@@ -1,4 +1,30 @@
+"""State backends. Everything the pipeline remembers goes through one small interface so
+the same code runs on the in-memory store (tests) and on Redis (production)."""
+import json
 import threading
+
+LUA_TRY_ACQUIRE = """
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then redis.call('EXPIRE', KEYS[1], ARGV[2]) end
+if current > tonumber(ARGV[1]) then
+    redis.call('DECR', KEYS[1])
+    return 0
+end
+return 1
+"""
+
+# KEYS = limit keys; ARGV = max1, window1, max2, window2, ...
+LUA_TRY_ACQUIRE_ALL = """
+for i = 1, #KEYS do
+    local cur = tonumber(redis.call('GET', KEYS[i]) or '0')
+    if cur >= tonumber(ARGV[2 * i - 1]) then return 0 end
+end
+for i = 1, #KEYS do
+    local cur = redis.call('INCR', KEYS[i])
+    if cur == 1 then redis.call('EXPIRE', KEYS[i], ARGV[2 * i]) end
+end
+return 1
+"""
 
 
 class Clock:
@@ -14,24 +40,39 @@ class Clock:
         self.t += seconds
 
 
+class SystemClock:
+    def now(self):
+        import time
+        return time.time()
+
+
 class MemoryStore:
-    """Minimal Redis-like key/value store with TTLs driven by the clock."""
+    """Redis-like store with TTLs driven by the clock. Values are kept as Python objects."""
 
     def __init__(self, clock):
         self.clock = clock
         self._d = {}
         self.lock = threading.RLock()
 
+    # ---- internals ----
     def _live(self, key):
         v = self._d.get(key)
         if v is None:
             return None
-        val, exp = v
-        if exp is not None and exp <= self.clock.now():
+        if v[1] is not None and v[1] <= self.clock.now():
             del self._d[key]
             return None
         return v
 
+    def _put(self, key, val, keep_ttl_from=None, ttl=None):
+        exp = None
+        if keep_ttl_from is not None:
+            exp = keep_ttl_from[1]
+        elif ttl is not None:
+            exp = self.clock.now() + ttl
+        self._d[key] = (val, exp)
+
+    # ---- strings / numbers ----
     def get(self, key):
         with self.lock:
             v = self._live(key)
@@ -39,20 +80,20 @@ class MemoryStore:
 
     def set(self, key, val, ttl=None):
         with self.lock:
-            self._d[key] = (val, None if ttl is None else self.clock.now() + ttl)
+            self._put(key, val, ttl=ttl)
 
     def setnx(self, key, val, ttl=None):
         with self.lock:
             if self._live(key) is not None:
                 return False
-            self.set(key, val, ttl)
+            self._put(key, val, ttl=ttl)
             return True
 
     def incr(self, key, by=1):
         with self.lock:
             v = self._live(key)
-            cur, exp = (0, None) if v is None else v
-            self._d[key] = (cur + by, exp)
+            cur = 0 if v is None else v[0]
+            self._put(key, cur + by, keep_ttl_from=v)
             return cur + by
 
     def decr(self, key):
@@ -62,7 +103,7 @@ class MemoryStore:
         with self.lock:
             v = self._live(key)
             if v is not None:
-                self._d[key] = (v[0], self.clock.now() + ttl)
+                self._put(key, v[0], ttl=ttl)
 
     def exists(self, key):
         with self.lock:
@@ -72,10 +113,186 @@ class MemoryStore:
         with self.lock:
             self._d.pop(key, None)
 
+    # ---- hashes ----
+    def hincrby(self, key, field, by=1, ttl=None):
+        with self.lock:
+            v = self._live(key)
+            h = dict(v[0]) if v is not None else {}
+            h[field] = h.get(field, 0) + by
+            if v is None:
+                self._put(key, h, ttl=ttl)
+            else:
+                self._put(key, h, keep_ttl_from=v)
+            return h[field]
+
+    def hgetall(self, key):
+        with self.lock:
+            v = self._live(key)
+            return dict(v[0]) if v is not None else {}
+
+    # ---- sorted sets ----
+    def zadd(self, key, score, member, ttl=None):
+        with self.lock:
+            v = self._live(key)
+            z = dict(v[0]) if v is not None else {}
+            z[member] = score
+            if v is None:
+                self._put(key, z, ttl=ttl)
+            else:
+                self._put(key, z, keep_ttl_from=v)
+
+    def zrangebyscore(self, key, lo, hi):
+        with self.lock:
+            v = self._live(key)
+            if v is None:
+                return []
+            return [m for m, s in sorted(v[0].items(), key=lambda kv: kv[1]) if lo <= s <= hi]
+
+    def zrem(self, key, member):
+        with self.lock:
+            v = self._live(key)
+            if v is not None:
+                z = dict(v[0]); z.pop(member, None)
+                self._put(key, z, keep_ttl_from=v)
+
+    def zremrangebyscore(self, key, lo, hi):
+        with self.lock:
+            v = self._live(key)
+            if v is not None:
+                z = {m: s for m, s in v[0].items() if not (lo <= s <= hi)}
+                self._put(key, z, keep_ttl_from=v)
+
+    # ---- sets ----
+    def sadd(self, key, member):
+        with self.lock:
+            v = self._live(key)
+            s = set(v[0]) if v is not None else set()
+            s.add(member)
+            self._put(key, s, keep_ttl_from=v)
+
+    def sismember(self, key, member):
+        with self.lock:
+            v = self._live(key)
+            return v is not None and member in v[0]
+
+    # ---- atomic rate limiting ----
+    def try_acquire(self, key, max_count, window):
+        with self.lock:
+            cur = self.incr(key)
+            if cur == 1:
+                self.expire(key, window)
+            if cur > max_count:
+                self.decr(key)
+                return False
+            return True
+
+    def try_acquire_all(self, specs):
+        """specs: list of (key, max_count, window). All-or-nothing."""
+        with self.lock:
+            for key, max_count, _ in specs:
+                if (self.get(key) or 0) >= max_count:
+                    return False
+            for key, _, window in specs:
+                if self.incr(key) == 1:
+                    self.expire(key, window)
+            return True
+
+
+class RedisStore:
+    """Same interface on a redis-py client. Values are JSON so dicts and floats round-trip.
+    Counters used with INCR are plain integers, which JSON encodes as the digits Redis expects."""
+
+    def __init__(self, client, clock=None):
+        self.r = client
+        self.clock = clock or SystemClock()
+        self._acquire = self.r.register_script(LUA_TRY_ACQUIRE)
+        self._acquire_all = self.r.register_script(LUA_TRY_ACQUIRE_ALL)
+
+    @staticmethod
+    def _enc(v):
+        return json.dumps(v)
+
+    @staticmethod
+    def _dec(raw):
+        if raw is None:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return raw
+
+    def get(self, key):
+        return self._dec(self.r.get(key))
+
+    def set(self, key, val, ttl=None):
+        self.r.set(key, self._enc(val), ex=int(ttl) if ttl else None)
+
+    def setnx(self, key, val, ttl=None):
+        return bool(self.r.set(key, self._enc(val), ex=int(ttl) if ttl else None, nx=True))
+
+    def incr(self, key, by=1):
+        return self.r.incrby(key, by)
+
+    def decr(self, key):
+        return self.r.decr(key)
+
+    def expire(self, key, ttl):
+        self.r.expire(key, int(ttl))
+
+    def exists(self, key):
+        return bool(self.r.exists(key))
+
+    def delete(self, key):
+        self.r.delete(key)
+
+    def hincrby(self, key, field, by=1, ttl=None):
+        pipe = self.r.pipeline()
+        pipe.hincrby(key, field, by)
+        if ttl:
+            pipe.expire(key, int(ttl), nx=True)
+        return pipe.execute()[0]
+
+    def hgetall(self, key):
+        return {(k.decode() if isinstance(k, bytes) else k): int(v) for k, v in self.r.hgetall(key).items()}
+
+    def zadd(self, key, score, member, ttl=None):
+        pipe = self.r.pipeline()
+        pipe.zadd(key, {member: score})
+        if ttl:
+            pipe.expire(key, int(ttl))
+        pipe.execute()
+
+    def zrangebyscore(self, key, lo, hi):
+        return [m.decode() if isinstance(m, bytes) else m for m in self.r.zrangebyscore(key, lo, hi)]
+
+    def zrem(self, key, member):
+        self.r.zrem(key, member)
+
+    def zremrangebyscore(self, key, lo, hi):
+        self.r.zremrangebyscore(key, lo, hi)
+
+    def sadd(self, key, member):
+        self.r.sadd(key, member)
+
+    def sismember(self, key, member):
+        return bool(self.r.sismember(key, member))
+
+    def try_acquire(self, key, max_count, window):
+        return int(self._acquire(keys=[key], args=[int(max_count), int(window)])) == 1
+
+    def try_acquire_all(self, specs):
+        if not specs:
+            return True
+        args = []
+        for _, max_count, window in specs:
+            args += [int(max_count), int(window)]
+        return int(self._acquire_all(keys=[k for k, _, _ in specs], args=args)) == 1
+
 
 class RateLimit:
-    """Fixed-window limiter. try_acquire() is the atomic check-and-consume from the Lua
-    script in the design; the store lock stands in for Redis single-threaded EVAL."""
+    """Fixed-window limiter; check-and-consume is atomic in the backing store."""
 
     def __init__(self, store):
         self.store = store
@@ -102,30 +319,13 @@ class RateLimit:
         return f"{self.key}:{self.ident}"
 
     def try_acquire(self):
-        with self.store.lock:
-            cur = self.store.incr(self.redis_key)
-            if cur == 1:
-                self.store.expire(self.redis_key, self.window)
-            if cur > self.max:
-                self.store.decr(self.redis_key)
-                return False
-            return True
+        return self.store.try_acquire(self.redis_key, self.max, self.window)
 
     def current_count(self):
-        return self.store.get(self.redis_key) or 0
+        return int(self.store.get(self.redis_key) or 0)
 
     @staticmethod
     def try_acquire_all(limits):
-        """Check every limit first, then consume all of them, in one critical section."""
         if not limits:
             return True
-        store = limits[0].store
-        with store.lock:
-            for lim in limits:
-                if lim.current_count() >= lim.max:
-                    return False
-            for lim in limits:
-                cur = store.incr(lim.redis_key)
-                if cur == 1:
-                    store.expire(lim.redis_key, lim.window)
-            return True
+        return limits[0].store.try_acquire_all([(l.redis_key, l.max, l.window) for l in limits])

@@ -7,11 +7,21 @@ from otp_guard.services import Services, IpInfo
 _nonce = itertools.count(1)
 
 
+def make_store(kind, clock):
+    if kind == "memory":
+        from otp_guard.store import MemoryStore
+        return MemoryStore(clock)
+    import fakeredis
+    from otp_guard.store import RedisStore
+    return RedisStore(fakeredis.FakeRedis(), clock)
+
+
 class Harness:
     """Builds requests that pass every step unless a test breaks something on purpose."""
 
-    def __init__(self, cfg=None):
+    def __init__(self, cfg=None, backend="memory"):
         self.clock = Clock()
+        self.backend = backend
         self.cfg = cfg or Config()
         if self.cfg.attestation_grace_until == 0.0:
             self.cfg.attestation_grace_until = self.clock.now() + 30 * 86400
@@ -27,7 +37,7 @@ class Harness:
         self.svc.prefixes.add("96890", "standard", 1)
         self.svc.prefixes.add("96699", "premium", 12)
         self.svc.prefixes.add("97159", "elevated", 3)
-        self.p = Pipeline(self.cfg, self.svc, self.clock)
+        self.p = Pipeline(self.cfg, self.svc, self.clock, store=make_store(backend, self.clock))
         self._fp = itertools.count(1)
 
     # ---- sessions ----
@@ -36,7 +46,7 @@ class Harness:
         tok = self.p.sessions.issue(platform, fp, self.cfg.session_ttl)
         if age_hours:
             # pretend the fingerprint was first seen earlier so tests start with a mature client
-            self.p.sessions.first_seen[fp] = self.clock.now() - age_hours * 3600
+            self.p.sessions.set_first_seen(fp, self.clock.now() - age_hours * 3600)
         return tok, fp
 
     # ---- requests ----
@@ -73,6 +83,11 @@ class Harness:
         return len(self.svc.sender.by_channel("sms"))
 
 
-@pytest.fixture
-def h():
-    return Harness()
+@pytest.fixture(params=["memory", "redis"])
+def h(request, monkeypatch):
+    harness = Harness(backend=request.param)
+    if request.param == "redis":
+        # fakeredis expires keys by time.time(); drive it from the test clock
+        import time
+        monkeypatch.setattr(time, "time", harness.clock.now)
+    return harness

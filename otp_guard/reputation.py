@@ -9,31 +9,28 @@ class Rep:
 
 
 class ReputationStore:
-    """Rolling 24-hour counters per key, kept as hourly buckets."""
+    """Rolling 24-hour counters per key, kept as hourly hash buckets in the store."""
 
-    def __init__(self, clock):
-        self.clock = clock
-        self.buckets = {}
-        self.trusted = set()
+    BUCKET_TTL = 25 * 3600
+
+    def __init__(self, store, clock):
+        self.store, self.clock = store, clock
 
     def _hour(self):
         return int(self.clock.now() // 3600)
 
     def incr(self, key, field, by=1):
-        h = self._hour()
-        b = self.buckets.setdefault(key, {}).setdefault(h, Rep())
-        setattr(b, field, getattr(b, field) + by)
+        self.store.hincrby(f"rep:{key}:{self._hour()}", field, by, ttl=self.BUCKET_TTL)
 
     def get(self, key):
         h = self._hour()
         total = Rep()
-        for hour, b in list(self.buckets.get(key, {}).items()):
-            if hour <= h - 24:
-                del self.buckets[key][hour]
-                continue
-            total.sent += b.sent
-            total.verified += b.verified
-            total.failed += b.failed
+        for hour in range(h - 23, h + 1):
+            b = self.store.hgetall(f"rep:{key}:{hour}")
+            if b:
+                total.sent += b.get("sent", 0)
+                total.verified += b.get("verified", 0)
+                total.failed += b.get("failed", 0)
         return total
 
     def conversion_ratio(self, key, min_sample):
@@ -47,34 +44,36 @@ class ReputationStore:
         return r.verified / resolved
 
     def mark_trusted(self, key):
-        self.trusted.add(key)
+        self.store.sadd("rep:trusted", key)
 
     def is_trusted(self, key):
-        return key in self.trusted
+        return self.store.sismember("rep:trusted", key)
 
 
 class AdaptiveLimits:
     """Multipliers produced by the hourly baseline job (Step 9) and per-ASN caps."""
 
-    def __init__(self, floor=0.25, ceil=1.5):
+    def __init__(self, store, floor=0.25, ceil=1.5):
+        self.store = store
         self.floor, self.ceil = floor, ceil
-        self.multipliers = {}
-        self.overrides = {}
-        self.asn_limits = {}
+
+    @staticmethod
+    def _k(source, platform, cc):
+        return f"adaptive:mult:{source}:{platform}:{cc}"
 
     def multiplier(self, source, platform, cc):
-        k = (source, platform, cc)
-        if k in self.overrides:
-            return self.overrides[k]
-        return self.multipliers.get(k, 1.0)
+        o = self.store.get(f"adaptive:override:{source}:{platform}:{cc}")
+        if o is not None:
+            return float(o)
+        m = self.store.get(self._k(source, platform, cc))
+        return 1.0 if m is None else float(m)
 
     def set_marketing_override(self, source, platform, cc, m):
-        self.overrides[(source, platform, cc)] = m
+        self.store.set(f"adaptive:override:{source}:{platform}:{cc}", float(m))
 
     def recompute(self, source, platform, cc, observed, expected_median, mad, conversion):
         """One baseline-job tick for a key. Healthy traffic drifts up, abusive drifts down."""
-        k = (source, platform, cc)
-        m = self.multipliers.get(k, 1.0)
+        m = float(self.store.get(self._k(source, platform, cc)) or 1.0)
         over = observed > expected_median + 3 * mad
         bad_conv = conversion is not None and conversion < 0.3
         healthy = (conversion is None or conversion >= 0.5) and observed <= expected_median + 2 * mad
@@ -82,8 +81,12 @@ class AdaptiveLimits:
             m = max(self.floor, m - 0.5)
         elif healthy:
             m = min(self.ceil, m + 0.25)
-        self.multipliers[k] = m
+        self.store.set(self._k(source, platform, cc), m)
         return m
 
     def asn_limit(self, asn, default):
-        return self.asn_limits.get(asn, default)
+        v = self.store.get(f"adaptive:asn:{asn}")
+        return default if v is None else int(v)
+
+    def set_asn_limit(self, asn, limit):
+        self.store.set(f"adaptive:asn:{asn}", int(limit))

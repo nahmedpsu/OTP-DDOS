@@ -80,7 +80,7 @@ def test_legitimate_user_journey(h):
     # a week later, same person, new session: lower score and no HLR spend
     h.clock.advance(7 * 86400)
     hlr_before = h.svc.hlr.calls
-    tok2, _ = h.session(fingerprint=fp)
+    tok2, _ = h.session(fingerprint=fp, age_hours=None)
     r2 = h.send(h.web_request(session=tok2))
     assert r2.rejected_at is None and r2.risk_score == 0 and h.svc.hlr.calls == hlr_before
 

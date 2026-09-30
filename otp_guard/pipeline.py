@@ -65,15 +65,18 @@ class Response:
 
 
 class SessionService:
+    FP_TTL = 90 * 86400
+
     def __init__(self, store, clock, key=b"session-hmac-key"):
         self.store, self.clock, self.key = store, clock, key
-        self.first_seen = {}
-        self._n = 0
+
+    def set_first_seen(self, fingerprint, when):
+        self.store.set("fp_first_seen:" + fingerprint, when, self.FP_TTL)
 
     def issue(self, platform, fingerprint, ttl):
-        self._n += 1
-        self.first_seen.setdefault(fingerprint, self.clock.now())
-        payload = {"session_id": f"s{self._n}", "fingerprint_hash": fingerprint,
+        n = self.store.incr("session:seq")
+        self.store.setnx("fp_first_seen:" + fingerprint, self.clock.now(), self.FP_TTL)
+        payload = {"session_id": f"s{n}", "fingerprint_hash": fingerprint,
                    "platform": platform, "issued_at": self.clock.now(),
                    "expires_at": self.clock.now() + ttl}
         raw = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
@@ -90,34 +93,36 @@ class SessionService:
         return json.loads(base64.urlsafe_b64decode(raw))
 
     def fingerprint_age_hours(self, fp):
-        return (self.clock.now() - self.first_seen.get(fp, self.clock.now())) / 3600
+        first = self.store.get("fp_first_seen:" + fp)
+        return 0.0 if first is None else (self.clock.now() - float(first)) / 3600
 
 
 class NumberTracker:
-    """Feeds the sequential and narrow-range detectors of Step 5c."""
+    """Feeds the sequential and narrow-range detectors of Step 5c. Sorted sets keyed by
+    client key and by 9-digit prefix, scored by request time."""
 
-    def __init__(self, clock):
-        self.clock = clock
-        self.by_key = {}      # key -> list of (t, number_int)
-        self.by_prefix = {}   # prefix9 -> {number: t}
+    def __init__(self, store, clock, window):
+        self.store, self.clock, self.window = store, clock, window
 
     def record(self, mobile, keys):
         t = self.clock.now()
         for k in keys:
-            self.by_key.setdefault(k, []).append((t, int(mobile)))
-        self.by_prefix.setdefault(mobile[:9], {})[mobile] = t
+            self.store.zremrangebyscore(f"numseq:{k}", float("-inf"), t - self.window)
+            self.store.zadd(f"numseq:{k}", t, mobile, ttl=self.window * 2)
+        pk = f"numpfx:{mobile[:9]}"
+        self.store.zremrangebyscore(pk, float("-inf"), t - self.window)
+        self.store.zadd(pk, t, mobile, ttl=self.window * 2)
 
     def neighbour_requested(self, mobile, radius, keys, window):
         n, t0 = int(mobile), self.clock.now() - window
         for k in keys:
-            for t, m in self.by_key.get(k, []):
-                if t >= t0 and m != n and abs(m - n) <= radius:
+            for m in self.store.zrangebyscore(f"numseq:{k}", t0, float("inf")):
+                if int(m) != n and abs(int(m) - n) <= radius:
                     return True
         return False
 
     def distinct_with_prefix(self, prefix9, window):
-        t0 = self.clock.now() - window
-        return sum(1 for t in self.by_prefix.get(prefix9, {}).values() if t >= t0)
+        return len(self.store.zrangebyscore(f"numpfx:{prefix9}", self.clock.now() - window, float("inf")))
 
 
 def subnet_of(ip):
@@ -125,21 +130,51 @@ def subnet_of(ip):
     return str(ipaddress.ip_network(f"{ip}/{24 if addr.version == 4 else 48}", strict=False))
 
 
+class SmsHistory:
+    """Audit records in the store (a relational table in production; same interface)."""
+
+    TTL = 30 * 86400
+
+    def __init__(self, store):
+        self.store = store
+
+    def next_id(self):
+        return self.store.incr("smslog:seq")
+
+    def put(self, record):
+        self.store.set(f"smslog:{record['log_id']}", record, self.TTL)
+
+    def get(self, log_id):
+        return self.store.get(f"smslog:{log_id}")
+
+    def __getitem__(self, log_id):
+        rec = self.get(log_id)
+        if rec is None:
+            raise KeyError(log_id)
+        return rec
+
+
 class Pipeline:
-    def __init__(self, config=None, services=None, clock=None):
+    def __init__(self, config=None, services=None, clock=None, store=None, session_key=b"session-hmac-key"):
         self.cfg = config or Config()
         self.svc = services or Services()
         self.clock = clock or Clock()
-        self.store = MemoryStore(self.clock)
-        self.rep = ReputationStore(self.clock)
-        self.adaptive = AdaptiveLimits()
-        self.sessions = SessionService(self.store, self.clock)
-        self.numbers = NumberTracker(self.clock)
-        self.sms_history = {}
-        self._log_seq = 0
-        self.mode = "normal"
+        self.store = store or MemoryStore(self.clock)
+        self.rep = ReputationStore(self.store, self.clock)
+        self.adaptive = AdaptiveLimits(self.store)
+        self.sessions = SessionService(self.store, self.clock, session_key)
+        self.numbers = NumberTracker(self.store, self.clock, self.cfg.pattern_window)
+        self.sms_history = SmsHistory(self.store)
         from .feedback import FeedbackLoop
         self.feedback = FeedbackLoop(self)
+
+    @property
+    def mode(self):
+        return self.store.get("otp:mode") or "normal"
+
+    @mode.setter
+    def mode(self, value):
+        self.store.set("otp:mode", value)
 
     # ---------- helpers ----------
     def rl(self, key, ident, limit):
@@ -294,11 +329,12 @@ class Pipeline:
             cache_key = "hlr:" + mobile
             hlr = self.store.get(cache_key)
             if hlr is None:
-                hlr = self.svc.hlr.lookup(mobile)
+                res = self.svc.hlr.lookup(mobile)
+                hlr = {"assigned": res.assigned, "reachable": res.reachable, "is_voip": res.is_voip}
                 self.store.set(cache_key, hlr, self.cfg.hlr_cache_ttl)
-            if not hlr.assigned or not hlr.reachable:
+            if not hlr["assigned"] or not hlr["reachable"]:
                 return False
-            if hlr.is_voip:
+            if hlr["is_voip"]:
                 req.signals.append("voip_number")
         return True
 
@@ -388,7 +424,7 @@ class Pipeline:
         # A shrinking or growing window must apply to the existing key, so refresh its TTL
         # relative to the last send rather than trusting the TTL set at that send.
         last = self.store.get("num_last_send:" + req.mobile)
-        if last is not None and self.clock.now() - last < window:
+        if last is not None and self.clock.now() - float(last) < window:
             return False
         return True
 
@@ -455,8 +491,7 @@ class Pipeline:
         channel = self.select_channel(req)
         if channel is None:
             return Response(200, dict(UNIFORM_BODY), rejected_at="no_channel", tier=req.tier, risk_score=req.risk_score)
-        self._log_seq += 1
-        log_id = self._log_seq
+        log_id = self.sms_history.next_id()
         record = {
             "log_id": log_id, "source": req.source, "phone_number": req.mobile,
             "headers": json.dumps(req.headers), "content": req.text,
@@ -467,7 +502,7 @@ class Pipeline:
             "fingerprint": req.fingerprint, "ip": req.ip, "asn": req.ip_info.asn,
             "reputation_keys": self.reputation_keys(req), "sent_at": self.clock.now(),
         }
-        self.sms_history[log_id] = record
+        self.sms_history.put(record)
 
         delay = 0
         if channel == "sms":
