@@ -98,11 +98,20 @@ rolling 24-hour window (implemented as hourly buckets). Reputation keys:
 | `country`     | `country:966`                 |
 | `prefix`      | `prefix:96650`                |
 | `number`      | `num:966501234567`            |
+| `block`       | `block:96650123` (first 8 digits: 10 000 numbers) | the one key a pumper cannot rotate: it is paid only on the ranges its partner carrier terminates |
 
 The ratio counts only **resolved** sends (verified, or failed after five wrong attempts
-or the 10-minute timeout). Sends still inside their verification window are excluded, so
-a burst of fresh legitimate traffic, such as a campaign launch, is neutral until the
-codes have had time to be entered.
+or the **resolution timeout**, 2 minutes by default; 99 % of real users verify within
+about 100 seconds, so waiting the full 10-minute code validity only delays the signal).
+A verification that arrives after the resolution timeout is reclassified from failed to
+verified. Sends still inside the window are excluded, so a burst of fresh legitimate
+traffic, such as a campaign launch, is neutral until the codes have had time to be
+entered.
+
+Two readings of each key are kept from the same 24 hourly buckets: the cumulative
+24-hour ratio, and the **recent hour versus the key's own baseline** (the other 23
+hours). The cumulative ratio is propped up by earlier legitimate traffic; the relative
+reading reacts when a key that normally converts at 80 % drops to 35 %.
 
 ```
 function conversionRatio(repKey, minSample = 20):
@@ -448,6 +457,7 @@ attacker cannot cheaply fake, and choose a graded response (**Gap H**).
 | Fingerprint age < 1 hour                 | +10 (< 5 minutes: +20)                     |
 | Session OTP request count                | +5 per previous request in this session    |
 | Conversion ratio of IP / subnet / ASN / fingerprint / country / prefix | `max over keys of (0.3 - ratio) / 0.3 * 25`, only when ratio < 0.3 |
+| Relative drop: a key's recent-hour ratio below 0.6 × its own baseline (≥ 20 recent and ≥ 200 baseline resolved) | `(1 - recent/baseline) * 25`, taking the larger of this and the absolute penalty (`conversion_drop`) |
 | Sustained flood on any of those keys: ≥ 100 resolved sends and ratio < 0.1 | +15 (`sustained_flood`) |
 | Instant verification on a key: ≥ 20 verified and > 80 % of them within 5 s of the send | +15 (`instant_verification`): codes entered by a machine, the tell of a colluding carrier verifying its own pumped traffic |
 | Geo mismatch: IP country != number country | +10                                      |
@@ -470,12 +480,19 @@ attacker cannot cheaply fake, and choose a graded response (**Gap H**).
 In `elevated` mode every tier boundary moves down by 10 points. In `emergency` mode only
 `allow` with score < 10 may use SMS; everything else is downgraded or blocked.
 
-**Known limits of the score** (measured in `results/evaluation.md`): a key's conversion
-ratio is diluted by legitimate traffic on the same key, so an attacker below about 1.8
-times the legitimate volume on a country or prefix is not penalised at all; and the
-`challenge_passed` credit can be bought from a solving service. Neither is solved by
-tuning weights; the first is bounded by the adaptive caps and the circuit breaker, the
-second by capping the credit per session.
+**What the conversion signal can and cannot separate** (measured in
+`results/evaluation.md`). The penalty attaches to keys. On a key the attacker shares with
+real users (country, prefix, a residential ASN) it raises everyone's score by the same
+amount: it rations rather than separates, and below about 1.8 times the legitimate volume
+it does not fire at all. It separates only on keys the attacker dominates. Every
+client-side key (IP, fingerprint, session) can be rotated for almost nothing, so the key
+that matters is the **destination block**: a pumper is paid only on the numbers its
+partner carrier terminates. A block that never verifies is denylisted by the feedback
+loop; a block whose codes are almost all entered within seconds is machine-verified and
+is denylisted too. A carrier that verifies with human-like delay defeats both, and turns
+the pumping into verified fake accounts, whose cost falls on whatever the account is for.
+The `challenge_passed` credit can be bought from a solving service; it reduces friction
+for people, it is not a defence against solvers.
 
 **A single signal never blocks.** The largest single contribution is the conversion penalty
 (+25), which on its own moves a clean-looking web client only to `delay`, a tier that still
@@ -701,9 +718,12 @@ write the audit record, and answer the client without revealing what happened.
 
 **Uniform response** (**Gap H**): every outcome from Step 1 onward returns HTTP 200 with
 the same body, `{"status": "ok", "message": "If this number is eligible, a code has been
-sent."}`, and the handler pads its processing time to a constant floor of
-`RESPONSE_FLOOR_MS = 400` (above the p95 of the full pipeline including the HLR call) so
-that timing does not reveal which step rejected the request. Two exceptions: the
+sent."}`, and an ASGI middleware pads the whole request, from arrival to just before the
+response is written, to a constant floor `RESPONSE_FLOOR_MS = 400`. The floor must sit
+above the deployment's p99 processing time under production load, including vendor calls;
+`results/performance.md` reports the fraction of requests that exceeded it in the load
+test (those leak timing), and a single uvicorn worker at high concurrency exceeds it, so
+size the worker count so that it does not. Two exceptions: the
 `challenge` tier on web returns the challenge to render, and a legacy app past the grace
 window receives `update_required`. Step 0 proxy and attestation failures return a
 generic 403 because those clients are not legitimate users.
@@ -837,6 +857,10 @@ should be changed only with evidence from the dashboards.
 | Conversion penalty threshold     | 0.3, min 20 resolved sends | Legitimate OTP conversion runs 70 to 90 %. Anything under 30 % is not a bad UX day, it is a flood. 20 resolved sends keeps a single user's typos from triggering it, and counting only resolved sends keeps a fresh burst of real traffic neutral. |
 | Auto-denylist threshold          | 0.1, min 50 resolved sends, 24 h; IP, subnet, fingerprint and datacenter ASNs only | Under 10 % on 50 resolved sends has no legitimate explanation. 24 hours limits the blast radius of a shared NAT being denylisted. Residential ASNs are excluded: blocking one is a denial of service against its customers. |
 | Sustained-flood bonus            | +15 at ≥ 100 resolved and ratio < 0.1 | Lets a residential attack that rotates IPs and pre-aged fingerprints reach the `challenge` tier (25 + 15 + 2.5 = 42.5) without denylisting anything shared. Real users on the attacked key see one interactive challenge, not a refusal. |
+| Resolution timeout               | 120 s (code validity stays 600 s) | The reputation signal fires five times sooner; late verifications are reclassified, so nothing is lost. |
+| Destination block key            | first 8 digits | 10 000 numbers: small enough that legitimate traffic rarely shares a block with a pumper, large enough that a pumper's carrier range fills it. |
+| Relative baseline                | recent hour < 0.6 × own 23-hour baseline | Reacts to a drop on a key whose cumulative ratio is still propped up by history. |
+| Instant-verification block denylist | ≥ 50 verified, > 80 % within 5 s | People do not enter codes in under five seconds fifty times in a row on one number block. |
 | Per-IP cap on CGNAT carriers     | 30 / minute for listed ASNs | Mobile carriers put hundreds of subscribers behind one address; at 5 / minute half of a normal sign-up flow would be refused (see `results/analysis.md`). |
 | Circuit breaker soft / hard      | 80 % / 100 % of hourly budget | 80 % leaves room for the elevated mode to take effect before the hard cap. The hourly budget itself should be set to 2x the p99 legitimate hourly volume from the last quarter. |
 | reCAPTCHA minimum score          | 0.5 normal, 0.7 elevated | Google's documented midpoint; 0.7 in elevated mode trades some friction for protection only while under attack. |

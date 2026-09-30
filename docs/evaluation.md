@@ -33,10 +33,13 @@ These are measured, not hypothetical. Each one is in `results/evaluation.md` or
    evaluation this attacker never even reaches the challenge tier (dilution keeps its score
    low), so the credit is not what leaks; the mitigation still is to cap the credit per
    session.
-9. **The feedback loop contributes nothing against diluted attacks.** The ablation shows
-   removing it changes leakage for no attacker profile; every containment it produced in
-   the single-seed walkthrough (`results/analysis.md`) came from runs with no legitimate
-   background traffic. Its value is confined to attacks that dominate a key.
+9. **The feedback loop separates attackers only on keys they dominate.** With the
+   ablation baseline on the same seeds, removing it raises leakage for the reused-profile
+   attacker (it dominates its fingerprint key) and for the sequential walk (it dominates a
+   destination block), and changes nothing for the diluted residential attackers. An
+   earlier version of this document compared the ablation against the 30-seed main study
+   and concluded the loop "contributes nothing"; that comparison mixed seed sets and was
+   wrong.
 10. **The per-session cap is the most valuable single layer** in the ablation, which is
     also the layer an attacker defeats most cheaply (a new session per request costs one
     call to `/session`). The evaluation's attackers already do this; the cap's value is
@@ -73,7 +76,12 @@ All per-run metrics are computed from one simulated attack window (20 minutes, a
 - Two modes are reported: **behavioural only** (source caps lifted, so the score, feedback
   and number layers are visible) and **with adaptive caps** (per-minute web cap at 3 times
   the legitimate rate, adaptive baseline job running every simulated minute).
-- The ablation switches off one layer at a time via `Config.features`.
+- The ablation switches off one layer at a time via `Config.features`. Its `full v2`
+  baseline is run on the same seeds as every ablation column; the 30-seed main study is
+  not used as the baseline. When the session layer is off, client identities are still
+  read from the token so the other layers see the same traffic (an earlier version
+  collapsed all traffic into one fingerprint, which made the sequential detector fire on
+  everything).
 - The weight sweep varies each risk weight and the tier boundaries one at a time; the cap
   sweep varies the adaptive floor and the base cap multiple. The trade-off chart plots
   legitimate friction against attacker steady-state leakage for every setting, with the
@@ -124,8 +132,14 @@ the default thread pool) and fires 800 requests at concurrency 16, once with the
 response floor and once with it disabled as the control. The server labels each response
 with its true outcome through an opt-in debug header that exists only for this test.
 Client-observed latencies are compared across outcomes with two-sample
-Kolmogorov-Smirnov tests: a p-value below 0.05 means an attacker measuring only response
-time could tell those two outcomes apart. Results: `results/performance.md`.
+Kolmogorov-Smirnov tests (about 900 to 3 300 samples per outcome): a p-value below 0.05
+means an attacker measuring only response time could tell those two outcomes apart. A KS
+test cannot show equivalence, so each pair also gets a two-one-sided-tests (TOST) check on
+the mean difference with a 2 ms margin; a small TOST p-value means the means are
+demonstrably within 2 ms. The report also states the fraction of requests whose pipeline
+processing exceeded the floor (those leak timing whatever the floor) and labels the
+with-floor throughput for what it is: concurrency divided by the floor, not capacity.
+Results: `results/performance.md`.
 
 Measured: with the floor, sent versus the disallowed-country and repeated-number
 rejections are indistinguishable (p = 0.37, 0.72); without it every

@@ -47,8 +47,9 @@ ADAPTIVE_ATTACKERS = {
         "Same, but the colluding range is not in the prefix table (class standard)",
         numbers="random", fp_mode="aged", verify_fraction=0.6, verify_delay_s=30.0, captcha_beta=(9, 1.5)),
     "challenge_solver": AttackerSpec("challenge_solver",
-        "Residential pool, aged fingerprints, pays a solving service for every interactive challenge",
-        fp_mode="aged", solves_challenges=True, captcha_beta=(9, 1.5)),
+        "Datacenter rotation abroad (score lands in the challenge tier) and pays a solving service for every challenge",
+        network="datacenter", ip_country="DE", fp_mode="fresh", solves_challenges=True,
+        captcha_beta=tuple(BOT_CAPTCHA["headless_browser"]), captcha_classes=("headless_browser", "captcha_farm")),
     "low_and_slow_20_asns": AttackerSpec("low_and_slow_20_asns",
         "2 requests/min spread over 20 residential ASNs, aged fingerprints, under legitimate volume",
         network="multi_asn", n_asns=20, rate_per_min=2.0, fp_mode="aged", captcha_beta=(9, 1.5)),
@@ -124,13 +125,49 @@ def study_multi_seed(seeds, features=ALL_FEATURES, attackers=None, minutes=20, m
 
 
 def study_ablation(seeds, attackers=None, minutes=20, caps_lifted=False):
+    """Leave one layer out. The 'full' pseudo-flag runs the complete v2 on the same seeds so the
+    baseline column is comparable (an earlier version compared against the 30-seed main study)."""
     specs, index = [], []
     for name, a in (attackers or ATTACKERS).items():
-        for flag in sorted(ALL_FEATURES):
-            feats = frozenset(ALL_FEATURES - {flag})
+        for flag in ["full"] + sorted(ALL_FEATURES):
+            feats = ALL_FEATURES if flag == "full" else frozenset(ALL_FEATURES - {flag})
             for s in seeds:
                 specs.append(SimSpec(attacker=randomised(a, s), minutes=minutes, features=feats, caps_lifted=caps_lifted, seed=s))
                 index.append((name, flag, s))
+    return specs, index
+
+
+PUMPING_ATTACKERS = {
+    "concentrated_pumper_no_verify": AttackerSpec("concentrated_pumper_no_verify",
+        "Pumper on 3 destination blocks inside a standard prefix; aged fingerprints, farmed captcha; carrier does not verify",
+        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5)),
+    "concentrated_pumper_verifies_instantly": AttackerSpec("concentrated_pumper_verifies_instantly",
+        "Same blocks; the carrier submits every code within 1 s",
+        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), verify_fraction=1.0, verify_delay_s=1.0),
+    "concentrated_pumper_verifies_humanlike": AttackerSpec("concentrated_pumper_verifies_humanlike",
+        "Same blocks; the carrier submits 60 % of codes after 30 s",
+        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), verify_fraction=0.6, verify_delay_s=30.0),
+    "residential_captcha_farm": ATTACKERS["residential_captcha_farm"],
+}
+
+PUMPING_VARIANTS = {
+    # name -> (features, cfg overrides)
+    "baseline_24h_cumulative_10min": (frozenset(ALL_FEATURES - {"fine_destination_key", "relative_baseline"}), {"resolution_timeout_s": 600}),
+    "fine_destination_key": (frozenset(ALL_FEATURES - {"relative_baseline"}), {"resolution_timeout_s": 600}),
+    "fast_resolution_2min": (frozenset(ALL_FEATURES - {"fine_destination_key", "relative_baseline"}), {"resolution_timeout_s": 120}),
+    "relative_baseline": (frozenset(ALL_FEATURES - {"fine_destination_key"}), {"resolution_timeout_s": 600}),
+    "all_three": (ALL_FEATURES, {"resolution_timeout_s": 120}),
+}
+
+
+def study_pumping(seeds, minutes=20):
+    specs, index = [], []
+    for aname, a in PUMPING_ATTACKERS.items():
+        for vname, (feats, cfg) in PUMPING_VARIANTS.items():
+            for s in seeds:
+                specs.append(SimSpec(attacker=randomised(a, s), minutes=minutes, features=feats, cfg_overrides=dict(cfg),
+                                     caps_lifted=True, seed=s))
+                index.append((aname, vname, s))
     return specs, index
 
 

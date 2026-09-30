@@ -31,7 +31,8 @@ class AttackerSpec:
     captcha_beta: tuple = (9, 1.5)     # reCAPTCHA v3 score distribution
     captcha_classes: tuple = ("captcha_farm",)   # classes the per-seed randomisation may draw from
     fp_mode: str = "fresh"             # fresh | aged | reused | single
-    numbers: str = "random"            # random | sequential | premium | elevated
+    numbers: str = "random"            # random | sequential | premium | elevated | concentrated
+    n_blocks: int = 3                  # concentrated: how many 8-digit destination blocks the pumper's carrier serves
     verify_fraction: float = 0.0       # colluding carrier submits codes
     verify_delay_s: float = 1.0
     solves_challenges: bool = False    # pays a solving service for interactive challenges
@@ -49,6 +50,9 @@ class LegitSpec:
     fresh_fp_fraction: float = cal("legit_fresh_fingerprint_fraction")
     captcha_beta: tuple = (cal("recaptcha_human_scores")["beta_a"], cal("recaptcha_human_scores")["beta_b"])
     solves_challenges: float = 0.9     # fraction of real users who complete an interactive challenge
+    corporate_egress_fraction: float = 0.05   # office traffic leaving through an in-country hosting range
+    roaming_fraction: float = 0.05            # in-country number, connecting from abroad
+    cloud_egress_abroad_fraction: float = 0.02  # a company proxy abroad: hosting range + geo mismatch
 
 
 @dataclass
@@ -110,6 +114,9 @@ class Simulation:
         h.svc.prefixes.add(ELEVATED_PREFIX, "elevated", 3)
         h.svc.prefixes.add(PREMIUM_PREFIX, "premium", 12)
         h.svc.ip_intel.register("100.64.0.0/10", IpInfo(asn="AS9000", asn_type="isp", country="SA"))
+        h.svc.ip_intel.register("192.0.2.0/24", IpInfo(asn="AS64501", asn_type="hosting", is_datacenter=True, country="SA"))
+        h.svc.ip_intel.register("198.51.200.0/24", IpInfo(asn="AS5384", asn_type="isp", country="AE"))
+        h.svc.ip_intel.register("198.51.201.0/24", IpInfo(asn="AS64502", asn_type="hosting", is_datacenter=True, country="DE"))
         h.svc.ip_intel.register("203.0.0.0/8", IpInfo(asn="AS64500", asn_type="hosting", is_datacenter=True,
                                                        country=spec.attacker.ip_country if spec.attacker.network == "datacenter" else "DE"))
         for i in range(spec.attacker.n_asns):
@@ -139,6 +146,12 @@ class Simulation:
             return f"{PREMIUM_PREFIX}{k:07d}"
         if a.numbers == "elevated":
             return f"{ELEVATED_PREFIX}{k:07d}"
+        if a.numbers == "concentrated":
+            # the pumper is paid only on the blocks its partner carrier terminates: a few 8-digit
+            # blocks inside a standard prefix, chosen once per attacker
+            if "blocks" not in self.attack_state:
+                self.attack_state["blocks"] = [f"{STANDARD_PREFIXES[0]}{self.rng.randrange(1000):03d}" for _ in range(a.n_blocks)]
+            return f"{self.rng.choice(self.attack_state['blocks'])}{self.rng.randrange(10**4):04d}"
         return f"{self.rng.choice(STANDARD_PREFIXES)}{self.rng.randrange(10**7):07d}"
 
     def attacker_ip(self, k):
@@ -180,7 +193,16 @@ class Simulation:
         if session is None:
             fresh = self.rng.random() < l.fresh_fp_fraction
             session, _ = h.session("web", age_hours=0 if fresh else 24)
-        kw = dict(session=session, ip=_res_ip(self.rng.randrange(1 << 22)),
+        u = self.rng.random()
+        if u < l.corporate_egress_fraction:
+            ip = f"192.0.2.{self.rng.randrange(1, 255)}"
+        elif u < l.corporate_egress_fraction + l.roaming_fraction:
+            ip = f"198.51.200.{self.rng.randrange(1, 255)}"
+        elif u < l.corporate_egress_fraction + l.roaming_fraction + l.cloud_egress_abroad_fraction:
+            ip = f"198.51.201.{self.rng.randrange(1, 255)}"
+        else:
+            ip = _res_ip(self.rng.randrange(1 << 22))
+        kw = dict(session=session, ip=ip,
                   mobile=f"{self.rng.choice(STANDARD_PREFIXES)}{self.rng.randrange(10**7):07d}",
                   recaptcha=self.captcha_token(l.captcha_beta))
         if challenge_proof:

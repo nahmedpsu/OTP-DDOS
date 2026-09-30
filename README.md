@@ -104,7 +104,7 @@ make results        # regenerate everything under results/
 | 9 | Adaptive limits per source, platform, country | Aggregate caps |
 | 10 | Global circuit breaker on count and spend | No global cap |
 | 11 | Channel selection, audit log, uniform response | Enumeration |
-| FB | Verification feedback loop: verify-to-send ratio feeds reputation | The signal an attacker cannot fake |
+| FB | Verification feedback loop: verify-to-send ratio feeds reputation | Separates attackers only on keys they dominate; see the evaluation |
 
 Full detail, pseudocode and the reasoning behind every default: `docs/sms_validation_process.md`.
 

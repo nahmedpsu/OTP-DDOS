@@ -40,3 +40,14 @@ def fraction_ci(successes, n, confidence=0.95):
 def ks_2samp(a, b):
     r = sps.ks_2samp(a, b)
     return float(r.statistic), float(r.pvalue)
+
+
+def tost_mean_diff(a, b, margin):
+    """Two one-sided t-tests: H0 |mean(a) - mean(b)| >= margin. Small p means equivalent within the margin."""
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    diff = float(a.mean() - b.mean())
+    se = math.sqrt(a.var(ddof=1) / len(a) + b.var(ddof=1) / len(b))
+    df = len(a) + len(b) - 2
+    p_lower = 1 - sps.t.cdf((diff + margin) / se, df)      # H0: diff <= -margin
+    p_upper = sps.t.cdf((diff - margin) / se, df)          # H0: diff >= +margin
+    return {"mean_diff": diff, "p_value": float(max(p_lower, p_upper)), "margin": margin}

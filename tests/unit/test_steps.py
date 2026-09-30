@@ -572,3 +572,75 @@ def test_instant_verification_is_a_signal(h):
     h.clock.advance(3600)
     r = h.send(h.web_request(session=h.session(age_hours=3)[0], ip="198.72.99.1", mobile="971599999999"))
     assert "instant_verification" in r.signals and r.risk_score >= 15 + 10 + 2.5 - 0.01
+
+
+# ---------------- Destination block key, resolution timeout, relative baseline, session-off identity ----------------
+
+def _pump(h, block, i, verify=None, delay=1):
+    tok, _ = h.session(age_hours=3)
+    r = h.send(h.web_request(session=tok, ip=f"198.80.{i % 250}.{i // 250 + 1}", mobile=f"{block}{i:04d}"))
+    if r.channel == "sms" and verify:
+        h.clock.advance(delay)
+        h.p.feedback.verify(h.p.sms_history[r.log_id]["session_id"], r.log_id, h.p.feedback.code_for(r.log_id))
+    return r
+
+
+def test_destination_block_never_verifying_is_denylisted(h):
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
+    for i in range(60):
+        assert _pump(h, "96650123", i).channel == "sms"
+    h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    assert h.p.store.exists("deny:block:96650123")
+    assert _pump(h, "96650123", 99).rejected_at == "step5"
+    assert _pump(h, "96655000", 1).channel == "sms"            # another block is unaffected
+
+
+def test_destination_block_machine_verified_is_denylisted(h):
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
+    for i in range(55):
+        _pump(h, "96650777", i, verify=True, delay=1)
+        h.clock.advance(5)
+    assert h.p.store.exists("deny:block:96650777")
+
+
+def test_humanlike_verification_is_not_denylisted(h):
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
+    for i in range(55):
+        _pump(h, "96650888", i, verify=True, delay=30)
+    assert not h.p.store.exists("deny:block:96650888")
+
+
+def test_late_verification_is_reclassified(h):
+    r = h.send(h.web_request())
+    h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    assert h.p.rep.get("num:966501234567").failed == 1
+    assert h.p.feedback.verify("s1", r.log_id, h.p.feedback.code_for(r.log_id))   # still valid: 600 s
+    rep = h.p.rep.get("num:966501234567")
+    assert rep.verified == 1 and rep.failed == 0
+
+
+def test_relative_baseline_fires_when_a_healthy_key_drops(h):
+    """A country converting at 80 % for hours, then a flood: cumulative ratio still above 0.3,
+    but the recent hour is far below the key's own baseline."""
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
+    for i in range(250):                                       # history: 80 % conversion
+        tok, _ = h.session(age_hours=3)
+        r = h.send(h.web_request(session=tok, ip=f"198.81.{i % 250}.{i // 250 + 1}", mobile=f"96655{(i * 7654321) % 10**7:07d}"))
+        if i % 5:
+            h.clock.advance(20); h.p.feedback.verify(h.p.sms_history[r.log_id]["session_id"], r.log_id, h.p.feedback.code_for(r.log_id))
+        h.clock.advance(30)
+    h.clock.advance(3600); h.p.feedback.run_due_timeouts()
+    for i in range(40):                                        # recent hour: nobody verifies
+        tok, _ = h.session(age_hours=3)
+        h.send(h.web_request(session=tok, ip=f"198.82.{i}.1", mobile=f"96655{(i * 1234567) % 10**7:07d}"))
+    h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    r = h.send(h.web_request(session=h.session(age_hours=3)[0], ip="198.83.1.1", mobile="966559999999"))
+    assert "conversion_drop" in r.signals and r.risk_score > 15
+
+
+def test_session_layer_off_keeps_client_identity(h):
+    from otp_guard.config import ALL_FEATURES
+    h.cfg.features = frozenset(ALL_FEATURES - {"session"})
+    tok, fp = h.session()
+    r = h.send(h.web_request(session=tok))
+    assert h.p.sms_history[r.log_id]["fingerprint"] == fp

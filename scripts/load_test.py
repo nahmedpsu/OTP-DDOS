@@ -158,15 +158,22 @@ def phase2(n, concurrency, floor_ms, redis_client):
             out = list(ex.map(one, range(n)))
         wall = time.perf_counter() - t0
         by_outcome = collections.defaultdict(list)
-        for _, outcome, dt, _ in out: by_outcome[outcome].append(dt)
+        over_floor = 0
+        for _, outcome, dt, timings in out:
+            by_outcome[outcome].append(dt)
+            over_floor += floor_ms > 0 and sum(timings.values()) > floor_ms
         ks = {}
         outcomes = sorted(by_outcome)
+        from otp_guard.evaluation.stats import tost_mean_diff
         for a in outcomes:
             for b in outcomes:
                 if a < b and len(by_outcome[a]) >= 20 and len(by_outcome[b]) >= 20:
                     stat, pv = ks_2samp(by_outcome[a], by_outcome[b])
-                    ks[f"{a} vs {b}"] = {"statistic": stat, "p_value": pv, "n_a": len(by_outcome[a]), "n_b": len(by_outcome[b])}
+                    ks[f"{a} vs {b}"] = {"statistic": stat, "p_value": pv, "n_a": len(by_outcome[a]), "n_b": len(by_outcome[b]),
+                                         "tost_2ms": tost_mean_diff(by_outcome[a], by_outcome[b], margin=2.0)}
         return {"requests": n, "concurrency": concurrency, "floor_ms": floor_ms, "wall_s": wall, "throughput_rps": n / wall,
+                "throughput_note": ("bounded by concurrency / floor = %.1f req/s, not server capacity" % (concurrency / (floor_ms / 1000.0))) if floor_ms else "server capacity at this concurrency",
+                "pipeline_time_over_floor_fraction": over_floor / n if floor_ms else None,
                 "latency_by_outcome_ms": {k: {"p50": pct(v, 50), "p95": pct(v, 95), "p99": pct(v, 99), "mean": statistics.fmean(v), "n": len(v)} for k, v in by_outcome.items()},
                 "ks_tests": ks}
     finally:
@@ -176,8 +183,8 @@ def phase2(n, concurrency, floor_ms, redis_client):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--requests", type=int, default=3000)
-    ap.add_argument("--http-requests", type=int, default=800)
-    ap.add_argument("--concurrency", type=int, default=16)
+    ap.add_argument("--http-requests", type=int, default=6000)
+    ap.add_argument("--concurrency", type=int, default=32)
     ap.add_argument("--out", default=str(ROOT / "results"))
     a = ap.parse_args()
     out = pathlib.Path(a.out); out.mkdir(exist_ok=True)
@@ -213,15 +220,20 @@ def write_md(R, path):
         L.append(f"| {k} | {v['n']} | {v['p50']:.2f} | {v['p95']:.2f} | {v['p99']:.2f} |")
     for key, title in (("phase2_http_floor_400", "with the 400 ms response floor"), ("phase2_http_floor_0", "floor disabled (control)")):
         p2 = R[key]
+        cov = "" if p2.get("pipeline_time_over_floor_fraction") is None else \
+              f" Pipeline processing exceeded the floor in {100 * p2['pipeline_time_over_floor_fraction']:.2f} % of requests (those leak timing)."
         L += ["", f"## Phase 2: HTTP through uvicorn, {p2['requests']} requests at concurrency {p2['concurrency']}, {title}", "",
-              f"Throughput {p2['throughput_rps']:.1f} requests/s over {p2['wall_s']:.1f} s.", "",
+              f"Throughput {p2['throughput_rps']:.1f} requests/s over {p2['wall_s']:.1f} s ({p2['throughput_note']}).{cov}", "",
               "| Server-side outcome | n | p50 (ms) | p95 (ms) | p99 (ms) | mean (ms) |", "|---|---:|---:|---:|---:|---:|"]
         for k, v in sorted(p2["latency_by_outcome_ms"].items()):
             L.append(f"| {k} | {v['n']} | {v['p50']:.1f} | {v['p95']:.1f} | {v['p99']:.1f} | {v['mean']:.1f} |")
-        L += ["", "Two-sample Kolmogorov-Smirnov tests on client-observed latency (an attacker's view). A small p-value means the outcomes are distinguishable by timing.", "",
-              "| Pair | KS statistic | p-value |", "|---|---:|---:|"]
+        L += ["", "Two-sample Kolmogorov-Smirnov tests on client-observed latency (an attacker's view): a small p-value means the outcomes "
+              "are distinguishable by timing. The TOST column is an equivalence test on the mean difference with a +/-2 ms margin: "
+              "a small p-value there means the means are demonstrably within 2 ms of each other.", "",
+              "| Pair | n | KS statistic | KS p-value | mean diff (ms) | TOST p (equivalent within 2 ms) |", "|---|---:|---:|---:|---:|---:|"]
         for k, v in p2["ks_tests"].items():
-            L.append(f"| {k} | {v['statistic']:.3f} | {v['p_value']:.2e} |")
+            t = v["tost_2ms"]
+            L.append(f"| {k} | {v['n_a']} / {v['n_b']} | {v['statistic']:.3f} | {v['p_value']:.2e} | {t['mean_diff']:.2f} | {t['p_value']:.2e} |")
     path.write_text("\n".join(L) + "\n")
 
 

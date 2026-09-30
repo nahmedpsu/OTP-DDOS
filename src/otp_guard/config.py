@@ -39,6 +39,8 @@ ALL_FEATURES = frozenset({
     "feedback",             # conversion signals and auto-denylist
     "backoff",              # Step 8 progressive backoff and daily cap (off: fixed 1 per minute)
     "circuit_breaker",      # Step 10
+    "fine_destination_key", # reputation on the 8-digit destination block (the range a pumper cannot rotate)
+    "relative_baseline",    # conversion penalty when a key's recent ratio falls well below its own history
 })
 V1_FEATURES = frozenset()   # the v1 design: header-trusted platform, IP cap, reCAPTCHA, country, text, 1/min, source caps
 
@@ -81,10 +83,16 @@ class Config:
     conversion_flood_min_sample: int = 100   # sustained flood on a key: many resolved sends, almost none verified
     conversion_flood_ratio: float = 0.1
     conversion_flood_points: int = 15
+    destination_block_digits: int = 8         # fine destination key: first 8 digits (10 000 numbers)
+    resolution_timeout_s: int = 120           # an unverified send counts as failed for reputation after this long
+    conversion_recent_hours: int = 1          # relative baseline: recent window vs the rest of the 24 h history
+    conversion_baseline_min_resolved: int = 200
+    conversion_relative_drop: float = 0.6     # penalise when recent ratio < drop x baseline ratio
     fast_verify_seconds: float = 5.0         # a code entered this soon after the send was not typed by a person
     fast_verify_min_verified: int = 20
     fast_verify_ratio: float = 0.8
     fast_verify_points: int = 15
+    fast_verify_block_denylist_min: int = 50  # a destination block with this many verifications, > fast_verify_ratio of them instant, is denylisted
     tier_bounds: tuple = (20, 40, 60, 80)
     elevated_shift: int = 10
 

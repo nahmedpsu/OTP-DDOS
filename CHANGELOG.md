@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.3.0
+
+- Fixes from review: the ablation baseline now runs on the same seeds as the ablation
+  columns; client identities are preserved when the session layer is switched off; numpy,
+  scipy and matplotlib are declared (`eval` and `dev` extras); MIT licence added.
+- New mechanisms, each tested in the pumping study: a destination-block reputation key
+  (first 8 digits) with denylisting of blocks that never verify or are machine-verified; a
+  2-minute resolution timeout with reclassification of late verifications; a relative
+  conversion baseline (recent hour against the key's own history).
+- Evaluation: concentrated-pumper study with and without a verifying carrier; the
+  challenge tier is now exercised (legitimate sub-populations on corporate, roaming and
+  cloud-abroad egress; a challenge solver that is actually challenged); timing-leak tests
+  with thousands of samples per outcome, a TOST equivalence test, the fraction of requests
+  over the floor, and honest throughput labelling.
+- Documentation reframed around what the reputation signal can and cannot separate.
+
 ## 2.2.0
 
 - Evaluation framework (`src/otp_guard/evaluation/`, `scripts/run_evaluation.py`,

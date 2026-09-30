@@ -47,6 +47,7 @@ class Request:
     signals: list = field(default_factory=list)
     timings_ms: dict = field(default_factory=dict)
     rep_cache: dict = field(default_factory=dict)
+    rep_split: dict = field(default_factory=dict)
     risk_score: float = None
     tier: str = None
     requires_challenge: bool = False
@@ -190,10 +191,16 @@ class Pipeline:
     def has_internal_credential(self, req):
         return req.service_credential in self.svc.internal_credentials
 
+    def block_key(self, mobile):
+        return "block:" + mobile[:self.cfg.destination_block_digits]
+
     def reputation_keys(self, req):
-        return ["ip:" + req.ip, "subnet:" + subnet_of(req.ip), "asn:" + req.ip_info.asn,
+        keys = ["ip:" + req.ip, "subnet:" + subnet_of(req.ip), "asn:" + req.ip_info.asn,
                 "fp:" + req.fingerprint, "sess:" + req.session_id, "country:" + req.country_code,
                 "prefix:" + req.prefix.id, "num:" + req.mobile]
+        if self.on("fine_destination_key"):
+            keys.append(self.block_key(req.mobile))
+        return keys
 
     def rep_get(self, req, key):
         """Reputation read memoised for the life of one request (the same keys are read in several steps)."""
@@ -204,7 +211,9 @@ class Pipeline:
     def rep_prefetch(self, req, keys):
         missing = [k for k in keys if k not in req.rep_cache]
         if missing:
-            req.rep_cache.update(self.rep.get_many(missing))
+            split = self.rep.get_split(missing, self.cfg.conversion_recent_hours)
+            req.rep_split.update(split)
+            req.rep_cache.update({k: v[0] for k, v in split.items()})
 
     def previous_session_requests(self, sid):
         return max(0, self.rl("otp:session", sid, self.cfg.session_otp_limit).current_count() - 1)
@@ -244,9 +253,12 @@ class Pipeline:
     # ---------- Step 1 ----------
     def step1_session(self, req):
         if not self.on("session"):
-            req.session_id = req.session_token or "anon"
-            req.fingerprint = req.fingerprint or "none"
-            req.fingerprint_age_hours = 24.0
+            # layer off: no enforcement, but keep the client's identity so other layers see the same
+            # traffic they would with it on (otherwise every request collapses into one client)
+            tok = self.sessions.verify(req.session_token) if req.session_token else None
+            req.session_id = tok["session_id"] if tok else (req.session_token or "anon")
+            req.fingerprint = tok["fingerprint_hash"] if tok else "none"
+            req.fingerprint_age_hours = self.sessions.fingerprint_age_hours(req.fingerprint) if tok else 24.0
             return True
         tok = self.sessions.verify(req.session_token) if req.session_token else None
         if tok is None or tok["expires_at"] < self.clock.now():
@@ -330,6 +342,8 @@ class Pipeline:
         # 5b prefix cost class
         prefix = self.svc.prefixes.lookup(mobile)
         req.prefix = prefix
+        if self.on("fine_destination_key") and self.on("feedback") and self.store.exists("deny:" + self.block_key(mobile)):
+            return False                              # a destination block that never verifies
         if not self.on("number_intelligence"):
             return True
         if prefix.cls == "premium":
@@ -390,9 +404,11 @@ class Pipeline:
             s += w["fresh_fp_1h"]
         s += w["session_repeat"] * self.previous_session_requests(req.session_id)
 
-        worst, flood, instant = 1.0, False, False
+        worst, flood, instant, rel_drop = 1.0, False, False, 0.0
         keys = ["ip:" + req.ip, "subnet:" + subnet_of(req.ip), "asn:" + req.ip_info.asn,
                 "fp:" + req.fingerprint, "country:" + req.country_code, "prefix:" + req.prefix.id]
+        if self.on("fine_destination_key"):
+            keys.append(self.block_key(req.mobile))
         self.rep_prefetch(req, keys + ["num:" + req.mobile])
         for key in (keys if self.on("feedback") else []):
             r = self.rep_get(req, key)
@@ -402,13 +418,23 @@ class Pipeline:
                 worst = min(worst, ratio)
                 if resolved >= self.cfg.conversion_flood_min_sample and ratio < self.cfg.conversion_flood_ratio:
                     flood = True
+            if self.on("relative_baseline"):
+                _, recent, base = req.rep_split[key]
+                rr, br = recent.verified + recent.failed, base.verified + base.failed
+                if rr >= self.cfg.conversion_min_sample and br >= self.cfg.conversion_baseline_min_resolved and base.verified > 0:
+                    recent_ratio, base_ratio = recent.verified / rr, base.verified / br
+                    if recent_ratio < self.cfg.conversion_relative_drop * base_ratio:
+                        rel_drop = max(rel_drop, 1 - recent_ratio / base_ratio)
             # codes entered within seconds of the send, nearly every time, are not being typed by people:
             # the tell of a colluding carrier verifying its own pumped traffic
             if r.verified >= self.cfg.fast_verify_min_verified and r.fast_verified / r.verified > self.cfg.fast_verify_ratio:
                 instant = True
         th = self.cfg.conversion_penalty_threshold
-        if worst < th:
-            s += (th - worst) / th * w["conversion"]
+        conv_pen = (th - worst) / th * w["conversion"] if worst < th else 0.0
+        if rel_drop > 0:
+            req.signals.append("conversion_drop")
+            conv_pen = max(conv_pen, rel_drop * w["conversion"])
+        s += conv_pen
         if flood:
             req.signals.append("sustained_flood")
             s += self.cfg.conversion_flood_points

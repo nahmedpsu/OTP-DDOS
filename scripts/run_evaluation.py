@@ -21,8 +21,9 @@ sys.path.insert(0, str(ROOT / "src"))
 from otp_guard.config import ALL_FEATURES, V1_FEATURES                                   # noqa: E402
 from otp_guard.evaluation.calibration import CALIBRATION                                  # noqa: E402
 from otp_guard.evaluation.runner import (ATTACKERS, ADAPTIVE_ATTACKERS, MODES, SWEEP_AXES, CAP_SWEEP,   # noqa: E402
+                                         PUMPING_ATTACKERS, PUMPING_VARIANTS,
                                          study_multi_seed, study_ablation, study_sweep, study_cap_sweep,
-                                         study_adaptive, run_all, summarise, economics)
+                                         study_adaptive, study_pumping, run_all, summarise, economics)
 from otp_guard.evaluation.stats import mean_ci                                            # noqa: E402
 
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
@@ -64,6 +65,7 @@ def main():
     add("sweep", *study_sweep(sseeds))
     add("capsweep", *study_cap_sweep(sseeds))
     add("adaptive", *study_adaptive(sseeds))
+    add("pumping", *study_pumping(sseeds))
     print(f"{len(jobs)} runs on {a.procs or 'all'} processes", flush=True)
     t0 = time.time()
     results = run_all([j[2] for j in jobs], a.procs)
@@ -117,6 +119,13 @@ def main():
     for (mode, name), rs in g.items():
         D.setdefault(mode, {})[name] = summarise(rs)
     R["adaptive_attackers"] = D
+
+    # F. pumping study: concentrated destination blocks, with and without a verifying carrier
+    F = {}
+    g = group(*by["pumping"], lambda i: (i[0], i[1]))
+    for (aname, vname), rs in g.items():
+        F.setdefault(aname, {})[vname] = summarise(rs)
+    R["pumping"] = F
 
     # E. economics (behavioural-only and caps modes, v1 vs v2)
     E = {}
@@ -203,17 +212,17 @@ def write_markdown(R, path):
     L += ["Attacker descriptions:", ""] + [f"- `{n}`: {a.description}" for n, a in ATTACKERS.items()] + [""]
 
     L += ["## B. Ablation: leave one layer out (with adaptive caps)", "",
-          "Total leaked SMS over 20 minutes (mean over seeds) with the named layer switched off. The `full v2` column is the reference; a cell much larger than it names the layer that stops that attacker.", ""]
+          f"Total leaked SMS over 20 minutes, mean over the same {meta['sweep_seeds']} seeds in every column, with the named layer switched off. "
+          "`full v2` is the complete design on those seeds. Bold: removal raises leakage by more than 25 % (and at least 5 SMS).", ""]
     flags = sorted(ALL_FEATURES)
     L.append("| Attacker | full v2 | " + " | ".join(f"-{f}" for f in flags) + " |")
     L.append("|---|---:|" + "---:|" * len(flags))
     for name in ATTACKERS:
-        ref = R["multi_seed"]["with_adaptive_caps"][name]["v2"]["leaked_total"][0]
+        ref = R["ablation"][name]["full"]["leaked_total"][0]
         cells = []
         for f in flags:
             v = R["ablation"][name][f]["leaked_total"][0]
-            mark = " **" if v > ref * 1.5 + 5 else " "
-            cells.append(f"{mark.strip()}{v:.0f}{mark.strip()}")
+            cells.append(f"**{v:.0f}**" if v > ref * 1.25 + 5 else f"{v:.0f}")
         L.append(f"| `{name}` | {ref:.0f} | " + " | ".join(cells) + " |")
     L.append("")
 
@@ -246,6 +255,20 @@ def write_markdown(R, path):
                      f"{ci(s['attacker_verifications'],0)} | {ci(s['attacker_challenges_solved'],0)} | {ci(s['legit_delivered_pct'])} | {ci(s['legit_challenge_rate_pct'])} | {ci(s['legit_refusal_rate_pct'])} |")
         L.append("")
     L += ["Adaptive attacker descriptions:", ""] + [f"- `{n}`: {a.description}" for n, a in ADAPTIVE_ATTACKERS.items()] + [""]
+
+    L += ["## F. Pumping on concentrated destination blocks (behavioural-only mode)", "",
+          "The one key a pumper cannot rotate is the destination: it is paid only on the numbers its partner carrier terminates. "
+          "Each attacker targets 3 blocks of 10 000 numbers inside a standard prefix. Variants: the 24-hour cumulative ratio with a "
+          "10-minute resolution timeout (the design as first written); the 8-digit destination-block key; a 2-minute resolution "
+          "timeout (late verifications are reclassified); a relative baseline (recent hour versus the key's own history); all three.", "",
+          "| Attacker | Variant | Contained | Time to containment (min) | Steady-state leak (SMS/min) | Total leaked | Attacker verifications (verified fake accounts) | Legit delivered % | Legit challenged % | Legit refused % |",
+          "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    for aname in PUMPING_ATTACKERS:
+        for vname in PUMPING_VARIANTS:
+            s = R["pumping"][aname][vname]
+            L.append(f"| `{aname}` | {vname} | {s['contained_fraction']:.2f} | {ci(s['time_to_containment_min'])} | {ci(s['steady_state_leak_per_min'])} | {ci(s['leaked_total'],0)} | "
+                     f"{ci(s['attacker_verifications'],0)} | {ci(s['legit_delivered_pct'])} | {ci(s['legit_challenge_rate_pct'])} | {ci(s['legit_refusal_rate_pct'])} |")
+    L += ["", "Attacker descriptions:", ""] + [f"- `{n}`: {a.description}" for n, a in PUMPING_ATTACKERS.items()] + [""]
 
     L += ["## E. Attacker economics (20-minute window)", "",
           "Revenue = leaked SMS x SMS termination price x revenue share (share is ASSUMED, low 0.2 and high 0.5). "

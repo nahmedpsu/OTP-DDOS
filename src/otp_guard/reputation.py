@@ -26,22 +26,33 @@ class ReputationStore:
     def get(self, key):
         return self.get_many([key])[key]
 
+    @staticmethod
+    def _sum(buckets):
+        total = Rep()
+        for b in buckets:
+            if b:
+                total.sent += b.get("sent", 0)
+                total.verified += b.get("verified", 0)
+                total.failed += b.get("failed", 0)
+                total.fast_verified += b.get("fast_verified", 0)
+        return total
+
     def get_many(self, keys):
         """All 24 buckets of every key in one store round trip."""
+        return {k: v[0] for k, v in self.get_split(keys, 24).items()}
+
+    def get_split(self, keys, recent_hours):
+        """For each key: (total over 24 h, recent window, baseline = the rest). One round trip."""
         h = self._hour()
-        hours = range(h - 23, h + 1)
+        hours = list(range(h - 23, h + 1))
         flat = [f"rep:{k}:{hour}" for k in keys for hour in hours]
         buckets = self.store.hgetall_many(flat)
         out = {}
         for i, k in enumerate(keys):
-            total = Rep()
-            for b in buckets[i * 24:(i + 1) * 24]:
-                if b:
-                    total.sent += b.get("sent", 0)
-                    total.verified += b.get("verified", 0)
-                    total.failed += b.get("failed", 0)
-                    total.fast_verified += b.get("fast_verified", 0)
-            out[k] = total
+            mine = buckets[i * 24:(i + 1) * 24]
+            recent = mine[24 - recent_hours:]
+            base = mine[:24 - recent_hours]
+            out[k] = (self._sum(mine), self._sum(recent), self._sum(base))
         return out
 
     def conversion_ratio(self, key, min_sample):
