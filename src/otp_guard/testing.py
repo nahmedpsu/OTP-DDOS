@@ -76,6 +76,11 @@ class Harness:
         return Request(mobile=mobile, session_token=tok, nonce=f"n{next(_nonce)}",
                        header_platform=platform, app_version="4.0.0", host="app.local", **kw)
 
+    def attacker_request(self, **kw):
+        """A rotating attacker presents a fresh fingerprint every time; it cannot be hours old."""
+        tok, _ = self.session("web", age_hours=0)
+        return self.web_request(session=tok, **kw)
+
     def send(self, req):
         return self.p.process(req)
 

@@ -45,12 +45,18 @@ def test_rotating_residential_ips_are_caught_by_conversion_feedback(h):
         h.clock.advance(60)
         h.p.feedback.run_due_timeouts()
         sent_per_minute.append(h.sms_sent - before)
-    # first ~10 minutes flow (no OTP has timed out yet); once timeouts land the ASN's
-    # conversion collapses, every later request is downgraded, and finally the ASN is denylisted
+    # first ~10 minutes flow (no OTP has timed out yet); once timeouts land the ASN's conversion
+    # collapses: +25 penalty, then the sustained-flood bonus, and every later request is challenged.
     assert sent_per_minute[0] == 30
     assert sent_per_minute[-1] == 0
     assert h.sms_sent < 20 * 30 * 0.7
-    assert h.p.store.exists("deny:asn:AS9000")
+    # the residential ASN itself is never denylisted: a real user on the same ISP is challenged, not refused
+    assert not h.p.store.exists("deny:asn:AS9000")
+    tok, _ = h.session()
+    r = h.send(h.web_request(session=tok, ip="100.99.1.1", mobile="966509999999"))
+    assert r.tier == "challenge" and r.body["status"] == "challenge"
+    r = h.send(h.web_request(session=tok, ip="100.99.1.1", mobile="966509999999", challenge_proof="challenge-ok"))
+    assert r.channel == "sms"
 
 
 def test_sms_pumping_to_premium_range_is_impossible(h):

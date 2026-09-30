@@ -117,6 +117,15 @@ def test_step2_ip_limit_five_per_minute(h):
     assert h.send(h.web_request(mobile="966501234599")).rejected_at is None
 
 
+def test_step2_cgnat_asn_gets_the_higher_ip_cap(h):
+    """Many subscribers of a mobile carrier share one public IP; a listed CGNAT ASN gets 30/min per IP."""
+    h.lift_source_caps()
+    h.svc.ip_intel.register("198.51.100.0/24", IpInfo(asn="AS39386", asn_type="isp"))
+    h.cfg.cgnat_asns = ("AS39386",)
+    ok = sum(h.send(h.web_request(mobile=f"9665{i * 1234567:08d}")).rejected_at is None for i in range(35))
+    assert ok == 30
+
+
 def test_step2_subnet_limit_catches_ip_rotation_inside_a_block(h):
     """Gap B: rotating through a /24 stays under the per-IP cap but hits the subnet cap."""
     h.lift_source_caps()
@@ -474,3 +483,55 @@ def test_step11_audit_log_has_risk_fields(h):
     rec = h.p.sms_history[r.log_id]
     for k in ("risk_score", "signals", "tier", "channel", "operating_mode", "session_id", "fingerprint", "ip", "asn"):
         assert k in rec
+
+
+# ---------------- Feedback loop denylist scope ----------------
+
+def test_datacenter_asn_is_denylisted_but_residential_asn_is_not(h):
+    h.lift_source_caps(); h.cfg.asn_limit_default = 100000
+    h.svc.ip_intel.register("203.0.0.0/8", IpInfo(asn="AS64500", asn_type="hosting", is_datacenter=True))
+    h.svc.ip_intel.register("100.64.0.0/10", IpInfo(asn="AS9000", asn_type="isp"))
+    for i in range(60):
+        h.send(h.web_request(ip=f"203.{i % 200}.{(i * 7) % 200}.1", mobile=f"96650{(i * 7654321) % 10**7:07d}"))
+        h.send(h.web_request(ip=f"100.{64 + i % 60}.{(i * 7) % 200}.1", mobile=f"96655{(i * 7654321) % 10**7:07d}"))
+    h.clock.advance(601); h.p.feedback.run_due_timeouts()
+    assert h.p.store.exists("deny:asn:AS64500")
+    assert not h.p.store.exists("deny:asn:AS9000")
+
+
+def test_sustained_flood_bonus_reaches_challenge_without_other_signals(h):
+    """An attacker with pre-aged unique fingerprints and a good captcha only ever scores
+    2.5 + 25 from conversion; the flood bonus adds 15 once a key has 100 resolved failures."""
+    h.lift_source_caps(); h.cfg.asn_limit_default = 100000
+    h.svc.ip_intel.register("100.64.0.0/10", IpInfo(asn="AS9000", asn_type="isp"))
+    for i in range(100):
+        h.send(h.web_request(ip=f"100.{64 + i % 60}.{(i * 7) % 200}.{i % 250 + 1}", mobile=f"96650{(i * 7654321) % 10**7:07d}"))
+    h.clock.advance(601); h.p.feedback.run_due_timeouts()
+    r = h.send(h.web_request(ip="100.70.70.70", mobile="966509999999"))
+    assert r.tier == "challenge" and r.risk_score == 42.5          # 2.5 captcha + 25 conversion + 15 flood
+
+
+# ---------------- Feature flags ----------------
+
+def test_v1_feature_profile_reproduces_the_original_gaps():
+    """With every v2 feature off, the pipeline is the v1 design: header-trusted platform, no session,
+    no subnet/ASN, no number intelligence, no risk engine, no feedback."""
+    from otp_guard.config import V1_FEATURES
+    from otp_guard.testing import Harness
+    h = Harness(); h.cfg.features = V1_FEATURES
+    # Gap A: a spoofed platform header now skips reCAPTCHA and the host check
+    r = h.send(h.web_request(header_platform="ios", host="evil.net", recaptcha="nope"))
+    assert r.rejected_at is None and h.p.sms_history[r.log_id]["trusted_platform"] == "ios"
+    # Gap D: premium prefix goes through
+    assert h.send(h.web_request(mobile="966991234567", ip="198.51.100.11")).rejected_at is None
+    # risk engine off: even a datacenter IP with a brand-new fingerprint is tier allow
+    from otp_guard.services import IpInfo
+    h.svc.ip_intel.register("203.0.113.5", IpInfo(is_datacenter=True, abuse_score=1.0, country="RU"))
+    tok, _ = h.session(age_hours=0)
+    r = h.send(h.web_request(session=tok, ip="203.0.113.5", mobile="966501234568"))
+    assert r.tier == "allow" and r.risk_score == 0.0
+    # backoff off: fixed 1 per minute, no daily cap
+    h.clock.advance(61)
+    for _ in range(6):
+        assert h.send(h.web_request(ip="198.51.100.12")).rejected_at is None
+        h.clock.advance(61)

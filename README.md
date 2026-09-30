@@ -17,6 +17,7 @@ docs/
   architecture.md               components, request flow, state keys
   api.md                        HTTP endpoints
   deployment.md                 environment variables, adapters, failure policies, operations
+  use_cases.md                  flows, operational situations, internal callers, staged rollout
   original/                     the three source documents this work started from
 src/otp_guard/
   pipeline.py                   Steps 0 to 11, one method each
@@ -34,6 +35,7 @@ tests/
   integration/                  HTTP API, end-to-end attack and user scenarios
 scripts/
   run_scenarios.py              attack scenarios -> results/scenarios.{md,json}
+  run_analysis.py               attacker profiles, false positives, v1 vs v2 cost, sensitivity -> results/analysis.{md,json}
   extract_pseudocode.py         design -> docs/pseudocode/ (CI checks it is in sync)
   smoke_api.py                  boots the real service and drives a flow -> results/api_smoke.txt
 results/                        recorded outputs of the above (deterministic)
@@ -46,6 +48,7 @@ config/                         sample prefix cost table and source limits
 make install        # pip install -e ".[dev,google]"
 make test           # 159 tests, every pipeline test on both memory and Redis backends
 make scenarios      # the attack scenarios, written to results/
+make analysis       # attacker profiles, false positives, v1 vs v2, sensitivity
 make smoke          # boot the HTTP service on fakes and drive one flow
 make results        # regenerate everything under results/
 ```
@@ -72,17 +75,29 @@ Full detail, pseudocode and the reasoning behind every default: `docs/sms_valida
 
 ## Headline results
 
-From `results/scenarios.md`. Attackers present a fresh fingerprint per request, as a
-rotating attacker must; default configuration unless noted.
+From `results/analysis.md`. Attackers send 30 requests a minute for 20 minutes with every
+source cap lifted, so the numbers show what the other layers do. v1 is the original design
+run through the same code with the v2 features switched off.
 
-| Scenario | Requests | SMS sent |
-|---|---:|---:|
-| One client, random numbers (the original incident) | 200 | 3 |
-| 300 rotating datacenter IPs, fresh session each | 300 | 0 |
-| 600 unique residential IPs over 20 minutes, every static cap lifted | 600 | 300, then 0 per minute once the feedback loop denylists the ASN |
-| Sequential number walk, every cap lifted, then 10 more after the verification window | 40 + 10 | 40, then 0 |
-| SMS pumping to a premium prefix | 50 | 0 |
-| Circuit breaker at a 10-per-hour budget | 12 | elevated at 80 %, emergency at 100 %; clean traffic still served, risky traffic downgraded |
+| Attacker | v1 SMS / 20 min | v2 SMS / 20 min | v2 sustained after detection |
+|---|---:|---:|---:|
+| One client, random numbers | 100 | 6 | 0 |
+| Datacenter IP rotation | 600 | 0 | 0 |
+| Residential proxy pool, fresh fingerprints, good reCAPTCHA | 600 | 300 | 0 |
+| Residential pool, unique fingerprints pre-aged two hours | 600 | 390 | 0 |
+| Sequential numbers | 600 | 300 | 0 |
+| Premium-prefix pumping, spoofed platform header | 600 | 0 | 0 |
+
+The residential cases show the one exposure that remains: attack rate times OTP timeout,
+until the verification feedback loop has data. Section D of the analysis shows that
+timeout is the only knob that moves it.
+
+Legitimate traffic (section B): normal, retrying, roaming, corporate, legacy-app and
+returning users are all delivered. Two situations need configuration, both measured:
+a campaign burst needs the source cap lifted (12.5 % delivered otherwise), and carriers
+behind carrier-grade NAT need their ASN listed (50 % delivered otherwise). A real user on
+an ISP that is hosting an attack gets one interactive challenge, then delivery; the ISP is
+never denylisted.
 
 ## Status
 

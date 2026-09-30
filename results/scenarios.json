@@ -41,7 +41,7 @@
         0,
         0
       ],
-      "asn_denylisted": true,
+      "asn_denylisted": false,
       "note": "Every static limit removed; unique residential IP per request. Only the verification feedback loop sees it."
     },
     "sms_pumping_premium_prefix": {

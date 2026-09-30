@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0
+
+- Analysis runner (`scripts/run_analysis.py`, `results/analysis.md`): attacker profiles per
+  layer, legitimate use cases, v1 versus v2 cost, sensitivity to OTP timeout.
+- `docs/use_cases.md`.
+- Feature flags (`Config.features`, `V1_FEATURES`) for staged rollout and the v1 baseline.
+- Design changes found by the analysis: the auto-denylist no longer applies to residential
+  ASNs (only IP, subnet, fingerprint and datacenter ASNs); a sustained-flood bonus (+15 at
+  100 resolved sends under 10 % conversion) moves rotating residential attacks to the
+  challenge tier instead; listed carrier-grade NAT ASNs get a 30/min per-IP cap.
+
 ## 2.0.0
 
 - v2 design (`docs/sms_validation_process.md`): 12-step pipeline addressing gaps A to H from

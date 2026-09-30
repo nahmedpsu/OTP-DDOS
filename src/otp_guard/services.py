@@ -66,10 +66,11 @@ class FakeIpIntel:
         if ip in self.by_ip:
             return self.by_ip[ip]
         addr = ipaddress.ip_address(ip)
+        best = None
         for net, info in self.by_network:
-            if addr in net:
-                return info
-        return self.default
+            if addr in net and (best is None or net.prefixlen > best[0].prefixlen):
+                best = (net, info)
+        return best[1] if best else self.default
 
 
 @dataclass

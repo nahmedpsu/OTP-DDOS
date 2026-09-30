@@ -1,4 +1,4 @@
-.PHONY: install test test-report scenarios pseudocode smoke results run-api run-worker clean
+.PHONY: install test test-report scenarios analysis pseudocode smoke results run-api run-worker clean
 
 PY ?= python3
 
@@ -14,13 +14,16 @@ test-report:        ## run the suite and record the output under results/
 scenarios:          ## run the attack scenarios and write results/scenarios.{md,json}
 	$(PY) scripts/run_scenarios.py
 
+analysis:           ## attacker profiles, false positives, v1 vs v2 cost, sensitivity -> results/analysis.{md,json}
+	$(PY) scripts/run_analysis.py
+
 pseudocode:         ## regenerate docs/pseudocode/ from the design document
 	$(PY) scripts/extract_pseudocode.py
 
 smoke:              ## boot the HTTP service on fakes and drive a flow; writes results/api_smoke.txt
 	$(PY) scripts/smoke_api.py
 
-results: test-report scenarios smoke   ## regenerate everything under results/
+results: test-report scenarios analysis smoke   ## regenerate everything under results/
 
 run-api:            ## run the HTTP service from the environment (.env)
 	PYTHONPATH=src $(PY) -m otp_guard.api

@@ -25,6 +25,7 @@ refuses to start while any component is still a fake.
 | `SMS_KILL_SWITCH` | `true` stops all SMS immediately. |
 | `INTERNAL_SERVICE_CREDENTIALS` | Comma-separated secrets for bulk, test-server and the timeouts endpoint. |
 | `TRUSTED_PROXIES` | CIDRs whose `X-Forwarded-For` is trusted. |
+| `CGNAT_ASNS` | Carrier ASNs behind carrier-grade NAT; their addresses get 30 requests per minute instead of 5. |
 | `RECAPTCHA_SECRET`, `RECAPTCHA_ACTION`, `RECAPTCHA_HOSTNAMES` | Google reCAPTCHA v3. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Service-account JSON for Play Integrity and FCM. |
 | `PLAY_INTEGRITY_PACKAGE` | Android package name. |

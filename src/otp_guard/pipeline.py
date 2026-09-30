@@ -195,7 +195,12 @@ class Pipeline:
         return max(0, self.rl("otp:session", sid, self.cfg.session_otp_limit).current_count() - 1)
 
     # ---------- Step 0 ----------
+    def on(self, feature):
+        return feature in self.cfg.features
+
     def establish_trusted_platform(self, req):
+        if not self.on("attestation"):
+            return req.header_platform if req.header_platform in ("ios", "android") else "web"
         if req.attestation is not None:
             r = self.svc.attestation.verify(req.attestation, req.nonce)
             if not r.valid:
@@ -223,6 +228,11 @@ class Pipeline:
 
     # ---------- Step 1 ----------
     def step1_session(self, req):
+        if not self.on("session"):
+            req.session_id = req.session_token or "anon"
+            req.fingerprint = req.fingerprint or "none"
+            req.fingerprint_age_hours = 24.0
+            return True
         tok = self.sessions.verify(req.session_token) if req.session_token else None
         if tok is None or tok["expires_at"] < self.clock.now():
             return False
@@ -233,7 +243,7 @@ class Pipeline:
         req.session_id = tok["session_id"]
         req.fingerprint = tok["fingerprint_hash"]
         req.fingerprint_age_hours = self.sessions.fingerprint_age_hours(req.fingerprint)
-        if self.store.exists("deny:fp:" + req.fingerprint):
+        if self.on("feedback") and self.store.exists("deny:fp:" + req.fingerprint):
             return False
         return self.rl("otp:session", req.session_id, self.cfg.session_otp_limit).try_acquire()
 
@@ -244,14 +254,16 @@ class Pipeline:
         if info.is_tor:
             return False
         sub = subnet_of(req.ip)
-        for k in ("ip:" + req.ip, "subnet:" + sub, "asn:" + info.asn):
+        for k in (("ip:" + req.ip, "subnet:" + sub, "asn:" + info.asn) if self.on("feedback") else ()):
             if self.store.exists("deny:" + k):
                 return False
         asn_cap = self.cfg.asn_datacenter_limit if info.is_datacenter \
             else self.adaptive.asn_limit(info.asn, self.cfg.asn_limit_default)
-        limits = [self.rl("otp:ip", req.ip, self.cfg.ip_limit),
-                  self.rl("otp:subnet", sub, self.cfg.subnet_limit),
-                  self.rl("otp:asn", info.asn, (asn_cap, 60))]
+        ip_cap = self.cfg.ip_limit_cgnat if info.asn in self.cfg.cgnat_asns else self.cfg.ip_limit
+        limits = [self.rl("otp:ip", req.ip, ip_cap)]
+        if self.on("network_subnet_asn"):
+            limits += [self.rl("otp:subnet", sub, self.cfg.subnet_limit),
+                       self.rl("otp:asn", info.asn, (asn_cap, 60))]
         return RateLimit.try_acquire_all(limits)
 
     # ---------- Step 3 ----------
@@ -303,6 +315,8 @@ class Pipeline:
         # 5b prefix cost class
         prefix = self.svc.prefixes.lookup(mobile)
         req.prefix = prefix
+        if not self.on("number_intelligence"):
+            return True
         if prefix.cls == "premium":
             return False
         if prefix.cls == "elevated":
@@ -363,15 +377,22 @@ class Pipeline:
             s += 10
         s += 5 * self.previous_session_requests(req.session_id)
 
-        worst = 1.0
-        for key in ["ip:" + req.ip, "subnet:" + subnet_of(req.ip), "asn:" + req.ip_info.asn,
-                    "fp:" + req.fingerprint, "country:" + req.country_code, "prefix:" + req.prefix.id]:
+        worst, flood = 1.0, False
+        keys = ["ip:" + req.ip, "subnet:" + subnet_of(req.ip), "asn:" + req.ip_info.asn,
+                "fp:" + req.fingerprint, "country:" + req.country_code, "prefix:" + req.prefix.id]
+        for key in (keys if self.on("feedback") else []):
             ratio = self.rep.conversion_ratio(key, self.cfg.conversion_min_sample)
             if ratio is not None:
                 worst = min(worst, ratio)
+                r = self.rep.get(key)
+                if (r.verified + r.failed) >= self.cfg.conversion_flood_min_sample and ratio < self.cfg.conversion_flood_ratio:
+                    flood = True
         th = self.cfg.conversion_penalty_threshold
         if worst < th:
             s += (th - worst) / th * 25
+        if flood:
+            req.signals.append("sustained_flood")
+            s += self.cfg.conversion_flood_points
 
         if req.ip_info.country != COUNTRY_OF_CODE.get(req.country_code, req.ip_info.country):
             s += 10
@@ -401,6 +422,9 @@ class Pipeline:
     def step7_risk(self, req):
         if req.challenge_proof and req.challenge_proof in self.svc.recaptcha.scores:
             req.signals.append("challenge_passed")
+        if not self.on("risk_engine"):
+            req.risk_score, req.tier = 0.0, "allow"
+            return True
         req.risk_score = self.compute_risk_score(req)
         req.tier = self.decide_tier(req.risk_score, self.mode)
         if req.trusted_platform == "legacy_app" and req.tier == "allow":
@@ -417,10 +441,13 @@ class Pipeline:
     # ---------- Step 8 ----------
     def step8_per_number(self, req):
         sends = self.rep.get("num:" + req.mobile).sent
-        if sends >= self.cfg.per_number_daily_cap:
-            return False
         base, cap = self.cfg.per_number_base_window, self.cfg.per_number_max_window
-        window = min(base * 2 ** max(sends - 1, 0), cap) if sends > 0 else base
+        if self.on("backoff"):
+            if sends >= self.cfg.per_number_daily_cap:
+                return False
+            window = min(base * 2 ** max(sends - 1, 0), cap) if sends > 0 else base
+        else:
+            window = base
         # A shrinking or growing window must apply to the existing key, so refresh its TTL
         # relative to the last send rather than trusting the TTL set at that send.
         last = self.store.get("num_last_send:" + req.mobile)
@@ -462,6 +489,8 @@ class Pipeline:
         return max(count / self.cfg.global_sms_per_hour, spend / self.cfg.global_spend_units_per_hour)
 
     def step10_circuit_breaker(self, req):
+        if not self.on("circuit_breaker"):
+            return True
         util = self.utilisation()
         mode = "emergency" if (util >= 1.0 or self.cfg.kill_switch) else \
                "elevated" if util >= self.cfg.breaker_soft else "normal"
@@ -500,6 +529,7 @@ class Pipeline:
             "risk_score": req.risk_score, "signals": list(req.signals), "tier": req.tier,
             "operating_mode": self.mode, "session_id": req.session_id,
             "fingerprint": req.fingerprint, "ip": req.ip, "asn": req.ip_info.asn,
+            "asn_is_datacenter": bool(req.ip_info.is_datacenter),
             "reputation_keys": self.reputation_keys(req), "sent_at": self.clock.now(),
         }
         self.sms_history.put(record)

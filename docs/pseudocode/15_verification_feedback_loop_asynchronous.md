@@ -18,5 +18,6 @@ function onOtpFailedOrTimeout(logId):
         r = reputation.get(key)
         resolved = r.verified + r.failed
         if resolved >= 50 and r.verified / resolved < 0.1:
-            denylist.add(key, ttl = 86400)
+            if key is ip, subnet, fingerprint, or a datacenter asn:
+                denylist.add(key, ttl = 86400)
 ```

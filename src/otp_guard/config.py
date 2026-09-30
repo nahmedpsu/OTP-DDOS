@@ -13,8 +13,22 @@ def default_source_limits():
     }
 
 
+ALL_FEATURES = frozenset({
+    "attestation",          # Step 0 derives platform from attestation (off: trust the header, v1 behaviour)
+    "session",              # Step 1 signed session, nonce replay, per-session cap
+    "network_subnet_asn",   # Step 2 subnet and ASN throttles (IP throttle is always on)
+    "number_intelligence",  # Step 5b-5d prefix cost class, pattern detection, HLR
+    "risk_engine",          # Step 7 (off: every request is tier allow)
+    "feedback",             # conversion signals and auto-denylist
+    "backoff",              # Step 8 progressive backoff and daily cap (off: fixed 1 per minute)
+    "circuit_breaker",      # Step 10
+})
+V1_FEATURES = frozenset()   # the v1 design: header-trusted platform, IP cap, reCAPTCHA, country, text, 1/min, source caps
+
+
 @dataclass
 class Config:
+    features: frozenset = ALL_FEATURES
     allowed_domains: tuple = ("admin.example.com", "example.com", "api.example.com", "partner.example.com")
     allowed_country_codes: tuple = ("966", "971", "965", "968")
     excluded_numbers: tuple = ()
@@ -29,6 +43,8 @@ class Config:
     nonce_ttl: int = 600
 
     ip_limit: tuple = (5, 60)
+    cgnat_asns: tuple = ()               # mobile carriers behind carrier-grade NAT: many users share one IP
+    ip_limit_cgnat: tuple = (30, 60)
     subnet_limit: tuple = (30, 60)
     asn_limit_default: int = 300
     asn_datacenter_limit: int = 50
@@ -44,6 +60,9 @@ class Config:
 
     conversion_penalty_threshold: float = 0.3
     conversion_min_sample: int = 20
+    conversion_flood_min_sample: int = 100   # sustained flood on a key: many resolved sends, almost none verified
+    conversion_flood_ratio: float = 0.1
+    conversion_flood_points: int = 15
     tier_bounds: tuple = (20, 40, 60, 80)
     elevated_shift: int = 10
 

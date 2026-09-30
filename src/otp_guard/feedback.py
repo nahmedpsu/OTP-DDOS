@@ -88,6 +88,10 @@ class FeedbackLoop:
             self.p.rep.incr(key, "failed")
             r = self.p.rep.get(key)
             resolved = r.verified + r.failed
-            if resolved >= cfg.denylist_min_sample and r.verified / resolved < cfg.denylist_ratio:
-                if not key.startswith(("num:", "country:", "prefix:", "sess:")):
+            if resolved >= cfg.denylist_min_sample and r.verified / resolved < cfg.denylist_ratio \
+                    and "feedback" in cfg.features:
+                # Fine-grained keys only. A residential ASN is thousands of real people; denylisting it
+                # would hand the attacker a denial of service. Hosting ASNs carry no such users.
+                if key.startswith(("ip:", "subnet:", "fp:")) or \
+                        (key.startswith("asn:") and rec.get("asn_is_datacenter")):
                     self.p.store.set("deny:" + key, 1, cfg.denylist_ttl)

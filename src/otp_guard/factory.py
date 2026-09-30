@@ -45,6 +45,8 @@ def build_config(env):
         cfg.excluded_numbers = _csv(env["EXCLUDED_NUMBERS"])
     if env.get("HOST"):
         cfg.host = env["HOST"]
+    if env.get("CGNAT_ASNS"):
+        cfg.cgnat_asns = _csv(env["CGNAT_ASNS"])
     if env.get("SOURCE_LIMITS_PATH"):
         with open(env["SOURCE_LIMITS_PATH"]) as f:
             cfg.source_limits = json.load(f)

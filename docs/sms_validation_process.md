@@ -251,7 +251,7 @@ that rotating within a pool of addresses does not reset the budget (**Gap B**).
 
 | Scope                    | Limit              | Notes                                          |
 |--------------------------|--------------------|------------------------------------------------|
-| IP                       | 5 / minute         | The v1 control                                 |
+| IP                       | 5 / minute         | The v1 control. 30 / minute for ASNs listed as carrier-grade NAT (`CGNAT_ASNS`), where hundreds of subscribers share one address |
 | Subnet (/24 IPv4, /48 IPv6) | 30 / minute     | Catches rotation inside one block              |
 | ASN (residential/ISP)    | 300 / minute       | Adaptive: replaced by the baseline job (Step 9) |
 | ASN (datacenter/hosting) | 50 / minute        | Datacenter traffic is not a normal user        |
@@ -448,6 +448,7 @@ attacker cannot cheaply fake, and choose a graded response (**Gap H**).
 | Fingerprint age < 1 hour                 | +10 (< 5 minutes: +20)                     |
 | Session OTP request count                | +5 per previous request in this session    |
 | Conversion ratio of IP / subnet / ASN / fingerprint / country / prefix | `max over keys of (0.3 - ratio) / 0.3 * 25`, only when ratio < 0.3 |
+| Sustained flood on any of those keys: ≥ 100 resolved sends and ratio < 0.1 | +15 (`sustained_flood`) |
 | Geo mismatch: IP country != number country | +10                                      |
 | `sequential_number`, `narrow_range_burst` | +15 each                                  |
 | `elevated_prefix`, `unknown_prefix`, `voip_number` | +10 each                         |
@@ -738,8 +739,13 @@ Legitimate users verify the code they asked for; flooders never do.
 - `conversionRatio(key)` feeds Step 7 on every later request from that key. A ratio
   under 0.3 with at least 20 resolved sends adds up to 25 risk points.
 - Keys whose ratio drops below 0.1 with at least 50 resolved sends are placed on a
-  24-hour **auto-denylist** and blocked at Step 2 (network keys) or Step 1
-  (fingerprints).
+  24-hour **auto-denylist** and blocked at Step 2 (IP, subnet, and ASN only when it is a
+  hosting or datacenter ASN) or Step 1 (fingerprints). A residential ASN is never
+  denylisted: it holds thousands of real users, and blocking it would hand the attacker a
+  denial of service. Residential attacks are handled by the score instead: the conversion
+  penalty (+25) plus the sustained-flood bonus (+15) push every request on that key into
+  the `challenge` tier, so real users on the same ISP solve an interactive challenge and
+  are served while the bot is not.
 - A verified number is marked trusted: it skips HLR lookup and receives -20 risk points.
 - The adaptive limits job (Step 9) reads conversion per (source, platform, country).
 
@@ -760,7 +766,8 @@ function onOtpFailedOrTimeout(logId):
         r = reputation.get(key)
         resolved = r.verified + r.failed
         if resolved >= 50 and r.verified / resolved < 0.1:
-            denylist.add(key, ttl = 86400)
+            if key is ip, subnet, fingerprint, or a datacenter asn:
+                denylist.add(key, ttl = 86400)
 ```
 
 ## Observability
@@ -811,7 +818,9 @@ should be changed only with evidence from the dashboards.
 |----------------------------------|---------|------------------------------------------------------------------------|
 | Risk tier boundaries             | 20 / 40 / 60 / 80 | Even bands. A clean web user scores under 15; one strong abuse signal alone (+25) lands in `delay`, never `block`; blocking needs three or more independent signals. |
 | Conversion penalty threshold     | 0.3, min 20 resolved sends | Legitimate OTP conversion runs 70 to 90 %. Anything under 30 % is not a bad UX day, it is a flood. 20 resolved sends keeps a single user's typos from triggering it, and counting only resolved sends keeps a fresh burst of real traffic neutral. |
-| Auto-denylist threshold          | 0.1, min 50 resolved sends, 24 h | Under 10 % on 50 resolved sends has no legitimate explanation. 24 hours limits the blast radius of a shared NAT or carrier-grade NAT being denylisted. |
+| Auto-denylist threshold          | 0.1, min 50 resolved sends, 24 h; IP, subnet, fingerprint and datacenter ASNs only | Under 10 % on 50 resolved sends has no legitimate explanation. 24 hours limits the blast radius of a shared NAT being denylisted. Residential ASNs are excluded: blocking one is a denial of service against its customers. |
+| Sustained-flood bonus            | +15 at ≥ 100 resolved and ratio < 0.1 | Lets a residential attack that rotates IPs and pre-aged fingerprints reach the `challenge` tier (25 + 15 + 2.5 = 42.5) without denylisting anything shared. Real users on the attacked key see one interactive challenge, not a refusal. |
+| Per-IP cap on CGNAT carriers     | 30 / minute for listed ASNs | Mobile carriers put hundreds of subscribers behind one address; at 5 / minute half of a normal sign-up flow would be refused (see `results/analysis.md`). |
 | Circuit breaker soft / hard      | 80 % / 100 % of hourly budget | 80 % leaves room for the elevated mode to take effect before the hard cap. The hourly budget itself should be set to 2x the p99 legitimate hourly volume from the last quarter. |
 | reCAPTCHA minimum score          | 0.5 normal, 0.7 elevated | Google's documented midpoint; 0.7 in elevated mode trades some friction for protection only while under attack. |
 | Apps without attestation         | 30-day grace as `legacy_app` (+20 risk, `delay` at best), then blocked with `update_required` | Attestation is mandatory; a permanent exemption would recreate Gap A. A fixed grace window with a forced-update cutoff is the standard mobile rollout pattern and gives users a clear action. |
