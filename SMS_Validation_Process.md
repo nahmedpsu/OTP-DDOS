@@ -1,330 +1,547 @@
-# SMS Validation Process
+# SMS Validation Process (v2)
 
 ## Overview
 
-The SMS validation process is a layered security and rate-limiting pipeline that every
-SMS request passes through before a message is sent. It exists to stop the OTP flood
-abuse described in the problem statement: attackers hitting the registration API with
-randomly generated mobile numbers and burning SMS budget at scale.
+The SMS validation process is a layered security, risk-scoring and rate-limiting pipeline
+that every OTP request passes through before a message is sent. It addresses the original
+OTP flood incident and the evolved attacks described in `Problem_Statement.md`.
 
-The pipeline has **9 sequential steps, numbered 0 to 8**. Each step returns `true` to
-continue or `false` to reject the request. The first failing step stops processing.
+Two principles drive the design:
 
-| Step | Check                                     | Control from the problem statement            |
-|------|-------------------------------------------|-----------------------------------------------|
-| 0    | Initial security check (proxy / host)     | VPN and proxy blocking                        |
-| 1    | IP-based throttling                       | IP-based throttling (5 requests / IP / minute)|
-| 2    | Google reCAPTCHA (score-based)            | Hidden reCAPTCHA with score-based validation  |
-| 3    | HTTP Origin validation                    | Domain whitelisting                           |
-| 4    | Mobile number country validation          | Country whitelisting                          |
-| 5    | SMS text validation                       | SMS body restrictions                         |
-| 6    | Rate limiting per mobile number           | 1 SMS per number per minute                   |
-| 7    | Rate limiting per source, platform, country| Platform- and country-based rate limits      |
-| 8    | Logging and sending                       | Audit trail                                   |
+1. **Cheap, local checks first.** Reject obvious abuse before spending on network calls
+   (reCAPTCHA, HLR lookup) and long before spending on an SMS.
+2. **Trust is earned by behaviour, not claimed by headers.** Platform exemptions require
+   attestation, clients need a signed session, and every client key carries a reputation
+   derived from whether the OTPs it requested were ever verified.
 
-The steps are ordered so that cheap, local checks run before expensive or network-bound
-ones (for example, the IP throttle runs before the reCAPTCHA call to Google).
+The pipeline has **12 sequential steps, numbered 0 to 11**, followed by an asynchronous
+**verification feedback loop**. Each step returns `true` to continue or `false` to reject.
+The first failing step stops processing. Whatever the outcome, the client receives the
+same uniform response (Step 11).
+
+| Step | Check                                            | Problem it addresses                     |
+|------|--------------------------------------------------|------------------------------------------|
+| 0    | Connection and client integrity (proxy, attestation, host) | VPN/proxy blocking, **Gap A** header spoofing |
+| 1    | Client session token and fingerprint             | **Gap B** IP rotation, replay            |
+| 2    | IP, subnet and ASN throttling (atomic)           | IP throttling, **Gap B**, **Gap F**      |
+| 3    | Google reCAPTCHA (score-based)                   | Bot protection                           |
+| 4    | HTTP Origin validation                           | Domain whitelisting                      |
+| 5    | Number intelligence (country, prefix cost, pattern, HLR) | Country whitelisting, **Gap C**, **Gap D** |
+| 6    | SMS text validation                              | Body restrictions                        |
+| 7    | Risk score engine and tier decision              | **Gap H** binary decisions               |
+| 8    | Per-number rate limit with progressive backoff   | Per-number flooding                      |
+| 9    | Adaptive rate limits per source, platform, country | Platform/country caps                  |
+| 10   | Global circuit breaker (count and spend)         | **Gap E** no global cap                  |
+| 11   | Channel selection, send, log, uniform response   | Audit, **Gap H** enumeration             |
+| FB   | Verification feedback loop (async)               | Conversion-based reputation              |
+
+## Shared Components
+
+### Atomic RateLimit
+
+All rate limits use one `RateLimit` class backed by Redis. Check and increment happen in a
+single Lua script so that concurrent requests across application instances cannot both
+pass (**Gap F**). The window is a fixed window keyed by `key:identifier`; the key expires
+with the window.
+
+```
+// RateLimit.tryAcquire(): returns true and consumes one slot, or false without consuming
+// Executed atomically inside Redis (EVAL)
+LUA_TRY_ACQUIRE = """
+    local current = redis.call('INCR', KEYS[1])
+    if current == 1 then
+        redis.call('EXPIRE', KEYS[1], ARGV[2])
+    end
+    if current > tonumber(ARGV[1]) then
+        redis.call('DECR', KEYS[1])          -- do not consume the slot
+        return 0
+    end
+    return 1
+"""
+
+class RateLimit:
+    setLimit(maxCount, windowSeconds)
+    setKey(key)
+    setIdentifier(identifier)
+
+    tryAcquire():
+        return redis.eval(LUA_TRY_ACQUIRE, [key + ":" + identifier], [maxCount, windowSeconds]) == 1
+
+    // Read-only helper used by the risk engine
+    currentCount():
+        return int(redis.get(key + ":" + identifier) or 0)
+```
+
+`tryAcquire()` replaces the separate `hasExceededLimit()` and `incrementCount()` calls
+from v1. Where a step must check several limits before consuming any of them (Step 9),
+it uses a multi-key variant `tryAcquireAll([...])` implemented with the same script over
+all keys in one transaction, rolling back on the first failure.
+
+### Reputation Store
+
+A Redis hash per reputation key holding `sent`, `verified`, `failed`, `last_seen` over a
+rolling 24-hour window (implemented as hourly buckets). Reputation keys:
+
+| Key type      | Example                       |
+|---------------|-------------------------------|
+| `ip`          | `ip:203.0.113.7`              |
+| `subnet`      | `subnet:203.0.113.0/24`       |
+| `asn`         | `asn:AS64500`                 |
+| `fingerprint` | `fp:9f2c...`                  |
+| `session`     | `sess:...`                    |
+| `country`     | `country:966`                 |
+| `prefix`      | `prefix:96650`                |
+| `number`      | `num:966501234567`            |
+
+```
+function conversionRatio(repKey, minSample = 20):
+    r = reputation.get(repKey)
+    if r.sent < minSample:
+        return null                          // not enough data: neutral
+    return r.verified / r.sent
+```
+
+### Operating Mode
+
+A global flag set by the circuit breaker (Step 10): `normal`, `elevated` or `emergency`.
+Several steps read it to tighten their behaviour.
 
 ## Validation Steps
 
-### Step 0: Initial Security Check
+### Step 0: Connection and Client Integrity
 
-**Purpose:** Block high-risk requests before any further processing.
+**Purpose:** Block high-risk connections and establish a **trusted platform** value
+before any platform-based exemption is applied.
 
-Blocks a request when **either** of the following is true:
+**Rules:**
 
-- The connection comes through a proxy or VPN (detected via `check_is_proxy_connection()`).
-- The `HTTP_HOST` is not `example.com` **and** the platform is not iOS.
-
-Both conditions are independent. A proxy connection is blocked regardless of host or
-platform. A non-iOS request from an unauthorized host is blocked regardless of proxy status.
+- A proxy or VPN connection (`check_is_proxy_connection()`) is blocked outright.
+- The platform is **never** taken from the `HTTP_PLATFORM` header alone. It is derived
+  from attestation:
+  - iOS: a valid Apple App Attest assertion for this request → platform `ios`.
+  - Android: a valid Google Play Integrity verdict (`MEETS_DEVICE_INTEGRITY`, app
+    recognised, licensed) → platform `android`.
+  - Attestation present but invalid → **blocked**. A forged or replayed attestation is a
+    stronger abuse signal than none at all.
+  - No attestation → platform `web`. The request then has no exemptions and must pass
+    reCAPTCHA and origin validation like any browser.
+- `HTTP_HOST` must be `example.com` unless the trusted platform is `ios` or `android`.
 
 **Examples:**
 
-| Host              | Platform | Proxy | Result                                   |
-|-------------------|----------|-------|------------------------------------------|
-| example.com       | web      | no    | Allowed                                  |
-| example.com       | web      | yes   | Blocked (proxy)                          |
-| someotherhost.com | web      | no    | Blocked (unauthorized host, not iOS)     |
-| someotherhost.com | ios      | no    | Allowed (iOS exemption)                  |
-| someotherhost.com | ios      | yes   | Blocked (proxy)                          |
+| Host              | Header platform | Attestation | Proxy | Trusted platform | Result                       |
+|-------------------|-----------------|-------------|-------|------------------|------------------------------|
+| example.com       | web             | none        | no    | web              | Allowed                      |
+| example.com       | web             | none        | yes   | web              | Blocked (proxy)              |
+| someotherhost.com | ios             | none        | no    | web              | Blocked (spoofed platform, unauthorized host) |
+| someotherhost.com | ios             | valid       | no    | ios              | Allowed (attested app)       |
+| someotherhost.com | ios             | invalid     | no    | -                | Blocked (bad attestation)    |
 
 ```
 // Pseudocode for Validation Step 0
-function initialSecurityCheck(host, platform, isProxyConnection):
-    if isProxyConnection:
+function establishTrustedPlatform(request):
+    if request.hasAttestation():
+        result = verifyAttestation(request.attestation, request.nonce)
+        if not result.valid:
+            return "invalid"
+        return result.platform                // "ios" or "android"
+    return "web"
+
+function connectionAndClientIntegrityCheck(request):
+    if check_is_proxy_connection():
         return false
 
-    if host != "example.com" and platform != "ios":
+    request.trustedPlatform = establishTrustedPlatform(request)
+    if request.trustedPlatform == "invalid":
+        logSecurity("attestation_failed", request)
+        return false
+
+    if request.host != "example.com" and request.trustedPlatform == "web":
         return false
 
     return true
-
-// Example
-host = "randomhost.com"
-platform = "web"
-isProxy = false
-isAllowed = initialSecurityCheck(host, platform, isProxy)
-// isAllowed = false (blocked: unauthorized host and platform is not iOS)
 ```
 
-### Step 1: IP-Based Throttling
+### Step 1: Client Session Token and Fingerprint
 
-**Purpose:** Limit how many SMS requests a single client IP can make, so that a single
-source cannot flood the endpoint even when it varies the target phone number.
+**Purpose:** Give every client an identity that survives an IP change, and stop replay.
+Rate limits and reputation are keyed on this identity as well as on the network.
 
-**Limit rule:** Maximum **5 requests per IP address per minute**.
+**How a session token is issued:**
 
-The IP is taken from the connection (or from the trusted forwarding header when the
-request passes through the platform's own load balancer). Because attackers rotate IPs,
-this step is a first-line throttle only and is complemented by the per-number and
-per-source limits in Steps 6 and 7.
+- Web: on page load the client runs invisible reCAPTCHA v3 and calls `/session`. If the
+  score passes, the server returns a signed token.
+- Apps: after attestation succeeds the app calls `/session` and receives a token.
+
+**Token contents** (HMAC-SHA256 signed, 30-minute expiry):
+`{ session_id, fingerprint_hash, platform, issued_at, expires_at }`.
+
+**Fingerprint:** a hash of stable client attributes. Web: user agent, language, timezone,
+screen size, canvas and audio hashes. Apps: the attestation key ID. The fingerprint is
+stored with its first-seen time; **fingerprint age** is a risk signal.
+
+**Rules:**
+
+- Every OTP request must carry a valid, unexpired session token whose platform matches
+  the trusted platform from Step 0.
+- Each request carries a fresh nonce; a nonce seen before is a replay and is blocked.
+- A session may make at most **3 OTP requests per 10 minutes**.
 
 ```
 // Pseudocode for Validation Step 1
-function validateRateLimitPerIp(ip):
-    rateLimit = new RateLimit()
-    rateLimit.setLimit(5, 60)               // 5 requests per 60 seconds
-    rateLimit.setKey("send_global_sms:ip")
-    rateLimit.setIdentifier(ip)
-
-    if rateLimit.hasExceededLimit():
-        logError("IP request cap reached: " + ip)
+function validateSession(request):
+    token = verifySignedToken(request.sessionToken, SESSION_HMAC_KEY)
+    if token is null or token.expires_at < now():
         return false
+    if token.platform != request.trustedPlatform:
+        return false                         // token issued to a different platform
 
-    rateLimit.incrementCount()
-    return true
+    if not redis.setnx("nonce:" + request.nonce, 1, ttl = 600):
+        return false                         // replay
 
-// Example
-ip = "203.0.113.7"
-canProceed = validateRateLimitPerIp(ip)
-// canProceed = false if this IP has already made 5 requests in the last minute
+    request.sessionId = token.session_id
+    request.fingerprint = token.fingerprint_hash
+    request.fingerprintAgeHours = fingerprintAge(request.fingerprint)
+
+    sessionLimit = new RateLimit()
+    sessionLimit.setLimit(3, 600)            // 3 OTP requests per 10 minutes per session
+    sessionLimit.setKey("otp:session")
+    sessionLimit.setIdentifier(request.sessionId)
+    return sessionLimit.tryAcquire()
 ```
 
-### Step 2: Google reCAPTCHA Validation
+### Step 2: IP, Subnet and ASN Throttling
 
-**Purpose:** Prevent automated or bot submissions on the web platform.
+**Purpose:** Limit request volume from a single source at three network granularities so
+that rotating within a pool of addresses does not reset the budget (**Gap B**).
 
-For web platform requests only:
+**Limits (defaults, all atomic):**
 
-- The request must include a hidden reCAPTCHA token (`g-recaptcha-response`).
-- The token is verified through Google's reCAPTCHA service using `verifyGoogleReCaptcha()`.
-- The verification result must be **valid** and its **score must meet or exceed the
-  configured threshold** (`RECAPTCHA_MIN_SCORE`, default `0.5`). Low-trust traffic with a
-  valid token but a low score is still rejected.
-- Non-web platforms (iOS, Android) skip this step.
+| Scope                    | Limit              | Notes                                          |
+|--------------------------|--------------------|------------------------------------------------|
+| IP                       | 5 / minute         | The v1 control                                 |
+| Subnet (/24 IPv4, /48 IPv6) | 30 / minute     | Catches rotation inside one block              |
+| ASN (residential/ISP)    | 300 / minute       | Adaptive: replaced by the baseline job (Step 9) |
+| ASN (datacenter/hosting) | 50 / minute        | Datacenter traffic is not a normal user        |
 
-**Example:**
-
-- Platform: web
-- reCAPTCHA token: `03AGdBq24PBgq8...`
-- Verification result: valid, score 0.9
-- Result: Allowed (valid token and score above threshold)
+The IP is taken from the connection, or from the forwarding header only when the request
+arrived through the platform's own load balancer. IP reputation (datacenter, Tor exit,
+known abuse lists) is recorded as a risk signal for Step 7 and is not a hard block here
+except for Tor exits, which are treated as proxies in Step 0.
 
 ```
 // Pseudocode for Validation Step 2
-function validateReCaptcha(post, platform, minScore):
-    if platform != "web":
-        return true                          // Skip for non-web platforms
+function validateNetworkThrottles(request):
+    ip = clientIp(request)
+    ipInfo = lookupIpIntel(ip)               // { asn, asnType, isDatacenter, isTor, abuseScore, country }
+    request.ipInfo = ipInfo
 
-    recaptchaResult = verifyGoogleReCaptcha(post)
-    if not recaptchaResult["valid"]:
+    ipLimit = new RateLimit(); ipLimit.setLimit(5, 60); ipLimit.setKey("otp:ip"); ipLimit.setIdentifier(ip)
+    subnetLimit = new RateLimit(); subnetLimit.setLimit(30, 60); subnetLimit.setKey("otp:subnet"); subnetLimit.setIdentifier(subnetOf(ip))
+
+    asnCap = 50 if ipInfo.isDatacenter else adaptiveLimit("asn", ipInfo.asn, default = 300)
+    asnLimit = new RateLimit(); asnLimit.setLimit(asnCap, 60); asnLimit.setKey("otp:asn"); asnLimit.setIdentifier(ipInfo.asn)
+
+    if not RateLimit.tryAcquireAll([ipLimit, subnetLimit, asnLimit]):
+        logError("Network cap reached for " + ip)
         return false
-
-    if recaptchaResult["score"] < minScore:
-        logError("reCAPTCHA score below threshold: " + recaptchaResult["score"])
-        return false
-
     return true
-
-// Example
-post = {
-    "g-recaptcha-response": "03AGdBq24PBgq8...",
-    "other_data": "..."
-}
-platform = "web"
-isValidCaptcha = validateReCaptcha(post, platform, 0.5)
-// isValidCaptcha = true if the token is valid and the score is >= 0.5
 ```
 
-### Step 3: HTTP Origin Validation
+### Step 3: Google reCAPTCHA Validation
 
-**Purpose:** Ensure requests come from approved domains.
+**Purpose:** Prevent automated submissions from browsers.
 
-Extracts the root domain from the `Origin` header and checks it against the allowed
-domains list. Only requests from allowed domains are processed.
-
-**Approved domains (example):**
-
-- admin.example.com
-- example.com
-- api.example.com
-- partner.example.com
-
-**Example:**
-
-- Origin: `https://app.example.com/send-sms`
-- Extracted root domain: `example.com`
-- Result: Allowed (in allowed domains list)
+Applies when the **trusted** platform is `web` (which now includes any app request that
+did not attest). The token must be valid and its score must meet `RECAPTCHA_MIN_SCORE`
+(default 0.5; raised to 0.7 in `elevated` mode). The raw score is also passed to the risk
+engine.
 
 ```
 // Pseudocode for Validation Step 3
-function validateHttpOrigin(origin, allowedDomains):
-    extractedDomain = extractRootDomainFromUrl(origin)
-    return extractedDomain in allowedDomains
+function validateReCaptcha(request, minScore):
+    if request.trustedPlatform != "web":
+        return true
 
-// Example
-origin = "https://app.example.com/send-sms"
-allowedDomains = ["admin.example.com", "example.com", "api.example.com", "partner.example.com"]
-isValidOrigin = validateHttpOrigin(origin, allowedDomains)
-// isValidOrigin = true (example.com is in allowedDomains)
+    result = verifyGoogleReCaptcha(request.post)
+    request.recaptchaScore = result["score"] if result["valid"] else 0.0
+    if not result["valid"]:
+        return false
+    if result["score"] < minScore:
+        logError("reCAPTCHA score below threshold: " + result["score"])
+        return false
+    return true
 ```
 
-### Step 4: Mobile Number Country Validation
+### Step 4: HTTP Origin Validation
 
-**Purpose:** Restrict SMS sending to approved countries.
+**Purpose:** Ensure browser requests come from approved domains.
 
-**Key rules:**
-
-- The mobile number must begin with a country code from the approved list.
-- Special restriction: Oman (`968`) numbers are blocked unless the platform is iOS or
-  Android (they are not allowed from web).
-- Bulk SMS requests skip this step entirely.
-
-**Processing steps:**
-
-1. Remove the `+` sign and any leading zeros from the number.
-2. Take the first 3 digits as the country code.
-3. Apply the Oman-from-web restriction.
-4. Verify the country code against the allowed list.
-
-**Example:**
-
-- Mobile: `+966501234567` (Saudi Arabia)
-- Platform: web
-- Result: Allowed if `966` is in the allowed country codes list
+Extracts the root domain from the `Origin` header and checks it against the allowed
+domains list (`admin.example.com`, `example.com`, `api.example.com`,
+`partner.example.com`). Attested app requests have no browser origin and skip this step.
 
 ```
 // Pseudocode for Validation Step 4
-function validateMobileCountry(mobile, platform, isBulkSms, allowedCountryCodes):
-    if isBulkSms:
-        return true                          // Bulk SMS skips country validation
-
-    mobile = removePlusSign(mobile)
-    mobile = removeLeadingZeros(mobile)
-    countryCode = getFirstThreeDigits(mobile)
-
-    // Special case: block Oman (968) from web
-    if countryCode == "968" and platform != "ios" and platform != "android":
-        return false
-
-    return countryCode in allowedCountryCodes
-
-// Example
-mobile = "+966501234567"
-platform = "web"
-isBulk = false
-allowedCountryCodes = ["966", "971", "965", "968"]   // Example country codes
-isValidMobile = validateMobileCountry(mobile, platform, isBulk, allowedCountryCodes)
-// isValidMobile = true (966 is in allowedCountryCodes)
+function validateHttpOrigin(request, allowedDomains):
+    if request.trustedPlatform != "web":
+        return true
+    return extractRootDomainFromUrl(request.origin) in allowedDomains
 ```
 
-### Step 5: SMS Text Validation
+### Step 5: Number Intelligence
 
-**Purpose:** Ensure SMS content meets requirements and the recipient is not blocked.
+**Purpose:** Refuse to spend on numbers that are disallowed, overpriced, generated or
+dead (**Gap C**, **Gap D**), and produce number-related risk signals.
 
-**Requirements:**
+**5a. Normalize and country check** (the v1 control):
 
-- Request is not from the test server (test server requests skip this step).
-- SMS text is not empty (minimum 1 character).
-- SMS text does not exceed **420 characters** (3 SMS units of 140 characters).
-- The mobile number is **not** in the `EXCLUDED_NUMBERS` list.
+- Remove `+` and leading zeros; parse to E.164; reject unparseable numbers.
+- The country code must be in the allowed list.
+- Oman (`968`) is blocked unless the trusted platform is `ios` or `android`.
+- Bulk SMS skips the country check **only** when the request carries a valid internal
+  service credential (mTLS or a signed service token); the bulk flag alone is not enough
+  (**Gap G**).
 
-**Example:**
+**5b. Prefix cost class:** look up the number's prefix in the cost table.
 
-- SMS text: `Your verification code is 1234` (30 chars)
-- Mobile: `966501234567`, not in `EXCLUDED_NUMBERS`
-- Result: Allowed
+| Class      | Meaning                               | Action                                  |
+|------------|---------------------------------------|-----------------------------------------|
+| `standard` | Normal mobile range                   | Continue                                |
+| `premium`  | Revenue-share or premium-rate range   | Blocked for OTP                         |
+| `elevated` | Ranges with high historical AIT rates | Continue, cap 20 / hour per prefix, risk signal |
+| `unknown`  | Not in table                          | Continue, risk signal                   |
+
+**5c. Pattern detection:** flooders generate numbers in sequence or from a narrow range.
+
+- **Sequential burst:** within the last 10 minutes the same fingerprint, IP or subnet
+  requested a number within ±5 of this one.
+- **Narrow-range burst:** more than 10 distinct numbers sharing the first 9 digits were
+  requested platform-wide in the last 10 minutes.
+
+Either raises a risk signal; both together block.
+
+**5d. HLR lookup:** for a number never verified before, query the HLR (cached 30 days) to
+confirm it is assigned and reachable. Unassigned or unreachable numbers are rejected. A
+number in the reputation store with `verified > 0` skips the lookup. HLR costs a fraction
+of an SMS and is skipped in `emergency` mode only for numbers already known.
 
 ```
 // Pseudocode for Validation Step 5
-function validateSmsText(text, mobile, isTestServer, excludedNumbers):
-    if isTestServer:
-        return true                          // Skip for test server
-
-    if mobile in excludedNumbers:
+function validateNumber(request):
+    mobile = parseE164(removeLeadingZeros(removePlusSign(request.mobile)))
+    if mobile is null:
         return false
+    request.mobile = mobile
+    countryCode = getFirstThreeDigits(mobile)
+    request.countryCode = countryCode
 
-    textLength = length(text)
-    if textLength < 1 or textLength > 420:
+    // 5a country
+    if request.isBulkSms and verifyInternalServiceCredential(request):
+        pass                                 // authenticated bulk path skips country check
+    else:
+        if countryCode == "968" and request.trustedPlatform not in ["ios", "android"]:
+            return false
+        if countryCode not in ALLOWED_COUNTRY_CODES:
+            return false
+
+    // 5b prefix cost class
+    prefix = lookupPrefix(mobile)            // { class, costUnits }
+    request.prefix = prefix
+    if prefix.class == "premium":
         return false
+    if prefix.class == "elevated":
+        prefixLimit = new RateLimit(); prefixLimit.setLimit(20, 3600)
+        prefixLimit.setKey("otp:prefix"); prefixLimit.setIdentifier(prefix.id)
+        if not prefixLimit.tryAcquire():
+            return false
+        request.signals.add("elevated_prefix")
+    if prefix.class == "unknown":
+        request.signals.add("unknown_prefix")
 
+    // 5c pattern detection
+    sequential = recentNeighbourRequested(mobile, radius = 5, keys = [request.fingerprint, request.ip, subnetOf(request.ip)], window = 600)
+    narrowRange = distinctNumbersWithPrefix(mobile[0:9], window = 600) > 10
+    if sequential and narrowRange:
+        return false
+    if sequential:  request.signals.add("sequential_number")
+    if narrowRange: request.signals.add("narrow_range_burst")
+    recordNumberRequest(mobile, request)      // feeds the two detectors above
+
+    // 5d HLR
+    if reputation.get("num:" + mobile).verified == 0:
+        hlr = hlrLookup(mobile)              // cached 30 days
+        if not hlr.assigned or not hlr.reachable:
+            return false
+        if hlr.isVoip: request.signals.add("voip_number")
     return true
-
-// Example
-smsText = "Your verification code is 1234. Please enter this code in the app to verify your account."
-mobile = "966501234567"
-isTestServer = false
-excludedNumbers = ["966500000000", "971500000000"]
-isValidText = validateSmsText(smsText, mobile, isTestServer, excludedNumbers)
-// isValidText = true (text is within 1..420 chars and the number is not excluded)
 ```
 
-### Step 6: Rate Limiting Per Mobile Number
+### Step 6: SMS Text Validation
 
-**Purpose:** Prevent SMS flooding to an individual number.
+**Purpose:** Ensure the SMS content meets requirements and the recipient is not blocked.
 
-**Limit rule:** Maximum **1 SMS per mobile number per minute** (60-second window).
+**Requirements:**
 
-The `RateLimit` class tracks the request count for each mobile number within the window.
-A second request for the same number inside the window is rejected until the window
-expires.
-
-**Example:**
-
-- Mobile: `966501234567`
-- Previous SMS sent: 20 seconds ago
-- Result: Rejected (less than 60 seconds since the last SMS)
+- Test-server requests skip this step **only** with a valid internal service credential
+  (**Gap G**).
+- Text length between 1 and 420 characters (3 SMS units of 140).
+- The number is not in `EXCLUDED_NUMBERS`.
 
 ```
 // Pseudocode for Validation Step 6
-function validateRateLimitPerMobile(mobile):
-    rateLimit = new RateLimit()
-    rateLimit.setLimit(1, 60)               // 1 SMS per 60 seconds
-    rateLimit.setKey("send_global_sms:limit")
-    rateLimit.setIdentifier(mobile)
-
-    if rateLimit.hasExceededLimit():
+function validateSmsText(request, excludedNumbers):
+    if IS_TEST_SERVER and verifyInternalServiceCredential(request):
+        return true
+    if request.mobile in excludedNumbers:
         return false
-
-    rateLimit.incrementCount()
-    return true
-
-// Example
-mobile = "966501234567"
-canSendSms = validateRateLimitPerMobile(mobile)
-// canSendSms = false if another SMS was sent to this number in the last 60 seconds
+    n = length(request.text)
+    return n >= 1 and n <= 420
 ```
 
-### Step 7: Rate Limiting Per Source, Platform and Country
+### Step 7: Risk Score Engine and Tier Decision
 
-**Purpose:** Enforce aggregate sending caps so that a burst of otherwise-valid requests
-cannot exhaust SMS resources.
+**Purpose:** Replace a chain of binary thresholds with one score built from signals the
+attacker cannot cheaply fake, and choose a graded response (**Gap H**).
 
-Limits are keyed on:
+**Signals and weights** (score 0 to 100, higher is riskier):
 
-- **Source** (e.g. `App/RegisterOTP`)
-- **Platform** (iOS, Android, web)
-- **Country code** of the recipient (optional override; falls back to the platform limit)
-- **Time period** (per minute and per hour)
+| Signal                                   | Points                                     |
+|------------------------------------------|--------------------------------------------|
+| reCAPTCHA score (web)                    | `(1 - score) * 25`                         |
+| IP is datacenter / hosting               | +15                                        |
+| IP abuse list score                      | `abuseScore * 15` (0..1)                   |
+| Fingerprint age < 1 hour                 | +10 (< 5 minutes: +20)                     |
+| Session OTP request count                | +5 per previous request in this session    |
+| Conversion ratio of IP / subnet / ASN / fingerprint / country / prefix | `max over keys of (0.3 - ratio) / 0.3 * 25`, only when ratio < 0.3 |
+| Geo mismatch: IP country != number country | +10                                      |
+| `sequential_number`, `narrow_range_burst` | +15 each                                  |
+| `elevated_prefix`, `unknown_prefix`, `voip_number` | +10 each                         |
+| Number previously verified               | -20                                        |
+| Fingerprint with verified history         | -15                                        |
 
-Thresholds are tuned per platform and per country from historical usage and peak
-marketing periods. If no limits are configured for a source, the step passes.
+**Tiers:**
 
-Both the per-minute and per-hour limits are **checked before either counter is
-incremented**, so a request rejected by the hour cap does not consume a minute slot.
+| Score        | Tier        | Response                                                      |
+|--------------|-------------|---------------------------------------------------------------|
+| 0 to 19      | `allow`     | Continue to send via preferred channel                        |
+| 20 to 39     | `delay`     | Continue, but the send is queued with a delay (Step 11)       |
+| 40 to 59     | `challenge` | Web: require an interactive challenge, then re-enter at Step 7 with a `challenge_passed` signal (-20). Apps: treated as `downgrade` |
+| 60 to 79     | `downgrade` | Continue only via a non-SMS channel; if none is available, block |
+| 80 to 100    | `block`     | Rejected                                                      |
 
-**Example limits:**
+In `elevated` mode every tier boundary moves down by 10 points. In `emergency` mode only
+`allow` with score < 10 may use SMS; everything else is downgraded or blocked.
+
+```
+// Pseudocode for Validation Step 7
+function computeRiskScore(request):
+    s = 0
+    if request.trustedPlatform == "web":
+        s += (1 - request.recaptchaScore) * 25
+    if request.ipInfo.isDatacenter: s += 15
+    s += request.ipInfo.abuseScore * 15
+    if request.fingerprintAgeHours < 1/12: s += 20
+    else if request.fingerprintAgeHours < 1: s += 10
+    s += 5 * previousSessionRequests(request.sessionId)
+
+    worst = 1.0
+    for key in ["ip:" + request.ip, "subnet:" + subnetOf(request.ip), "asn:" + request.ipInfo.asn,
+                "fp:" + request.fingerprint, "country:" + request.countryCode, "prefix:" + request.prefix.id]:
+        ratio = conversionRatio(key)
+        if ratio is not null: worst = min(worst, ratio)
+    if worst < 0.3: s += (0.3 - worst) / 0.3 * 25
+
+    if request.ipInfo.country != countryOf(request.countryCode): s += 10
+    for sig in request.signals:
+        s += { "sequential_number": 15, "narrow_range_burst": 15,
+               "elevated_prefix": 10, "unknown_prefix": 10, "voip_number": 10,
+               "challenge_passed": -20 }.get(sig, 0)
+    if reputation.get("num:" + request.mobile).verified > 0: s -= 20
+    if reputation.get("fp:" + request.fingerprint).verified > 0: s -= 15
+    return clamp(s, 0, 100)
+
+function decideTier(score, mode):
+    shift = 10 if mode == "elevated" else 0
+    if mode == "emergency":
+        return "allow" if score < 10 else "downgrade"
+    if score >= 80 - shift: return "block"
+    if score >= 60 - shift: return "downgrade"
+    if score >= 40 - shift: return "challenge"
+    if score >= 20 - shift: return "delay"
+    return "allow"
+
+function riskDecision(request):
+    request.riskScore = computeRiskScore(request)
+    request.tier = decideTier(request.riskScore, operatingMode())
+    if request.tier == "block":
+        return false
+    if request.tier == "challenge":
+        if request.trustedPlatform == "web":
+            request.requiresChallenge = true // Step 11 returns the challenge; client retries with proof
+            return false
+        request.tier = "downgrade"
+    return true
+```
+
+### Step 8: Per-Number Rate Limit with Progressive Backoff
+
+**Purpose:** Prevent flooding an individual number, and make each repeat request wait
+longer than the last.
+
+**Rules:**
+
+- The base window is 60 seconds (1 SMS per number per minute, the v1 control).
+- The window doubles with each send to the same number in the last 24 hours:
+  60 s, 120 s, 240 s, 480 s, 960 s, capped at 3600 s.
+- Hard cap of **5 sends per number per 24 hours**.
+
+**Example:**
+
+| Send # in 24h | Minimum wait since previous send |
+|---------------|----------------------------------|
+| 1             | none                             |
+| 2             | 60 s                             |
+| 3             | 120 s                            |
+| 4             | 240 s                            |
+| 5             | 480 s                            |
+| 6             | rejected (daily cap)             |
+
+```
+// Pseudocode for Validation Step 8
+function validateRateLimitPerMobile(mobile):
+    sends = reputation.get("num:" + mobile).sent      // rolling 24h
+    if sends >= 5:
+        return false
+
+    window = min(60 * 2 ** max(sends - 1, 0), 3600) if sends > 0 else 60
+    rateLimit = new RateLimit()
+    rateLimit.setLimit(1, window)
+    rateLimit.setKey("send_global_sms:limit")
+    rateLimit.setIdentifier(mobile)
+    return rateLimit.tryAcquire()
+```
+
+### Step 9: Adaptive Rate Limits per Source, Platform and Country
+
+**Purpose:** Enforce aggregate caps that follow real traffic instead of a fixed number.
+
+Limits are keyed on **source** (e.g. `App/RegisterOTP`), **trusted platform**, and
+**recipient country**, for per-minute and per-hour windows. Configured base limits are
+multiplied by an **adaptive multiplier** in the range 0.25 to 1.5 produced by the
+baseline job:
+
+- Every hour, compute the expected volume for each (source, platform, country,
+  hour-of-day, day-of-week) from the last 4 weeks (median and MAD).
+- Multiplier rises toward 1.5 when the key's conversion ratio is healthy (≥ 0.5) and
+  traffic is within 2 MAD of expected.
+- Multiplier falls toward 0.25 when traffic exceeds expected by more than 3 MAD or the
+  key's conversion ratio drops below 0.3.
+- Marketing calendar entries override the multiplier upward for planned campaigns.
+
+Both windows are checked before either counter is consumed.
+
+**Example base limits:**
 
 | Platform | Per minute | Per hour |
 |----------|-----------:|---------:|
@@ -332,185 +549,235 @@ incremented**, so a request rejected by the hour cap does not consume a minute s
 | Web      | 5          | 50       |
 | Android  | 8          | 80       |
 
-**Example:**
-
-- Source: `App/RegisterOTP`
-- Platform: iOS
-- Country: `966`, no country override configured
-- Per-minute limit: 10 SMS; current count: 9 in the last minute
-- Per-hour limit: 100 SMS; current count: 40 in the last hour
-- Result: Allowed (under both limits)
-
 ```
-// Pseudocode for Validation Step 7
-function resolveLimit(sourceLimit, period, platform, countryCode):
-    // period is "per_minute" or "per_hour"
-    // A per-country override wins over the platform default when present
-    overrides = sourceLimit.get("per_country", {})
-    if countryCode in overrides and (period + "_" + platform) in overrides[countryCode]:
-        return overrides[countryCode][period + "_" + platform]
-    return sourceLimit[period + "_" + platform]
+// Pseudocode for Validation Step 9
+function effectiveLimit(sourceLimit, period, platform, countryCode):
+    base = sourceLimit.get("per_country", {}).get(countryCode, {}).get(period + "_" + platform)
+    if base is null:
+        base = sourceLimit[period + "_" + platform]
+    return ceil(base * adaptiveMultiplier(source, platform, countryCode))
 
-function validateSourceRateLimit(source, platform, countryCode, limits):
+function validateSourceRateLimit(request, limits):
+    source = request.source; platform = request.trustedPlatform; cc = request.countryCode
     if source not in limits:
-        return true                          // No limits configured for this source
-
-    sourceLimit = limits[source]
+        return true
+    sl = limits[source]
 
     minuteLimit = new RateLimit()
-    minuteLimit.setLimit(resolveLimit(sourceLimit, "per_minute", platform, countryCode), 60)
+    minuteLimit.setLimit(effectiveLimit(sl, "per_minute", platform, cc), 60)
     minuteLimit.setKey("sms_cap_per_minute_" + platform + ":limit")
-    minuteLimit.setIdentifier(source + ":" + countryCode)
+    minuteLimit.setIdentifier(source + ":" + cc)
 
     hourLimit = new RateLimit()
-    hourLimit.setLimit(resolveLimit(sourceLimit, "per_hour", platform, countryCode), 3600)
+    hourLimit.setLimit(effectiveLimit(sl, "per_hour", platform, cc), 3600)
     hourLimit.setKey("sms_cap_per_hour_" + platform + ":limit")
-    hourLimit.setIdentifier(source + ":" + countryCode)
+    hourLimit.setIdentifier(source + ":" + cc)
 
-    // Check both limits first, then increment both
-    if minuteLimit.hasExceededLimit():
-        logError(platform + " SMS PerMinute Cap Reached!")
+    if not RateLimit.tryAcquireAll([minuteLimit, hourLimit]):
+        logError(platform + " SMS cap reached for " + source + "/" + cc)
         return false
-
-    if hourLimit.hasExceededLimit():
-        logError(platform + " SMS PerHour Cap Reached!")
-        return false
-
-    minuteLimit.incrementCount()
-    hourLimit.incrementCount()
     return true
-
-// Example
-source = "App/RegisterOTP"
-platform = "ios"
-countryCode = "966"
-limits = {
-    "App/RegisterOTP": {
-        "per_minute_ios": 10,
-        "per_hour_ios": 100,
-        "per_minute_web": 5,
-        "per_hour_web": 50,
-        "per_minute_android": 8,
-        "per_hour_android": 80,
-        "per_country": {
-            "968": { "per_minute_web": 2, "per_hour_web": 20 }
-        }
-    }
-}
-isWithinLimits = validateSourceRateLimit(source, platform, countryCode, limits)
-// isWithinLimits = true if under both the per-minute and per-hour limits
 ```
 
-### Step 8: Logging and Sending SMS
+### Step 10: Global Circuit Breaker
 
-**Purpose:** Final processing of a fully validated request.
+**Purpose:** Bound total SMS count and total spend regardless of how the traffic is
+distributed across keys (**Gap E**), and switch the whole pipeline into a defensive mode
+automatically.
 
-After all validations pass:
+**Budgets** (configurable): `GLOBAL_SMS_PER_HOUR` and `GLOBAL_SPEND_UNITS_PER_HOUR`, where
+spend is the sum of prefix cost units from Step 5b.
 
-1. Write an audit log of the SMS request: source, recipient number, request headers,
-   message content and selected provider.
-2. Send the SMS through the configured provider (`PROVIDER_A`, `PROVIDER_B` or
-   `PROVIDER_C`).
-3. Return the success or failure status to the requester.
+| Utilisation of either budget | Operating mode | Effect                                                     |
+|------------------------------|----------------|------------------------------------------------------------|
+| < 80 %                       | `normal`       | Default behaviour                                          |
+| 80 % to < 100 %              | `elevated`     | Tier boundaries down 10 points, reCAPTCHA min 0.7, page on-call |
+| ≥ 100 %                      | `emergency`    | SMS only for score < 10; everything else downgraded or blocked; page on-call |
 
-**Example log entry:**
-
-```json
-{
-  "source": "App/RegisterOTP",
-  "phone_number": "966501234567",
-  "headers": {"User-Agent": "Mozilla/5.0..."},
-  "content": "Your verification code is 1234",
-  "sms_provider": "PROVIDER_A"
-}
-```
+The mode is recomputed on every request from the current hourly counters and resets when
+the window rolls. A manual **kill switch** (`SMS_KILL_SWITCH`) forces `emergency`.
 
 ```
-// Pseudocode for Validation Step 8
-function logAndSendSms(source, mobile, headers, message, provider):
-    log = {
-        "source": source,
-        "phone_number": mobile,
-        "headers": jsonEncode(headers),
-        "content": message,
-        "sms_provider": provider
-    }
-    logId = addSmsHistoryToDatabase(log)
+// Pseudocode for Validation Step 10
+function circuitBreaker(request):
+    if request.tier not in ["allow", "delay"]:
+        return true                          // non-SMS channels do not spend SMS budget
 
-    if provider == "PROVIDER_A":
-        return sendViaProviderA(mobile, message, logId)
-    else if provider == "PROVIDER_B":
-        return sendViaProviderB(mobile, message, logId)
-    else:                                    // Default to PROVIDER_C
-        return sendViaProviderC(mobile, message, logId)
+    count = redis.get("global:sms:count:" + currentHour()) or 0
+    spend = redis.get("global:sms:spend:" + currentHour()) or 0
+    util = max(count / GLOBAL_SMS_PER_HOUR, spend / GLOBAL_SPEND_UNITS_PER_HOUR)
 
-// Example
-source = "App/RegisterOTP"
-mobile = "966501234567"
-headers = {"User-Agent": "Mozilla/5.0..."}
-message = "Your verification code is 1234"
-provider = "PROVIDER_A"
-success = logAndSendSms(source, mobile, headers, message, provider)
-// success = true if the SMS was sent successfully
+    mode = "emergency" if (util >= 1.0 or SMS_KILL_SWITCH) else "elevated" if util >= 0.8 else "normal"
+    setOperatingMode(mode)
+    if mode != "normal": alertOnCall("SMS circuit breaker: " + mode, util)
+
+    if mode == "emergency" and request.riskScore >= 10:
+        request.tier = "downgrade"           // Step 11 will try a non-SMS channel
+    return true
 ```
+
+### Step 11: Channel Selection, Send, Log and Uniform Response
+
+**Purpose:** Deliver the code over the cheapest channel appropriate to the risk tier,
+write the audit record, and answer the client without revealing what happened.
+
+**Channel preference by tier:**
+
+| Tier        | Channels tried in order                                        |
+|-------------|----------------------------------------------------------------|
+| `allow`     | push (if the device is registered), SMS                        |
+| `delay`     | push, SMS after a delay of `min(5 * 2^k, 60)` s where k = previous requests in session |
+| `downgrade` | push, WhatsApp OTP, silent network authentication; **never SMS**; block if none available |
+
+**Audit log** includes the v1 fields plus `trusted_platform`, `risk_score`, `signals`,
+`tier`, `channel`, `operating_mode`, `session_id`, `fingerprint`, `ip`, `asn`.
+
+**Uniform response** (**Gap H**): every outcome from Step 1 onward returns HTTP 200 with
+the same body, `{"status": "ok", "message": "If this number is eligible, a code has been
+sent."}`, and the handler pads its processing time to a constant floor so that timing does
+not reveal which step rejected the request. The one exception is the `challenge` tier on
+web, which returns the challenge to render. Step 0 failures return a generic 403 because
+those clients are not legitimate users.
+
+```
+// Pseudocode for Validation Step 11
+function logAndSend(request, providerConfig):
+    channel = selectChannel(request.tier, request)
+    if channel is null:
+        return uniformResponse()             // downgrade with no channel: silently dropped
+
+    logId = addSmsHistoryToDatabase({
+        "source": request.source, "phone_number": request.mobile,
+        "headers": jsonEncode(request.headers), "content": request.text,
+        "sms_provider": providerConfig.provider if channel == "sms" else null,
+        "channel": channel, "trusted_platform": request.trustedPlatform,
+        "risk_score": request.riskScore, "signals": request.signals, "tier": request.tier,
+        "operating_mode": operatingMode(), "session_id": request.sessionId,
+        "fingerprint": request.fingerprint, "ip": request.ip, "asn": request.ipInfo.asn
+    })
+
+    if channel == "sms":
+        redis.incr("global:sms:count:" + currentHour())
+        redis.incrby("global:sms:spend:" + currentHour(), request.prefix.costUnits)
+        delay = 0 if request.tier == "allow" else min(5 * 2 ** previousSessionRequests(request.sessionId), 60)
+        enqueueSend(providerConfig.provider, request.mobile, request.text, logId, delay)
+    else:
+        enqueueSend(channel, request.mobile, request.text, logId, 0)
+
+    recordSent(request)                      // increments `sent` on every reputation key
+    scheduleVerificationTimeout(logId, 600)  // feedback loop: unverified after 10 min counts as failed
+    return uniformResponse()
+```
+
+## Verification Feedback Loop (asynchronous)
+
+**Purpose:** Turn the attacker's own behaviour into the strongest signal in the system.
+Legitimate users verify the code they asked for; flooders never do.
+
+**Events:**
+
+- `otp_verified(logId)`: the code was entered correctly. Increment `verified` on every
+  reputation key attached to the send (ip, subnet, asn, fingerprint, session, country,
+  prefix, number).
+- `otp_failed(logId)`: five wrong attempts. Increment `failed`.
+- `otp_timeout(logId)`: 10 minutes elapsed with no verification. Increment `failed`.
+
+**Derived effects:**
+
+- `conversionRatio(key)` feeds Step 7 on every later request from that key. A ratio
+  under 0.3 with at least 20 sends adds up to 25 risk points.
+- Keys whose ratio drops below 0.1 with at least 50 sends are placed on a 24-hour
+  **auto-denylist** and blocked at Step 2 (network keys) or Step 1 (fingerprints).
+- A verified number is marked trusted: it skips HLR lookup and receives -20 risk points.
+- The adaptive limits job (Step 9) reads conversion per (source, platform, country).
+
+**Protecting the verify endpoint itself:** 5 attempts per OTP, then the code is
+invalidated; 20 verify calls per session per 10 minutes; codes expire after 10 minutes.
+
+```
+// Pseudocode for the feedback loop
+function onOtpVerified(logId):
+    send = smsHistory.get(logId)
+    for key in reputationKeysOf(send): reputation.incr(key, "verified")
+    reputation.markTrusted("num:" + send.phone_number)
+
+function onOtpFailedOrTimeout(logId):
+    send = smsHistory.get(logId)
+    for key in reputationKeysOf(send):
+        reputation.incr(key, "failed")
+        r = reputation.get(key)
+        if r.sent >= 50 and r.verified / r.sent < 0.1:
+            denylist.add(key, ttl = 86400)
+```
+
+## Observability
+
+- Metrics per step: requests, rejects, latency; per tier and channel: sends, verifies,
+  conversion; global: SMS count, spend units, operating mode.
+- Alerts: circuit breaker mode change, conversion ratio for any country below 0.3 over an
+  hour, HLR reject rate above 30 %, any single ASN above 20 % of traffic.
+- Dashboards show conversion by country, platform and ASN so that limit tuning is based
+  on evidence.
 
 ## Full Pipeline
 
 ```
-function processSmsRequest(request):
-    if not initialSecurityCheck(request.host, request.platform, check_is_proxy_connection()):
-        return reject("blocked_connection")
-    if not validateRateLimitPerIp(request.ip):
-        return reject("ip_rate_limited")
-    if not validateReCaptcha(request.post, request.platform, RECAPTCHA_MIN_SCORE):
-        return reject("recaptcha_failed")
-    if not validateHttpOrigin(request.origin, ALLOWED_DOMAINS):
-        return reject("invalid_origin")
-    if not validateMobileCountry(request.mobile, request.platform, request.isBulkSms, ALLOWED_COUNTRY_CODES):
-        return reject("country_not_allowed")
-    if not validateSmsText(request.text, request.mobile, IS_TEST_SERVER, EXCLUDED_NUMBERS):
-        return reject("invalid_text_or_excluded_number")
-    if not validateRateLimitPerMobile(request.mobile):
-        return reject("mobile_rate_limited")
-    if not validateSourceRateLimit(request.source, request.platform, countryCodeOf(request.mobile), SOURCE_LIMITS):
-        return reject("source_rate_limited")
-    return logAndSendSms(request.source, request.mobile, request.headers, request.text, SMS_PROVIDER)
+function processOtpRequest(request):
+    if not connectionAndClientIntegrityCheck(request):        return forbidden()     // Step 0
+    if not validateSession(request):                          return uniformResponse() // Step 1
+    if not validateNetworkThrottles(request):                 return uniformResponse() // Step 2
+    if not validateReCaptcha(request, recaptchaMinScore()):   return uniformResponse() // Step 3
+    if not validateHttpOrigin(request, ALLOWED_DOMAINS):      return uniformResponse() // Step 4
+    if not validateNumber(request):                           return uniformResponse() // Step 5
+    if not validateSmsText(request, EXCLUDED_NUMBERS):        return uniformResponse() // Step 6
+    if not riskDecision(request):
+        return challengeResponse() if request.requiresChallenge else uniformResponse() // Step 7
+    if not validateRateLimitPerMobile(request.mobile):        return uniformResponse() // Step 8
+    if not validateSourceRateLimit(request, SOURCE_LIMITS):   return uniformResponse() // Step 9
+    circuitBreaker(request)                                                            // Step 10
+    return logAndSend(request, PROVIDER_CONFIG)                                        // Step 11
 ```
 
 ## Summary
 
-The SMS validation process provides multiple layers of security and rate limiting to
-allow legitimate use while preventing abuse. Each step addresses a specific risk, from
-proxy and bot prevention through per-IP, per-number and per-source flood protection,
-with comprehensive logging for auditing. The system maintains strict controls while
-allowing flexibility for different platforms, countries and use cases.
+v2 keeps every v1 control and closes the gaps an adapted attacker exploits. Platform
+exemptions require attestation, clients carry a signed identity, network throttles work
+at IP, subnet and ASN level atomically, and numbers are validated for country, cost,
+pattern and liveness before any money is spent. A risk score built on those signals and
+on the verify-to-send ratio decides between allow, delay, challenge, downgrade and block,
+with progressive backoff, adaptive caps and a global circuit breaker bounding the damage
+of anything that gets through. Uniform responses stop the pipeline from being probed.
 
-## Reconciliation Notes
+## Change Log
 
-This document supersedes the earlier `sms_1.md` and the SMS Validation Process PDF. The
-following inconsistencies between those documents and the Problem Statement were resolved:
+### v2 (this revision)
 
-1. **Per-number limit.** The Problem Statement specifies 1 SMS per number per minute; the
-   earlier validation docs said 1 per 5 seconds. Aligned to **1 per 60 seconds** (Step 6).
-2. **IP throttling was missing.** The Problem Statement lists 5 requests per IP per
-   minute, but no validation step implemented it. Added as **Step 1**.
-3. **Step 0 logic.** The earlier pseudocode combined host, platform and proxy with AND, so
-   a proxy from the correct host was allowed. Rewritten so a proxy is always blocked and a
-   non-iOS request from an unauthorized host is always blocked.
-4. **reCAPTCHA scoring.** The Problem Statement describes score-based validation; the
-   earlier docs only checked token validity. Added a minimum-score threshold (Step 2).
-5. **Country validation pseudocode** referenced `platform` without receiving it and
-   omitted the bulk-SMS skip. Both added (Step 4).
-6. **SMS text pseudocode** omitted the `EXCLUDED_NUMBERS` check described in the prose.
-   Added (Step 5).
-7. **Source rate limit counter ordering.** The minute counter was incremented before the
-   hour check, so hour-capped requests still consumed minute slots. Both limits are now
-   checked before either is incremented (Step 7).
-8. **Country-based rate limits** from the Problem Statement were absent. Added an
-   optional per-country override to the source limits (Step 7).
-9. **"Sliding window" wording.** The PDF claimed sliding-window tracking for Step 6 but
-   the pseudocode shows a fixed-window counter. The document now describes the window
-   without asserting a sliding implementation.
-10. **Step count and heading levels.** The overview said "7 steps" for a 0–7 pipeline and
-    the Markdown heading depth grew with each step (up to ten `#`). Fixed to a 0–8
-    pipeline with consistent `###` headings.
+Addresses Gaps A to H from `Problem_Statement.md` and adds the distinctive controls:
+
+1. Step 0 derives platform from attestation, not the header (Gap A).
+2. Step 1 adds signed session tokens, fingerprints and nonce replay protection (Gap B).
+3. Step 2 adds subnet and ASN throttles with datacenter caps (Gap B).
+4. All rate limits use an atomic Lua check-and-increment (Gap F).
+5. Step 5 adds prefix cost classes, sequential and narrow-range detection, and HLR lookup
+   (Gaps C and D).
+6. Bulk and test-server bypasses require an internal service credential (Gap G).
+7. Step 7 risk score engine with tiered responses (Gap H).
+8. Step 8 progressive backoff and a daily cap per number.
+9. Step 9 adaptive multipliers from a traffic baseline and conversion ratio.
+10. Step 10 global circuit breaker on count and spend with elevated and emergency modes
+    (Gap E).
+11. Step 11 channel downgrade, delayed sends and uniform responses (Gap H).
+12. Verification feedback loop and auto-denylist.
+
+### v1 reconciliation (previous revision)
+
+1. Per-number limit aligned to 1 SMS per minute per the problem statement.
+2. IP throttling step added (5 per IP per minute).
+3. Step 0 logic corrected so a proxy is always blocked.
+4. reCAPTCHA gained a minimum-score threshold.
+5. Country validation pseudocode received the platform and bulk parameters it used.
+6. Text validation pseudocode gained the `EXCLUDED_NUMBERS` check.
+7. Source rate limit checks both windows before consuming either.
+8. Per-country overrides added to source limits.
+9. "Sliding window" wording removed where the implementation is a fixed window.
+10. Step count and Markdown heading levels fixed.
