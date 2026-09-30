@@ -123,9 +123,19 @@ before any platform-based exemption is applied.
     recognised, licensed) → platform `android`.
   - Attestation present but invalid → **blocked**. A forged or replayed attestation is a
     stronger abuse signal than none at all.
-  - No attestation → platform `web`. The request then has no exemptions and must pass
-    reCAPTCHA and origin validation like any browser.
-- `HTTP_HOST` must be `example.com` unless the trusted platform is `ios` or `android`.
+  - No attestation and no app version header → platform `web`. The request has no
+    exemptions and must pass reCAPTCHA and origin validation like any browser.
+  - No attestation but an app version header (`X-App-Version`) → a **legacy app**.
+    Attestation is mandatory for app clients; legacy apps are tolerated only during the
+    30-day rollout grace window (`ATTESTATION_GRACE_UNTIL`):
+    - During the window: platform `legacy_app`. Skips reCAPTCHA and origin (an app cannot
+      run a browser challenge) but carries a `legacy_app` risk signal (+20) and can never
+      be better than the `delay` tier.
+    - After the window: **blocked** with an `update_required` response. This response is
+      safe to reveal because it says nothing about the number and only reaches clients
+      that identify themselves as an app.
+- `HTTP_HOST` must be `example.com` unless the trusted platform is `ios`, `android` or
+  `legacy_app`.
 
 **Examples:**
 
@@ -136,6 +146,7 @@ before any platform-based exemption is applied.
 | someotherhost.com | ios             | none        | no    | web              | Blocked (spoofed platform, unauthorized host) |
 | someotherhost.com | ios             | valid       | no    | ios              | Allowed (attested app)       |
 | someotherhost.com | ios             | invalid     | no    | -                | Blocked (bad attestation)    |
+| someotherhost.com | ios + X-App-Version | none    | no    | legacy_app       | Allowed with +20 risk during grace window; blocked (update required) after |
 
 ```
 // Pseudocode for Validation Step 0
@@ -145,6 +156,11 @@ function establishTrustedPlatform(request):
         if not result.valid:
             return "invalid"
         return result.platform                // "ios" or "android"
+    if request.headers.has("X-App-Version"):
+        if now() < ATTESTATION_GRACE_UNTIL:
+            request.signals.add("legacy_app")
+            return "legacy_app"
+        return "update_required"
     return "web"
 
 function connectionAndClientIntegrityCheck(request):
@@ -154,6 +170,9 @@ function connectionAndClientIntegrityCheck(request):
     request.trustedPlatform = establishTrustedPlatform(request)
     if request.trustedPlatform == "invalid":
         logSecurity("attestation_failed", request)
+        return false
+    if request.trustedPlatform == "update_required":
+        request.updateRequired = true        // Step 11 returns the update_required response
         return false
 
     if request.host != "example.com" and request.trustedPlatform == "web":
@@ -183,7 +202,8 @@ stored with its first-seen time; **fingerprint age** is a risk signal.
 **Rules:**
 
 - Every OTP request must carry a valid, unexpired session token whose platform matches
-  the trusted platform from Step 0.
+  the trusted platform from Step 0. Legacy apps obtain a token from `/session` without
+  attestation during the grace window only.
 - Each request carries a fresh nonce; a nonce seen before is a replay and is blocked.
 - A session may make at most **3 OTP requests per 10 minutes**.
 
@@ -252,8 +272,9 @@ function validateNetworkThrottles(request):
 
 **Purpose:** Prevent automated submissions from browsers.
 
-Applies when the **trusted** platform is `web` (which now includes any app request that
-did not attest). The token must be valid and its score must meet `RECAPTCHA_MIN_SCORE`
+Applies when the **trusted** platform is `web`. Attested apps and legacy apps (grace
+window only) skip it, since an app cannot render a browser challenge; legacy apps pay for
+the skip with a +20 risk signal in Step 7. The token must be valid and its score must meet `RECAPTCHA_MIN_SCORE`
 (default 0.5; raised to 0.7 in `elevated` mode). The raw score is also passed to the risk
 engine.
 
@@ -298,7 +319,8 @@ dead (**Gap C**, **Gap D**), and produce number-related risk signals.
 
 - Remove `+` and leading zeros; parse to E.164; reject unparseable numbers.
 - The country code must be in the allowed list.
-- Oman (`968`) is blocked unless the trusted platform is `ios` or `android`.
+- Oman (`968`) is blocked unless the trusted platform is `ios` or `android`. Legacy apps
+  are not exempt.
 - Bulk SMS skips the country check **only** when the request carries a valid internal
   service credential (mTLS or a signed service token); the bulk flag alone is not enough
   (**Gap G**).
@@ -417,6 +439,7 @@ attacker cannot cheaply fake, and choose a graded response (**Gap H**).
 | Geo mismatch: IP country != number country | +10                                      |
 | `sequential_number`, `narrow_range_burst` | +15 each                                  |
 | `elevated_prefix`, `unknown_prefix`, `voip_number` | +10 each                         |
+| `legacy_app` (no attestation, grace window) | +20, and tier is never better than `delay` |
 | Number previously verified               | -20                                        |
 | Fingerprint with verified history         | -15                                        |
 
@@ -456,7 +479,7 @@ function computeRiskScore(request):
     for sig in request.signals:
         s += { "sequential_number": 15, "narrow_range_burst": 15,
                "elevated_prefix": 10, "unknown_prefix": 10, "voip_number": 10,
-               "challenge_passed": -20 }.get(sig, 0)
+               "legacy_app": 20, "challenge_passed": -20 }.get(sig, 0)
     if reputation.get("num:" + request.mobile).verified > 0: s -= 20
     if reputation.get("fp:" + request.fingerprint).verified > 0: s -= 15
     return clamp(s, 0, 100)
@@ -474,6 +497,8 @@ function decideTier(score, mode):
 function riskDecision(request):
     request.riskScore = computeRiskScore(request)
     request.tier = decideTier(request.riskScore, operatingMode())
+    if request.trustedPlatform == "legacy_app" and request.tier == "allow":
+        request.tier = "delay"
     if request.tier == "block":
         return false
     if request.tier == "challenge":
@@ -634,10 +659,12 @@ write the audit record, and answer the client without revealing what happened.
 
 **Uniform response** (**Gap H**): every outcome from Step 1 onward returns HTTP 200 with
 the same body, `{"status": "ok", "message": "If this number is eligible, a code has been
-sent."}`, and the handler pads its processing time to a constant floor so that timing does
-not reveal which step rejected the request. The one exception is the `challenge` tier on
-web, which returns the challenge to render. Step 0 failures return a generic 403 because
-those clients are not legitimate users.
+sent."}`, and the handler pads its processing time to a constant floor of
+`RESPONSE_FLOOR_MS = 400` (above the p95 of the full pipeline including the HLR call) so
+that timing does not reveal which step rejected the request. Two exceptions: the
+`challenge` tier on web returns the challenge to render, and a legacy app past the grace
+window receives `update_required`. Step 0 proxy and attestation failures return a
+generic 403 because those clients are not legitimate users.
 
 ```
 // Pseudocode for Validation Step 11
@@ -723,7 +750,8 @@ function onOtpFailedOrTimeout(logId):
 
 ```
 function processOtpRequest(request):
-    if not connectionAndClientIntegrityCheck(request):        return forbidden()     // Step 0
+    if not connectionAndClientIntegrityCheck(request):
+        return updateRequiredResponse() if request.updateRequired else forbidden()     // Step 0
     if not validateSession(request):                          return uniformResponse() // Step 1
     if not validateNetworkThrottles(request):                 return uniformResponse() // Step 2
     if not validateReCaptcha(request, recaptchaMinScore()):   return uniformResponse() // Step 3
@@ -748,6 +776,24 @@ on the verify-to-send ratio decides between allow, delay, challenge, downgrade a
 with progressive backoff, adaptive caps and a global circuit breaker bounding the damage
 of anything that gets through. Uniform responses stop the pipeline from being probed.
 
+## Default Values and the Reasoning Behind Them
+
+All thresholds are configuration, but the defaults below are deliberate choices and
+should be changed only with evidence from the dashboards.
+
+| Setting                          | Default | Reason                                                                 |
+|----------------------------------|---------|------------------------------------------------------------------------|
+| Risk tier boundaries             | 20 / 40 / 60 / 80 | Even bands. A clean web user scores under 15; one strong abuse signal alone (+25) lands in `delay`, never `block`; blocking needs three or more independent signals. |
+| Conversion penalty threshold     | 0.3, min 20 sends | Legitimate OTP conversion runs 70 to 90 %. Anything under 30 % is not a bad UX day, it is a flood. 20 sends keeps a single user's typos from triggering it. |
+| Auto-denylist threshold          | 0.1, min 50 sends, 24 h | Under 10 % on 50 sends has no legitimate explanation. 24 hours limits the blast radius of a shared NAT or carrier-grade NAT being denylisted. |
+| Circuit breaker soft / hard      | 80 % / 100 % of hourly budget | 80 % leaves room for the elevated mode to take effect before the hard cap. The hourly budget itself should be set to 2x the p99 legitimate hourly volume from the last quarter. |
+| reCAPTCHA minimum score          | 0.5 normal, 0.7 elevated | Google's documented midpoint; 0.7 in elevated mode trades some friction for protection only while under attack. |
+| Apps without attestation         | 30-day grace as `legacy_app` (+20 risk, `delay` at best), then blocked with `update_required` | Attestation is mandatory; a permanent exemption would recreate Gap A. A fixed grace window with a forced-update cutoff is the standard mobile rollout pattern and gives users a clear action. |
+| Response time floor              | 400 ms | Above the pipeline p95 including HLR, so early rejects and full sends are indistinguishable by timing. |
+| Per-number daily cap             | 5      | A real user who fails to receive a code retries two or three times; five covers a bad network day. |
+| Session OTP requests             | 3 per 10 min | Matches a normal resend flow with one retry to spare. |
+| Subnet / datacenter ASN caps     | 30 / 50 per minute | A residential /24 rarely produces more than a handful of registrations per minute; datacenter ranges should produce almost none. |
+
 ## Change Log
 
 ### v2 (this revision)
@@ -768,6 +814,8 @@ Addresses Gaps A to H from `Problem_Statement.md` and adds the distinctive contr
     (Gap E).
 11. Step 11 channel downgrade, delayed sends and uniform responses (Gap H).
 12. Verification feedback loop and auto-denylist.
+13. Attestation made mandatory for apps with a 30-day legacy grace window, and default
+    values fixed with rationale (see "Default Values").
 
 ### v1 reconciliation (previous revision)
 
