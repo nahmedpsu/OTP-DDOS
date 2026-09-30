@@ -88,7 +88,7 @@ class Config:
     tier_bounds: tuple = (20, 40, 60, 80)
     elevated_shift: int = 10
 
-    adaptive_reduction_spares_allow_tier: bool = True   # the reduced cap rations delay/downgrade tiers, not clean traffic
+    adaptive_reduction_spares_known_good: bool = True   # the reduced cap never rations clients with verified history
     per_number_base_window: int = 60
     per_number_max_window: int = 3600
     per_number_daily_cap: int = 5

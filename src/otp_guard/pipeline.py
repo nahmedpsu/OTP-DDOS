@@ -465,15 +465,20 @@ class Pipeline:
         return True
 
     # ---------- Step 9 ----------
-    def effective_limit(self, source, sl, period, platform, cc, tier="allow"):
+    def is_known_good(self, req):
+        """A client that has verified a code before: its fingerprint has verified history or the
+        number is trusted. A low risk score alone is not enough; an attacker can buy that."""
+        return self.rep.get("fp:" + req.fingerprint).verified > 0 or self.rep.is_trusted("num:" + req.mobile)
+
+    def effective_limit(self, source, sl, period, platform, cc, known_good=False):
         base = sl.get("per_country", {}).get(cc, {}).get(f"{period}_{platform}")
         if base is None:
             base = sl.get(f"{period}_{platform}")
         if base is None:
             return None
         m = self.adaptive.multiplier(source, platform, cc)
-        if tier == "allow" and self.cfg.adaptive_reduction_spares_allow_tier:
-            m = max(m, 1.0)                      # a tightened cap rations risky tiers, not clean traffic
+        if known_good and self.cfg.adaptive_reduction_spares_known_good:
+            m = max(m, 1.0)                      # a tightened cap rations unknown clients, not returning ones
         return max(1, int(-(-base * m // 1)))   # ceil
 
     def step9_source_limits(self, req):
@@ -481,8 +486,9 @@ class Pipeline:
         if sl is None:
             return True
         p, cc = req.trusted_platform, req.country_code
-        minute_cap = self.effective_limit(req.source, sl, "per_minute", p, cc, req.tier)
-        hour_cap = self.effective_limit(req.source, sl, "per_hour", p, cc, req.tier)
+        kg = self.is_known_good(req)
+        minute_cap = self.effective_limit(req.source, sl, "per_minute", p, cc, kg)
+        hour_cap = self.effective_limit(req.source, sl, "per_hour", p, cc, kg)
         if minute_cap is None or hour_cap is None:
             return True
         limits = [self.rl(f"sms_cap_per_minute_{p}:limit", f"{req.source}:{cc}", (minute_cap, 60)),

@@ -596,11 +596,14 @@ baseline job:
 
 Both windows are checked before either counter is consumed.
 
-**Risk-aware rationing.** When the multiplier is below 1 the reduced cap applies to the
-`delay` and `downgrade` tiers only; `allow`-tier requests keep the base cap. Under attack
-the scarce capacity is then taken from the traffic that looks risky, not from a returning
-user on a known browser. The evaluation (`results/evaluation.md`, cap sweep) shows what
-this is worth.
+**Rationing spares known-good clients only.** When the multiplier is below 1 the reduced
+cap applies to every client except those with verified history (a fingerprint that has
+verified a code before, or a trusted number); those keep the base cap. A low risk score
+is deliberately not enough to be spared: an attacker with pre-aged fingerprints and farmed
+CAPTCHA scores has a low score too, and an earlier version that spared the `allow` tier
+let exactly that attacker through while rationing real new users (`results/evaluation.md`).
+For a registration endpoint almost every real user is also unknown, so under a diluting
+attack the cap is blunt for them; the cap sweep quantifies the trade-off.
 
 **Example base limits:**
 

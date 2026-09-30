@@ -371,7 +371,6 @@ def test_step8_progressive_backoff_and_daily_cap(h):
 # ---------------- Step 9 ----------------
 
 def test_step9_web_per_minute_cap_and_adaptive_tightening(h):
-    h.cfg.adaptive_reduction_spares_allow_tier = False     # measure the raw multiplier on clean traffic
     offset = [0]
     def burst(n):
         base = offset[0]; offset[0] += 100
@@ -540,18 +539,23 @@ def test_v1_feature_profile_reproduces_the_original_gaps():
 
 # ---------------- Risk-aware adaptive cap, instant verification ----------------
 
-def test_reduced_adaptive_cap_spares_allow_tier(h):
-    """Multiplier 0.25 on a web cap of 8: risky (delay) traffic gets 2/min, clean traffic keeps 8."""
+def test_reduced_adaptive_cap_spares_known_good_clients_only(h):
+    """Multiplier 0.25 on a web cap of 8: unknown clients get 2/min even with a low score;
+    a fingerprint with verified history keeps the base cap (minus what was already used)."""
     h.cfg.source_limits["App/RegisterOTP"]["per_minute_web"] = 8
     h.cfg.source_limits["App/RegisterOTP"]["per_hour_web"] = 800
     h.cfg.source_limits["App/RegisterOTP"]["per_country"] = {}
+    tok, fp = h.session(age_hours=48)
+    r = h.send(h.web_request(session=tok, ip="198.69.1.1", mobile="966501111111"))
+    h.p.feedback.verify("s1", r.log_id, h.p.feedback.code_for(r.log_id))       # fp now has verified history
+    h.clock.advance(61)
     h.p.store.set("adaptive:mult:App/RegisterOTP:web:966", 0.25)
-    risky = sum(h.send(h.web_request(session=h.session(age_hours=0)[0], ip=f"198.70.{i}.1",
-                                     mobile=f"96650{(i * 7654321) % 10**7:07d}")).rejected_at is None for i in range(6))
-    clean = sum(h.send(h.web_request(ip=f"198.71.{i}.1", mobile=f"96655{(i * 7654321) % 10**7:07d}")).rejected_at is None
-                for i in range(10))
-    # the counter is shared: the rationed tier used 2 of the base 8, clean traffic gets the remaining 6
-    assert risky == 2 and clean == 6
+    unknown_low_score = sum(h.send(h.web_request(session=h.session(age_hours=48)[0], ip=f"198.70.{i}.1",
+                                                 mobile=f"96650{(i * 7654321) % 10**7:07d}")).rejected_at is None for i in range(6))
+    tok2, _ = h.session(fingerprint=fp, age_hours=None)
+    known = sum(h.send(h.web_request(session=tok2, ip=f"198.71.{i}.1", mobile=f"96655{(i * 7654321) % 10**7:07d}")).rejected_at is None
+                for i in range(3))                                              # session cap is 3
+    assert unknown_low_score == 2 and known == 3
 
 
 def test_instant_verification_is_a_signal(h):
