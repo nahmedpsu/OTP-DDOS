@@ -45,6 +45,7 @@ class IpInfo:
     asn_type: str = "residential"
     is_datacenter: bool = False
     is_tor: bool = False
+    is_proxy: bool = False
     abuse_score: float = 0.0
     country: str = "SA"
 

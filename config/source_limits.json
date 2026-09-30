@@ -1,0 +1,9 @@
+{
+  "App/RegisterOTP": {
+    "per_minute_ios": 10, "per_hour_ios": 100,
+    "per_minute_web": 5, "per_hour_web": 50,
+    "per_minute_android": 8, "per_hour_android": 80,
+    "per_minute_legacy_app": 8, "per_hour_legacy_app": 80,
+    "per_country": {"968": {"per_minute_web": 2, "per_hour_web": 20}}
+  }
+}

@@ -35,8 +35,9 @@ same uniform response (Step 11).
 | 11   | Channel selection, send, log, uniform response   | Audit, **Gap H** enumeration             |
 | FB   | Verification feedback loop (async)               | Conversion-based reputation              |
 
-A runnable reference implementation of this pipeline lives in `otp_guard/`, and
-`tests/` exercises every step and the attack scenarios. See `README.md`.
+An implementation of this pipeline lives in `otp_guard/` with real vendor adapters in
+`otp_guard/providers/` and an HTTP API in `otp_guard/api.py`; `tests/` exercises every
+step on both the memory and Redis backends, plus the attack scenarios. See `README.md`.
 
 ## Shared Components
 

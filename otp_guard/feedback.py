@@ -47,6 +47,17 @@ class FeedbackLoop:
             self.on_failed_or_timeout(log_id)
         return False
 
+    def verify_by_session(self, session_id, mobile, code):
+        """Verify without a log id: the client only knows its session and the number it used.
+        A session with no pending code still consumes a verify attempt and gets the same answer."""
+        from .pipeline import Pipeline
+        mobile = Pipeline.parse_e164(mobile or "") or ""
+        log_id = self.p.store.get(f"otp:latest:{session_id}:{mobile}")
+        if log_id is None:
+            self.p.rl("otp:verify:session", session_id, self.p.cfg.verify_session_limit).try_acquire()
+            return False
+        return self.verify(session_id, int(log_id), code)
+
     def code_for(self, log_id):
         """Test helper: what the user would have received."""
         return self.p.store.get(self._key(log_id))["code"]

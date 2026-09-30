@@ -518,6 +518,7 @@ class Pipeline:
         for key in record["reputation_keys"]:
             self.rep.incr(key, "sent")
         self.store.set("num_last_send:" + req.mobile, self.clock.now(), 86400)
+        self.store.set(f"otp:latest:{req.session_id}:{req.mobile}", log_id, self.cfg.otp_ttl)
         self.feedback.on_sent(log_id)
         return Response(200, dict(UNIFORM_BODY), tier=req.tier, channel=channel, log_id=log_id, risk_score=req.risk_score)
 

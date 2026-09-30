@@ -1,0 +1,21 @@
+[
+  {"prefix": "96650", "class": "standard", "cost_units": 1},
+  {"prefix": "96653", "class": "standard", "cost_units": 1},
+  {"prefix": "96654", "class": "standard", "cost_units": 1},
+  {"prefix": "96655", "class": "standard", "cost_units": 1},
+  {"prefix": "96656", "class": "standard", "cost_units": 1},
+  {"prefix": "96658", "class": "standard", "cost_units": 1},
+  {"prefix": "96659", "class": "standard", "cost_units": 1},
+  {"prefix": "97150", "class": "standard", "cost_units": 1},
+  {"prefix": "97152", "class": "standard", "cost_units": 1},
+  {"prefix": "97154", "class": "standard", "cost_units": 1},
+  {"prefix": "97155", "class": "standard", "cost_units": 1},
+  {"prefix": "97156", "class": "standard", "cost_units": 1},
+  {"prefix": "97158", "class": "standard", "cost_units": 1},
+  {"prefix": "9655",  "class": "standard", "cost_units": 1},
+  {"prefix": "9656",  "class": "standard", "cost_units": 1},
+  {"prefix": "9659",  "class": "standard", "cost_units": 1},
+  {"prefix": "9687",  "class": "standard", "cost_units": 1},
+  {"prefix": "9689",  "class": "standard", "cost_units": 1},
+  {"prefix": "9669",  "class": "premium",  "cost_units": 12}
+]

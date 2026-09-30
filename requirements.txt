@@ -1,0 +1,9 @@
+# runtime
+redis>=5
+requests>=2.31
+fastapi>=0.110
+uvicorn>=0.27
+cryptography>=41
+cbor2>=5
+# optional: Google service-account tokens for Play Integrity and FCM
+google-auth>=2.29
