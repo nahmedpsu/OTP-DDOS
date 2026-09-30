@@ -35,6 +35,9 @@ same uniform response (Step 11).
 | 11   | Channel selection, send, log, uniform response   | Audit, **Gap H** enumeration             |
 | FB   | Verification feedback loop (async)               | Conversion-based reputation              |
 
+A runnable reference implementation of this pipeline lives in `otp_guard/`, and
+`tests/` exercises every step and the attack scenarios. See `README.md`.
+
 ## Shared Components
 
 ### Atomic RateLimit
@@ -93,12 +96,18 @@ rolling 24-hour window (implemented as hourly buckets). Reputation keys:
 | `prefix`      | `prefix:96650`                |
 | `number`      | `num:966501234567`            |
 
+The ratio counts only **resolved** sends (verified, or failed after five wrong attempts
+or the 10-minute timeout). Sends still inside their verification window are excluded, so
+a burst of fresh legitimate traffic, such as a campaign launch, is neutral until the
+codes have had time to be entered.
+
 ```
 function conversionRatio(repKey, minSample = 20):
     r = reputation.get(repKey)
-    if r.sent < minSample:
+    resolved = r.verified + r.failed
+    if resolved < minSample:
         return null                          // not enough data: neutral
-    return r.verified / r.sent
+    return r.verified / resolved
 ```
 
 ### Operating Mode
@@ -620,7 +629,10 @@ spend is the sum of prefix cost units from Step 5b.
 | ≥ 100 %                      | `emergency`    | SMS only for score < 10; everything else downgraded or blocked; page on-call |
 
 The mode is recomputed on every request from the current hourly counters and resets when
-the window rolls. A manual **kill switch** (`SMS_KILL_SWITCH`) forces `emergency`.
+the window rolls. Automatic `emergency` mode still lets the cleanest traffic (score < 10)
+use SMS, so an attack cannot turn the breaker into a denial of service against real users.
+The manual **kill switch** (`SMS_KILL_SWITCH`) is different: it forces `emergency` and
+stops **all** SMS; every request is downgraded to a non-SMS channel or dropped.
 
 ```
 // Pseudocode for Validation Step 10
@@ -636,7 +648,7 @@ function circuitBreaker(request):
     setOperatingMode(mode)
     if mode != "normal": alertOnCall("SMS circuit breaker: " + mode, util)
 
-    if mode == "emergency" and request.riskScore >= 10:
+    if SMS_KILL_SWITCH or (mode == "emergency" and request.riskScore >= 10):
         request.tier = "downgrade"           // Step 11 will try a non-SMS channel
     return true
 ```
@@ -712,9 +724,10 @@ Legitimate users verify the code they asked for; flooders never do.
 **Derived effects:**
 
 - `conversionRatio(key)` feeds Step 7 on every later request from that key. A ratio
-  under 0.3 with at least 20 sends adds up to 25 risk points.
-- Keys whose ratio drops below 0.1 with at least 50 sends are placed on a 24-hour
-  **auto-denylist** and blocked at Step 2 (network keys) or Step 1 (fingerprints).
+  under 0.3 with at least 20 resolved sends adds up to 25 risk points.
+- Keys whose ratio drops below 0.1 with at least 50 resolved sends are placed on a
+  24-hour **auto-denylist** and blocked at Step 2 (network keys) or Step 1
+  (fingerprints).
 - A verified number is marked trusted: it skips HLR lookup and receives -20 risk points.
 - The adaptive limits job (Step 9) reads conversion per (source, platform, country).
 
@@ -733,7 +746,8 @@ function onOtpFailedOrTimeout(logId):
     for key in reputationKeysOf(send):
         reputation.incr(key, "failed")
         r = reputation.get(key)
-        if r.sent >= 50 and r.verified / r.sent < 0.1:
+        resolved = r.verified + r.failed
+        if resolved >= 50 and r.verified / resolved < 0.1:
             denylist.add(key, ttl = 86400)
 ```
 
@@ -784,8 +798,8 @@ should be changed only with evidence from the dashboards.
 | Setting                          | Default | Reason                                                                 |
 |----------------------------------|---------|------------------------------------------------------------------------|
 | Risk tier boundaries             | 20 / 40 / 60 / 80 | Even bands. A clean web user scores under 15; one strong abuse signal alone (+25) lands in `delay`, never `block`; blocking needs three or more independent signals. |
-| Conversion penalty threshold     | 0.3, min 20 sends | Legitimate OTP conversion runs 70 to 90 %. Anything under 30 % is not a bad UX day, it is a flood. 20 sends keeps a single user's typos from triggering it. |
-| Auto-denylist threshold          | 0.1, min 50 sends, 24 h | Under 10 % on 50 sends has no legitimate explanation. 24 hours limits the blast radius of a shared NAT or carrier-grade NAT being denylisted. |
+| Conversion penalty threshold     | 0.3, min 20 resolved sends | Legitimate OTP conversion runs 70 to 90 %. Anything under 30 % is not a bad UX day, it is a flood. 20 resolved sends keeps a single user's typos from triggering it, and counting only resolved sends keeps a fresh burst of real traffic neutral. |
+| Auto-denylist threshold          | 0.1, min 50 resolved sends, 24 h | Under 10 % on 50 resolved sends has no legitimate explanation. 24 hours limits the blast radius of a shared NAT or carrier-grade NAT being denylisted. |
 | Circuit breaker soft / hard      | 80 % / 100 % of hourly budget | 80 % leaves room for the elevated mode to take effect before the hard cap. The hourly budget itself should be set to 2x the p99 legitimate hourly volume from the last quarter. |
 | reCAPTCHA minimum score          | 0.5 normal, 0.7 elevated | Google's documented midpoint; 0.7 in elevated mode trades some friction for protection only while under attack. |
 | Apps without attestation         | 30-day grace as `legacy_app` (+20 risk, `delay` at best), then blocked with `update_required` | Attestation is mandatory; a permanent exemption would recreate Gap A. A fixed grace window with a forced-update cutoff is the standard mobile rollout pattern and gives users a clear action. |
