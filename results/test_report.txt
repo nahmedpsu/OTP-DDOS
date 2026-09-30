@@ -1,6 +1,6 @@
-........................................................................ [ 43%]
-........................................................................ [ 86%]
-......................                                                   [100%]
+........................................................................ [ 41%]
+........................................................................ [ 82%]
+...............................                                          [100%]
 =============================== warnings summary ===============================
 ../../../usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1
   /usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
@@ -8,6 +8,9 @@
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
 ==================================== PASSES ====================================
+____________________ test_synthetic_logs_replay_round_trip _____________________
+----------------------------- Captured stdout call -----------------------------
+wrote 319 rows to /tmp/pytest-of-root/pytest-22/test_synthetic_logs_replay_rou0/logs.csv
 _______ test_recaptcha_rejects_wrong_action_or_hostname_and_fails_closed _______
 ------------------------------ Captured log call -------------------------------
 WARNING  otp_guard.providers:recaptcha.py:24 recaptcha unavailable: down
@@ -39,6 +42,7 @@ PASSED tests/integration/test_api.py::test_attested_app_session_uses_one_time_ch
 PASSED tests/integration/test_api.py::test_legacy_app_session_only_during_grace
 PASSED tests/integration/test_api.py::test_client_ip_ignores_forged_forwarded_for_from_untrusted_peer
 PASSED tests/integration/test_api.py::test_internal_timeout_tick_requires_credential
+PASSED tests/integration/test_replay.py::test_synthetic_logs_replay_round_trip
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[memory]
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[redis]
 PASSED tests/integration/test_scenarios.py::test_rotating_ips_across_datacenter_asn[memory]
@@ -57,6 +61,10 @@ PASSED tests/integration/test_scenarios.py::test_verify_endpoint_session_rate_li
 PASSED tests/integration/test_scenarios.py::test_verify_endpoint_session_rate_limit[redis]
 PASSED tests/integration/test_scenarios.py::test_marketing_campaign_override_lifts_cap[memory]
 PASSED tests/integration/test_scenarios.py::test_marketing_campaign_override_lifts_cap[redis]
+PASSED tests/unit/test_evaluation.py::test_containment_definition
+PASSED tests/unit/test_evaluation.py::test_mean_ci_and_ks
+PASSED tests/unit/test_evaluation.py::test_simulation_runs_and_is_deterministic
+PASSED tests/unit/test_evaluation.py::test_v1_leaks_more_than_v2_for_datacenter_attacker
 PASSED tests/unit/test_factory.py::test_empty_env_builds_all_fakes_and_reports_them
 PASSED tests/unit/test_factory.py::test_full_env_wires_real_adapters
 PASSED tests/unit/test_factory.py::test_kill_switch_and_grace_parsing
@@ -196,4 +204,8 @@ PASSED tests/unit/test_steps.py::test_datacenter_asn_is_denylisted_but_residenti
 PASSED tests/unit/test_steps.py::test_sustained_flood_bonus_reaches_challenge_without_other_signals[memory]
 PASSED tests/unit/test_steps.py::test_sustained_flood_bonus_reaches_challenge_without_other_signals[redis]
 PASSED tests/unit/test_steps.py::test_v1_feature_profile_reproduces_the_original_gaps
-166 passed, 1 warning in 30.11s
+PASSED tests/unit/test_steps.py::test_reduced_adaptive_cap_spares_known_good_clients_only[memory]
+PASSED tests/unit/test_steps.py::test_reduced_adaptive_cap_spares_known_good_clients_only[redis]
+PASSED tests/unit/test_steps.py::test_instant_verification_is_a_signal[memory]
+PASSED tests/unit/test_steps.py::test_instant_verification_is_a_signal[redis]
+175 passed, 1 warning in 22.31s

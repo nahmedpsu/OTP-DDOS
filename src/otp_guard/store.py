@@ -130,6 +130,9 @@ class MemoryStore:
             v = self._live(key)
             return dict(v[0]) if v is not None else {}
 
+    def hgetall_many(self, keys):
+        return [self.hgetall(k) for k in keys]
+
     # ---- sorted sets ----
     def zadd(self, key, score, member, ttl=None):
         with self.lock:
@@ -207,6 +210,7 @@ class RedisStore:
         self.clock = clock or SystemClock()
         self._acquire = self.r.register_script(LUA_TRY_ACQUIRE)
         self._acquire_all = self.r.register_script(LUA_TRY_ACQUIRE_ALL)
+        self.round_trips = 0        # one per method call below; a pipeline counts once
 
     @staticmethod
     def _enc(v):
@@ -224,30 +228,39 @@ class RedisStore:
             return raw
 
     def get(self, key):
+        self.round_trips += 1
         return self._dec(self.r.get(key))
 
     def set(self, key, val, ttl=None):
+        self.round_trips += 1
         self.r.set(key, self._enc(val), ex=int(ttl) if ttl else None)
 
     def setnx(self, key, val, ttl=None):
+        self.round_trips += 1
         return bool(self.r.set(key, self._enc(val), ex=int(ttl) if ttl else None, nx=True))
 
     def incr(self, key, by=1):
+        self.round_trips += 1
         return self.r.incrby(key, by)
 
     def decr(self, key):
+        self.round_trips += 1
         return self.r.decr(key)
 
     def expire(self, key, ttl):
+        self.round_trips += 1
         self.r.expire(key, int(ttl))
 
     def exists(self, key):
+        self.round_trips += 1
         return bool(self.r.exists(key))
 
     def delete(self, key):
+        self.round_trips += 1
         self.r.delete(key)
 
     def hincrby(self, key, field, by=1, ttl=None):
+        self.round_trips += 1
         pipe = self.r.pipeline()
         pipe.hincrby(key, field, by)
         if ttl:
@@ -255,9 +268,19 @@ class RedisStore:
         return pipe.execute()[0]
 
     def hgetall(self, key):
+        self.round_trips += 1
         return {(k.decode() if isinstance(k, bytes) else k): int(v) for k, v in self.r.hgetall(key).items()}
 
+    def hgetall_many(self, keys):
+        self.round_trips += 1
+        """One round trip for many hashes (the 24 hourly reputation buckets of a key)."""
+        pipe = self.r.pipeline(transaction=False)
+        for k in keys:
+            pipe.hgetall(k)
+        return [{(k.decode() if isinstance(k, bytes) else k): int(v) for k, v in h.items()} for h in pipe.execute()]
+
     def zadd(self, key, score, member, ttl=None):
+        self.round_trips += 1
         pipe = self.r.pipeline()
         pipe.zadd(key, {member: score})
         if ttl:
@@ -265,24 +288,31 @@ class RedisStore:
         pipe.execute()
 
     def zrangebyscore(self, key, lo, hi):
+        self.round_trips += 1
         return [m.decode() if isinstance(m, bytes) else m for m in self.r.zrangebyscore(key, lo, hi)]
 
     def zrem(self, key, member):
+        self.round_trips += 1
         self.r.zrem(key, member)
 
     def zremrangebyscore(self, key, lo, hi):
+        self.round_trips += 1
         self.r.zremrangebyscore(key, lo, hi)
 
     def sadd(self, key, member):
+        self.round_trips += 1
         self.r.sadd(key, member)
 
     def sismember(self, key, member):
+        self.round_trips += 1
         return bool(self.r.sismember(key, member))
 
     def try_acquire(self, key, max_count, window):
+        self.round_trips += 1
         return int(self._acquire(keys=[key], args=[int(max_count), int(window)])) == 1
 
     def try_acquire_all(self, specs):
+        self.round_trips += 1
         if not specs:
             return True
         args = []

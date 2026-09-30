@@ -7,8 +7,10 @@
     POST /internal/timeouts/run -> feedback loop tick          needs X-Service-Credential
     GET  /healthz               -> mode and wiring report
 """
+import asyncio
 import ipaddress
 import secrets
+import time
 
 from fastapi import FastAPI, Header, Request as HttpRequest
 from fastapi.responses import JSONResponse
@@ -72,6 +74,20 @@ def create_app(pipeline, report=None, trusted_proxies=(), debug_outcome_header=F
     p = pipeline
     proxies = [ipaddress.ip_network(x, strict=False) for x in trusted_proxies]
 
+    @app.middleware("http")
+    async def response_floor(request: HttpRequest, call_next):
+        """Constant-time floor for /otp/request, measured from the moment the request reaches the
+        app (before body parsing) to just before the response is written. Async sleep, so a padded
+        request does not hold a worker thread."""
+        started = time.perf_counter()
+        response = await call_next(request)
+        floor = p.cfg.response_floor_ms / 1000.0
+        if floor > 0 and request.url.path == "/otp/request" and response.status_code == 200:
+            remaining = floor - (time.perf_counter() - started)
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+        return response
+
     def bearer(auth):
         return auth.split(" ", 1)[1] if auth and auth.lower().startswith("bearer ") else None
 
@@ -130,7 +146,7 @@ def create_app(pipeline, report=None, trusted_proxies=(), debug_outcome_header=F
             challenge_proof=body.challenge_proof, is_bulk=body.is_bulk, service_credential=x_service_credential,
             headers={"User-Agent": http.headers.get("user-agent", "")},
         )
-        resp = p.process(req)
+        resp = p.process(req, apply_floor=False)        # the middleware above applies the floor
         headers = {}
         if debug_outcome_header:
             import json as _json

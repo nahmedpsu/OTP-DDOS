@@ -46,6 +46,7 @@ class Request:
     prefix: object = None
     signals: list = field(default_factory=list)
     timings_ms: dict = field(default_factory=dict)
+    rep_cache: dict = field(default_factory=dict)
     risk_score: float = None
     tier: str = None
     requires_challenge: bool = False
@@ -193,6 +194,17 @@ class Pipeline:
         return ["ip:" + req.ip, "subnet:" + subnet_of(req.ip), "asn:" + req.ip_info.asn,
                 "fp:" + req.fingerprint, "sess:" + req.session_id, "country:" + req.country_code,
                 "prefix:" + req.prefix.id, "num:" + req.mobile]
+
+    def rep_get(self, req, key):
+        """Reputation read memoised for the life of one request (the same keys are read in several steps)."""
+        if key not in req.rep_cache:
+            req.rep_cache[key] = self.rep.get(key)
+        return req.rep_cache[key]
+
+    def rep_prefetch(self, req, keys):
+        missing = [k for k in keys if k not in req.rep_cache]
+        if missing:
+            req.rep_cache.update(self.rep.get_many(missing))
 
     def previous_session_requests(self, sid):
         return max(0, self.rl("otp:session", sid, self.cfg.session_otp_limit).current_count() - 1)
@@ -342,7 +354,7 @@ class Pipeline:
             req.signals.append("narrow_range_burst")
 
         # 5d HLR
-        if self.rep.get("num:" + mobile).verified == 0 and not self.rep.is_trusted("num:" + mobile):
+        if self.rep_get(req, "num:" + mobile).verified == 0 and not self.rep.is_trusted("num:" + mobile):
             cache_key = "hlr:" + mobile
             hlr = self.store.get(cache_key)
             if hlr is None:
@@ -381,8 +393,9 @@ class Pipeline:
         worst, flood, instant = 1.0, False, False
         keys = ["ip:" + req.ip, "subnet:" + subnet_of(req.ip), "asn:" + req.ip_info.asn,
                 "fp:" + req.fingerprint, "country:" + req.country_code, "prefix:" + req.prefix.id]
+        self.rep_prefetch(req, keys + ["num:" + req.mobile])
         for key in (keys if self.on("feedback") else []):
-            r = self.rep.get(key)
+            r = self.rep_get(req, key)
             resolved = r.verified + r.failed
             ratio = r.verified / resolved if resolved >= self.cfg.conversion_min_sample else None
             if ratio is not None:
@@ -407,9 +420,9 @@ class Pipeline:
             s += w["geo_mismatch"]
         for sig in req.signals:
             s += w.get(sig, 0)
-        if self.rep.get("num:" + req.mobile).verified > 0 or self.rep.is_trusted("num:" + req.mobile):
+        if self.rep_get(req, "num:" + req.mobile).verified > 0 or self.rep.is_trusted("num:" + req.mobile):
             s += w["verified_number"]
-        if self.rep.get("fp:" + req.fingerprint).verified > 0:
+        if self.rep_get(req, "fp:" + req.fingerprint).verified > 0:
             s += w["verified_fingerprint"]
         return max(0.0, min(100.0, s))
 
@@ -449,7 +462,7 @@ class Pipeline:
 
     # ---------- Step 8 ----------
     def step8_per_number(self, req):
-        sends = self.rep.get("num:" + req.mobile).sent
+        sends = self.rep_get(req, "num:" + req.mobile).sent
         base, cap = self.cfg.per_number_base_window, self.cfg.per_number_max_window
         if self.on("backoff"):
             if sends >= self.cfg.per_number_daily_cap:
@@ -468,7 +481,7 @@ class Pipeline:
     def is_known_good(self, req):
         """A client that has verified a code before: its fingerprint has verified history or the
         number is trusted. A low risk score alone is not enough; an attacker can buy that."""
-        return self.rep.get("fp:" + req.fingerprint).verified > 0 or self.rep.is_trusted("num:" + req.mobile)
+        return self.rep_get(req, "fp:" + req.fingerprint).verified > 0 or self.rep.is_trusted("num:" + req.mobile)
 
     def effective_limit(self, source, sl, period, platform, cc, known_good=False):
         base = sl.get("per_country", {}).get(cc, {}).get(f"{period}_{platform}")
@@ -570,16 +583,23 @@ class Pipeline:
         return Response(200, dict(UNIFORM_BODY), tier=req.tier, channel=channel, log_id=log_id, risk_score=req.risk_score)
 
     # ---------- Full pipeline ----------
-    def process(self, req):
-        start = time.perf_counter()
+    def process(self, req, apply_floor=True, started=None):
+        """apply_floor pads every 200 response to cfg.response_floor_ms measured from `started`
+        (default: now). The API passes its own handler-entry time so parsing and response
+        building are inside the floor too."""
+        start = started if started is not None else time.perf_counter()
         resp = self._process(req)
+        if apply_floor:
+            self.pad_to_floor(resp, start)
+        resp.elapsed_ms = (time.perf_counter() - start) * 1000
+        return resp
+
+    def pad_to_floor(self, resp, start):
         floor = self.cfg.response_floor_ms / 1000.0
         if resp.http_status == 200 and floor > 0:
             remaining = floor - (time.perf_counter() - start)
             if remaining > 0:
                 time.sleep(remaining)
-        resp.elapsed_ms = (time.perf_counter() - start) * 1000
-        return resp
 
     def _timed(self, req, name, fn):
         t0 = time.perf_counter()

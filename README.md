@@ -78,7 +78,7 @@ config/                         sample prefix cost table and source limits
 
 ```
 make install        # pip install -e ".[dev,google]"
-make test           # 159 tests, every pipeline test on both memory and Redis backends
+make test           # every pipeline test on both memory and Redis backends; see results/test_report.txt for the count
 make scenarios      # the attack scenarios, written to results/
 make analysis       # single-seed walkthrough of attacker profiles and use cases
 make evaluation     # the 30-seed evaluation (about 5 minutes on 4 cores)
@@ -110,29 +110,57 @@ Full detail, pseudocode and the reasoning behind every default: `docs/sms_valida
 
 ## Headline results
 
-From `results/analysis.md`. Attackers send 30 requests a minute for 20 minutes with every
-source cap lifted, so the numbers show what the other layers do. v1 is the original design
-run through the same code with the v2 features switched off.
+From `results/evaluation.md`: 30 seeds per attacker with randomised pool size, attack rate and
+CAPTCHA class; 20 requests/min of legitimate traffic in the background; means with 95 %
+confidence intervals in the full tables. v1 is the original design run through the same code
+with the v2 layers switched off. "Behavioural only" lifts the source caps; "with adaptive
+caps" runs them at 3x the legitimate rate.
 
-| Attacker | v1 SMS / 20 min | v2 SMS / 20 min | v2 sustained after detection |
-|---|---:|---:|---:|
-| One client, random numbers | 100 | 6 | 0 |
-| Datacenter IP rotation | 600 | 0 | 0 |
-| Residential proxy pool, fresh fingerprints, good reCAPTCHA | 600 | 300 | 0 |
-| Residential pool, unique fingerprints pre-aged two hours | 600 | 390 | 0 |
-| Sequential numbers | 600 | 300 | 0 |
-| Premium-prefix pumping, spoofed platform header | 600 | 0 | 0 |
+| Attacker (600 requests over 20 min) | v1 leaked | v2 leaked, behavioural only | v2 leaked, with caps | v2 legit delivered, with caps |
+|---|---:|---:|---:|---:|
+| One client, random numbers | 29 | 2 | 2 | 99.5 % |
+| Datacenter rotation, fresh fingerprints | 410 | 0 | 0 | 99.5 % |
+| Premium-prefix pumping | 597 | 0 | 0 | 99.5 % |
+| Spoofed platform header | 601 | 0 | 0 | 99.5 % |
+| Residential pool, bot CAPTCHA scores | 212 | 212 | 154 | 85.6 % |
+| Residential pool, reused browser profile | 593 | 352 | 171 | 68.9 % |
+| Sequential numbers | 597 | 379 | 200 | 65.4 % |
+| Residential pool, farmed CAPTCHA, fresh or pre-aged fingerprints | 593 | **593** | 245 | **47.4 %** |
 
-The residential cases show the one exposure that remains: attack rate times OTP timeout,
-until the verification feedback loop has data. Section D of the analysis shows that
-timeout is the only knob that moves it.
+The last row is the honest headline. Against a residential attacker with human-like
+CAPTCHA scores at a rate comparable to legitimate traffic, no behavioural signal separates
+the two, and the volume cap that does contain it refuses half of the real sign-ups. The
+trade-off is measurable and is the design's main open problem:
 
-Legitimate traffic (section B): normal, retrying, roaming, corporate, legacy-app and
-returning users are all delivered. Two situations need configuration, both measured:
-a campaign burst needs the source cap lifted (12.5 % delivered otherwise), and carriers
-behind carrier-grade NAT need their ASN listed (50 % delivered otherwise). A real user on
-an ISP that is hosting an attack gets one interactive challenge, then delivery; the ISP is
-never denylisted.
+![leakage vs friction](results/tradeoff.png)
+
+Other things the evaluation established:
+
+- **Which layer stops what** (ablation): the per-session cap is the single most valuable
+  layer; removing it raises leakage for five of nine attackers. The risk engine stops
+  datacenter rotation, number intelligence stops premium pumping. Removing the feedback loop
+  changes nothing under dilution, which is the point of weak spot 1.
+- **Weights**: raising the fresh-fingerprint weight to 40 stops the farm attacker outright
+  but challenges 60 % of legitimate new users; the tier boundaries scaled to 0.6 cut leakage
+  by a third for a 21 % challenge rate. OTP timeout has no effect on this attacker because
+  the conversion signal never fires.
+- **Adaptive attackers**: a colluding carrier that verifies its own codes on a listed range
+  is held to 20 SMS by the per-prefix cap whether it verifies instantly or with human-like
+  delay; on an unlisted range it is indistinguishable from real traffic. Low-and-slow attacks
+  under the dilution bound leak in full.
+- **Economics**: premium pumping is profitable under v1 (14 to 38 USD per 20 minutes at 20
+  to 50 % revenue share) and loses money under v2.
+- **Performance** (`results/performance.md`, real Redis, one uvicorn process on 4 vCPUs):
+  a full send costs 7.2 ms p50 / 14.1 ms p99 in
+  process and 40 Redis round trips. Over HTTP at concurrency 16 the service
+  sustains 135 requests/s without the floor and 39 with it. With the 400 ms
+  floor, Kolmogorov-Smirnov tests cannot tell a sent code from a number-related rejection
+  (p = 0.37 and 0.72); without it every pair is distinguishable (p < 10⁻⁶). A
+  residual ~1 ms difference remains for requests that present no session at all (p < 0.01),
+  which tells an attacker nothing they did not already know.
+
+`results/analysis.md` is an earlier single-seed walkthrough without background traffic; it
+overstates containment for residential attackers and is kept for the use-case tables.
 
 ## Status and artifact availability
 

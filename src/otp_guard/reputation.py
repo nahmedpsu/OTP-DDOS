@@ -24,16 +24,25 @@ class ReputationStore:
         self.store.hincrby(f"rep:{key}:{self._hour()}", field, by, ttl=self.BUCKET_TTL)
 
     def get(self, key):
+        return self.get_many([key])[key]
+
+    def get_many(self, keys):
+        """All 24 buckets of every key in one store round trip."""
         h = self._hour()
-        total = Rep()
-        for hour in range(h - 23, h + 1):
-            b = self.store.hgetall(f"rep:{key}:{hour}")
-            if b:
-                total.sent += b.get("sent", 0)
-                total.verified += b.get("verified", 0)
-                total.failed += b.get("failed", 0)
-                total.fast_verified += b.get("fast_verified", 0)
-        return total
+        hours = range(h - 23, h + 1)
+        flat = [f"rep:{k}:{hour}" for k in keys for hour in hours]
+        buckets = self.store.hgetall_many(flat)
+        out = {}
+        for i, k in enumerate(keys):
+            total = Rep()
+            for b in buckets[i * 24:(i + 1) * 24]:
+                if b:
+                    total.sent += b.get("sent", 0)
+                    total.verified += b.get("verified", 0)
+                    total.failed += b.get("failed", 0)
+                    total.fast_verified += b.get("fast_verified", 0)
+            out[k] = total
+        return out
 
     def conversion_ratio(self, key, min_sample):
         """verified / resolved, where resolved = verified + failed (failed includes timeouts).

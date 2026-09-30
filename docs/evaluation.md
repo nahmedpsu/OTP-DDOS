@@ -29,8 +29,18 @@ These are measured, not hypothetical. Each one is in `results/evaluation.md` or
    prefix table is indistinguishable from real traffic.** Only per-prefix caps, the spend
    breaker and a maintained prefix table limit it (section D).
 8. **A challenge solver who buys interactive-challenge solutions receives the -20
-   `challenge_passed` credit** and can move from `challenge` back to `delay`. Section D
-   measures it; the mitigation is to cap the credit per key or session.
+   `challenge_passed` credit** and can move from `challenge` back to `delay`. In the
+   evaluation this attacker never even reaches the challenge tier (dilution keeps its score
+   low), so the credit is not what leaks; the mitigation still is to cap the credit per
+   session.
+9. **The feedback loop contributes nothing against diluted attacks.** The ablation shows
+   removing it changes leakage for no attacker profile; every containment it produced in
+   the single-seed walkthrough (`results/analysis.md`) came from runs with no legitimate
+   background traffic. Its value is confined to attacks that dominate a key.
+10. **The per-session cap is the most valuable single layer** in the ablation, which is
+    also the layer an attacker defeats most cheaply (a new session per request costs one
+    call to `/session`). The evaluation's attackers already do this; the cap's value is
+    against the naive ones.
 
 ## Metric definitions
 
@@ -102,3 +112,26 @@ parameter, its value and its source, and marks assumptions. The important ones:
   attacker (the worst case for dilution).
 - **Attackers do not adapt within a run**, apart from the adaptive profiles in section D.
 - **The confidence intervals cover seed-to-seed variation only**, not calibration error.
+
+## Performance and timing-leak method
+
+`scripts/load_test.py` runs against a real `redis-server` on the same 4-vCPU container.
+Phase 1 drives the pipeline in process with 3 000 mixed requests (55 % sent, 15 % no
+session, 15 % disallowed country, 15 % repeated number) and records per-step and
+end-to-end latency percentiles, plus Redis round trips and commands per request from
+`INFO commandstats`. Phase 2 serves the API with uvicorn (one process, sync handlers in
+the default thread pool) and fires 800 requests at concurrency 16, once with the 400 ms
+response floor and once with it disabled as the control. The server labels each response
+with its true outcome through an opt-in debug header that exists only for this test.
+Client-observed latencies are compared across outcomes with two-sample
+Kolmogorov-Smirnov tests: a p-value below 0.05 means an attacker measuring only response
+time could tell those two outcomes apart. Results: `results/performance.md`.
+
+Measured: with the floor, sent versus the disallowed-country and repeated-number
+rejections are indistinguishable (p = 0.37, 0.72); without it every
+pair is distinguishable. The no-session rejection stays about 1 ms faster than the rest
+(p < 0.01) because it does no work before the floor and less framework work after it. It
+reveals only that no session was presented, which the sender knows; closing it would take
+jitter or equalised work in Step 1. Throughput: one uvicorn process, sync handlers,
+135 requests/s at concurrency 16 without the floor; run several workers in production.
+
