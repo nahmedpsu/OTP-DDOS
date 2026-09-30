@@ -449,6 +449,7 @@ attacker cannot cheaply fake, and choose a graded response (**Gap H**).
 | Session OTP request count                | +5 per previous request in this session    |
 | Conversion ratio of IP / subnet / ASN / fingerprint / country / prefix | `max over keys of (0.3 - ratio) / 0.3 * 25`, only when ratio < 0.3 |
 | Sustained flood on any of those keys: ≥ 100 resolved sends and ratio < 0.1 | +15 (`sustained_flood`) |
+| Instant verification on a key: ≥ 20 verified and > 80 % of them within 5 s of the send | +15 (`instant_verification`): codes entered by a machine, the tell of a colluding carrier verifying its own pumped traffic |
 | Geo mismatch: IP country != number country | +10                                      |
 | `sequential_number`, `narrow_range_burst` | +15 each                                  |
 | `elevated_prefix`, `unknown_prefix`, `voip_number` | +10 each                         |
@@ -468,6 +469,13 @@ attacker cannot cheaply fake, and choose a graded response (**Gap H**).
 
 In `elevated` mode every tier boundary moves down by 10 points. In `emergency` mode only
 `allow` with score < 10 may use SMS; everything else is downgraded or blocked.
+
+**Known limits of the score** (measured in `results/evaluation.md`): a key's conversion
+ratio is diluted by legitimate traffic on the same key, so an attacker below about 1.8
+times the legitimate volume on a country or prefix is not penalised at all; and the
+`challenge_passed` credit can be bought from a solving service. Neither is solved by
+tuning weights; the first is bounded by the adaptive caps and the circuit breaker, the
+second by capping the credit per session.
 
 **A single signal never blocks.** The largest single contribution is the conversion penalty
 (+25), which on its own moves a clean-looking web client only to `delay`, a tier that still
@@ -587,6 +595,12 @@ baseline job:
 - Marketing calendar entries override the multiplier upward for planned campaigns.
 
 Both windows are checked before either counter is consumed.
+
+**Risk-aware rationing.** When the multiplier is below 1 the reduced cap applies to the
+`delay` and `downgrade` tiers only; `allow`-tier requests keep the base cap. Under attack
+the scarce capacity is then taken from the traffic that looks risky, not from a returning
+user on a known browser. The evaluation (`results/evaluation.md`, cap sweep) shows what
+this is worth.
 
 **Example base limits:**
 

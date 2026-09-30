@@ -76,8 +76,11 @@ class FeedbackLoop:
     def on_verified(self, log_id):
         rec = self.p.sms_history[log_id]
         self._finish(log_id)
+        fast = (self.p.clock.now() - float(rec.get("sent_at", 0))) < self.p.cfg.fast_verify_seconds
         for key in rec["reputation_keys"]:
             self.p.rep.incr(key, "verified")
+            if fast:
+                self.p.rep.incr(key, "fast_verified")
         self.p.rep.mark_trusted("num:" + rec["phone_number"])
 
     def on_failed_or_timeout(self, log_id):

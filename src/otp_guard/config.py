@@ -1,6 +1,23 @@
 from dataclasses import dataclass, field
 
 
+def default_weights():
+    """Risk points per signal (Step 7). Every number here is swept in results/evaluation.md."""
+    return {
+        "recaptcha": 25,          # scaled by (1 - score)
+        "datacenter": 15,
+        "abuse": 15,              # scaled by abuse score
+        "fresh_fp_5min": 20,
+        "fresh_fp_1h": 10,
+        "session_repeat": 5,      # per previous request in the session
+        "conversion": 25,         # scaled by shortfall below the threshold
+        "geo_mismatch": 10,
+        "sequential_number": 15, "narrow_range_burst": 15, "elevated_prefix": 10,
+        "unknown_prefix": 10, "voip_number": 10, "legacy_app": 20, "challenge_passed": -20,
+        "verified_number": -20, "verified_fingerprint": -15,
+    }
+
+
 def default_source_limits():
     return {
         "App/RegisterOTP": {
@@ -29,6 +46,7 @@ V1_FEATURES = frozenset()   # the v1 design: header-trusted platform, IP cap, re
 @dataclass
 class Config:
     features: frozenset = ALL_FEATURES
+    weights: dict = field(default_factory=default_weights)
     allowed_domains: tuple = ("admin.example.com", "example.com", "api.example.com", "partner.example.com")
     allowed_country_codes: tuple = ("966", "971", "965", "968")
     excluded_numbers: tuple = ()
@@ -63,9 +81,14 @@ class Config:
     conversion_flood_min_sample: int = 100   # sustained flood on a key: many resolved sends, almost none verified
     conversion_flood_ratio: float = 0.1
     conversion_flood_points: int = 15
+    fast_verify_seconds: float = 5.0         # a code entered this soon after the send was not typed by a person
+    fast_verify_min_verified: int = 20
+    fast_verify_ratio: float = 0.8
+    fast_verify_points: int = 15
     tier_bounds: tuple = (20, 40, 60, 80)
     elevated_shift: int = 10
 
+    adaptive_reduction_spares_allow_tier: bool = True   # the reduced cap rations delay/downgrade tiers, not clean traffic
     per_number_base_window: int = 60
     per_number_max_window: int = 3600
     per_number_daily_cap: int = 5

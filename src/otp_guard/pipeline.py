@@ -45,6 +45,7 @@ class Request:
     country_code: str = None
     prefix: object = None
     signals: list = field(default_factory=list)
+    timings_ms: dict = field(default_factory=dict)
     risk_score: float = None
     tier: str = None
     requires_challenge: bool = False
@@ -62,6 +63,8 @@ class Response:
     log_id: int = None
     risk_score: float = None
     elapsed_ms: float = 0.0
+    timings_ms: dict = None
+    signals: list = None
 
 
 class SessionService:
@@ -361,47 +364,53 @@ class Pipeline:
         return 1 <= len(req.text or "") <= self.cfg.sms_max_len
 
     # ---------- Step 7 ----------
-    SIGNAL_POINTS = {"sequential_number": 15, "narrow_range_burst": 15, "elevated_prefix": 10,
-                     "unknown_prefix": 10, "voip_number": 10, "legacy_app": 20, "challenge_passed": -20}
-
     def compute_risk_score(self, req):
+        w = self.cfg.weights
         s = 0.0
         if req.trusted_platform == "web":
-            s += (1 - (req.recaptcha_score or 0.0)) * 25
+            s += (1 - (req.recaptcha_score or 0.0)) * w["recaptcha"]
         if req.ip_info.is_datacenter:
-            s += 15
-        s += req.ip_info.abuse_score * 15
+            s += w["datacenter"]
+        s += req.ip_info.abuse_score * w["abuse"]
         if req.fingerprint_age_hours < 1 / 12:
-            s += 20
+            s += w["fresh_fp_5min"]
         elif req.fingerprint_age_hours < 1:
-            s += 10
-        s += 5 * self.previous_session_requests(req.session_id)
+            s += w["fresh_fp_1h"]
+        s += w["session_repeat"] * self.previous_session_requests(req.session_id)
 
-        worst, flood = 1.0, False
+        worst, flood, instant = 1.0, False, False
         keys = ["ip:" + req.ip, "subnet:" + subnet_of(req.ip), "asn:" + req.ip_info.asn,
                 "fp:" + req.fingerprint, "country:" + req.country_code, "prefix:" + req.prefix.id]
         for key in (keys if self.on("feedback") else []):
-            ratio = self.rep.conversion_ratio(key, self.cfg.conversion_min_sample)
+            r = self.rep.get(key)
+            resolved = r.verified + r.failed
+            ratio = r.verified / resolved if resolved >= self.cfg.conversion_min_sample else None
             if ratio is not None:
                 worst = min(worst, ratio)
-                r = self.rep.get(key)
-                if (r.verified + r.failed) >= self.cfg.conversion_flood_min_sample and ratio < self.cfg.conversion_flood_ratio:
+                if resolved >= self.cfg.conversion_flood_min_sample and ratio < self.cfg.conversion_flood_ratio:
                     flood = True
+            # codes entered within seconds of the send, nearly every time, are not being typed by people:
+            # the tell of a colluding carrier verifying its own pumped traffic
+            if r.verified >= self.cfg.fast_verify_min_verified and r.fast_verified / r.verified > self.cfg.fast_verify_ratio:
+                instant = True
         th = self.cfg.conversion_penalty_threshold
         if worst < th:
-            s += (th - worst) / th * 25
+            s += (th - worst) / th * w["conversion"]
         if flood:
             req.signals.append("sustained_flood")
             s += self.cfg.conversion_flood_points
+        if instant:
+            req.signals.append("instant_verification")
+            s += self.cfg.fast_verify_points
 
         if req.ip_info.country != COUNTRY_OF_CODE.get(req.country_code, req.ip_info.country):
-            s += 10
+            s += w["geo_mismatch"]
         for sig in req.signals:
-            s += self.SIGNAL_POINTS.get(sig, 0)
+            s += w.get(sig, 0)
         if self.rep.get("num:" + req.mobile).verified > 0 or self.rep.is_trusted("num:" + req.mobile):
-            s -= 20
+            s += w["verified_number"]
         if self.rep.get("fp:" + req.fingerprint).verified > 0:
-            s -= 15
+            s += w["verified_fingerprint"]
         return max(0.0, min(100.0, s))
 
     def decide_tier(self, score, mode):
@@ -456,13 +465,15 @@ class Pipeline:
         return True
 
     # ---------- Step 9 ----------
-    def effective_limit(self, source, sl, period, platform, cc):
+    def effective_limit(self, source, sl, period, platform, cc, tier="allow"):
         base = sl.get("per_country", {}).get(cc, {}).get(f"{period}_{platform}")
         if base is None:
             base = sl.get(f"{period}_{platform}")
         if base is None:
             return None
         m = self.adaptive.multiplier(source, platform, cc)
+        if tier == "allow" and self.cfg.adaptive_reduction_spares_allow_tier:
+            m = max(m, 1.0)                      # a tightened cap rations risky tiers, not clean traffic
         return max(1, int(-(-base * m // 1)))   # ceil
 
     def step9_source_limits(self, req):
@@ -470,8 +481,8 @@ class Pipeline:
         if sl is None:
             return True
         p, cc = req.trusted_platform, req.country_code
-        minute_cap = self.effective_limit(req.source, sl, "per_minute", p, cc)
-        hour_cap = self.effective_limit(req.source, sl, "per_hour", p, cc)
+        minute_cap = self.effective_limit(req.source, sl, "per_minute", p, cc, req.tier)
+        hour_cap = self.effective_limit(req.source, sl, "per_hour", p, cc, req.tier)
         if minute_cap is None or hour_cap is None:
             return True
         limits = [self.rl(f"sms_cap_per_minute_{p}:limit", f"{req.source}:{cc}", (minute_cap, 60)),
@@ -564,34 +575,46 @@ class Pipeline:
         resp.elapsed_ms = (time.perf_counter() - start) * 1000
         return resp
 
-    def _process(self, req):
-        def reject(step):
-            return Response(200, dict(UNIFORM_BODY), rejected_at=step, tier=req.tier, risk_score=req.risk_score)
+    def _timed(self, req, name, fn):
+        t0 = time.perf_counter()
+        try:
+            return fn(req)
+        finally:
+            req.timings_ms[name] = (time.perf_counter() - t0) * 1000
 
-        if not self.step0_connection_and_client_integrity(req):
+    def _process(self, req):
+        def finish(resp):
+            resp.timings_ms = req.timings_ms
+            resp.signals = list(req.signals)
+            return resp
+
+        def reject(step):
+            return finish(Response(200, dict(UNIFORM_BODY), rejected_at=step, tier=req.tier, risk_score=req.risk_score))
+
+        if not self._timed(req, "step0", self.step0_connection_and_client_integrity):
             if req.update_required:
-                return Response(426, {"status": "update_required"}, rejected_at="step0")
-            return Response(403, {"status": "forbidden"}, rejected_at="step0")
-        if not self.step1_session(req):
+                return finish(Response(426, {"status": "update_required"}, rejected_at="step0"))
+            return finish(Response(403, {"status": "forbidden"}, rejected_at="step0"))
+        if not self._timed(req, "step1", self.step1_session):
             return reject("step1")
-        if not self.step2_network_throttles(req):
+        if not self._timed(req, "step2", self.step2_network_throttles):
             return reject("step2")
-        if not self.step3_recaptcha(req):
+        if not self._timed(req, "step3", self.step3_recaptcha):
             return reject("step3")
-        if not self.step4_origin(req):
+        if not self._timed(req, "step4", self.step4_origin):
             return reject("step4")
-        if not self.step5_number(req):
+        if not self._timed(req, "step5", self.step5_number):
             return reject("step5")
-        if not self.step6_text(req):
+        if not self._timed(req, "step6", self.step6_text):
             return reject("step6")
-        if not self.step7_risk(req):
+        if not self._timed(req, "step7", self.step7_risk):
             if req.requires_challenge:
-                return Response(200, {"status": "challenge", "challenge": "interactive_recaptcha"},
-                                rejected_at="step7", tier="challenge", risk_score=req.risk_score)
+                return finish(Response(200, {"status": "challenge", "challenge": "interactive_recaptcha"},
+                                       rejected_at="step7", tier="challenge", risk_score=req.risk_score))
             return reject("step7")
-        if not self.step8_per_number(req):
+        if not self._timed(req, "step8", self.step8_per_number):
             return reject("step8")
-        if not self.step9_source_limits(req):
+        if not self._timed(req, "step9", self.step9_source_limits):
             return reject("step9")
-        self.step10_circuit_breaker(req)
-        return self.step11_log_and_send(req)
+        self._timed(req, "step10", self.step10_circuit_breaker)
+        return finish(self._timed(req, "step11", self.step11_log_and_send))

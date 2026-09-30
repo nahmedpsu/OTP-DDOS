@@ -21,6 +21,9 @@ jobs:
         run: |
           python scripts/run_scenarios.py --out /tmp/results
           python scripts/run_analysis.py --out /tmp/results
+          python scripts/run_evaluation.py --quick --out /tmp/results
+          python scripts/generate_synthetic_logs.py --out /tmp/logs.csv --minutes 8 --attack-start-minute 3
+          python scripts/replay_logs.py --input /tmp/logs.csv
       - name: Pseudocode is in sync with the design
         run: |
           python scripts/extract_pseudocode.py

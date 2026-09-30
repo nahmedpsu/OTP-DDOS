@@ -371,6 +371,7 @@ def test_step8_progressive_backoff_and_daily_cap(h):
 # ---------------- Step 9 ----------------
 
 def test_step9_web_per_minute_cap_and_adaptive_tightening(h):
+    h.cfg.adaptive_reduction_spares_allow_tier = False     # measure the raw multiplier on clean traffic
     offset = [0]
     def burst(n):
         base = offset[0]; offset[0] += 100
@@ -535,3 +536,35 @@ def test_v1_feature_profile_reproduces_the_original_gaps():
     for _ in range(6):
         assert h.send(h.web_request(ip="198.51.100.12")).rejected_at is None
         h.clock.advance(61)
+
+
+# ---------------- Risk-aware adaptive cap, instant verification ----------------
+
+def test_reduced_adaptive_cap_spares_allow_tier(h):
+    """Multiplier 0.25 on a web cap of 8: risky (delay) traffic gets 2/min, clean traffic keeps 8."""
+    h.cfg.source_limits["App/RegisterOTP"]["per_minute_web"] = 8
+    h.cfg.source_limits["App/RegisterOTP"]["per_hour_web"] = 800
+    h.cfg.source_limits["App/RegisterOTP"]["per_country"] = {}
+    h.p.store.set("adaptive:mult:App/RegisterOTP:web:966", 0.25)
+    risky = sum(h.send(h.web_request(session=h.session(age_hours=0)[0], ip=f"198.70.{i}.1",
+                                     mobile=f"96650{(i * 7654321) % 10**7:07d}")).rejected_at is None for i in range(6))
+    clean = sum(h.send(h.web_request(ip=f"198.71.{i}.1", mobile=f"96655{(i * 7654321) % 10**7:07d}")).rejected_at is None
+                for i in range(10))
+    # the counter is shared: the rationed tier used 2 of the base 8, clean traffic gets the remaining 6
+    assert risky == 2 and clean == 6
+
+
+def test_instant_verification_is_a_signal(h):
+    """A colluding carrier enters codes within a second of the send; after 20 such verifications
+    the key carries +15."""
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
+    for i in range(20):
+        tok, _ = h.session(age_hours=3)
+        r = h.send(h.web_request(session=tok, ip=f"198.72.{i}.1", mobile=f"97159{i:07d}"))
+        assert r.channel == "sms"
+        h.clock.advance(1)
+        assert h.p.feedback.verify(h.p.sms_history[r.log_id]["session_id"], r.log_id, h.p.feedback.code_for(r.log_id))
+        h.clock.advance(200)                       # stay clear of the elevated-prefix hourly cap window? no: 20/h
+    h.clock.advance(3600)
+    r = h.send(h.web_request(session=h.session(age_hours=3)[0], ip="198.72.99.1", mobile="971599999999"))
+    assert "instant_verification" in r.signals and r.risk_score >= 15 + 10 + 2.5 - 0.01

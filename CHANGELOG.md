@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.2.0
+
+- Evaluation framework (`src/otp_guard/evaluation/`, `scripts/run_evaluation.py`,
+  `results/evaluation.md`): calibrated synthetic traffic with sources, properly defined
+  metrics (time to containment, leaked before containment, steady-state leakage, total
+  cost including lookups and CAPTCHA, friction), 30 seeds with randomised pool size, rate
+  and CAPTCHA class and 95 % confidence intervals, leave-one-layer-out ablation, weight and
+  boundary sweeps with the leakage-friction trade-off chart, adaptive attackers (verifying
+  pumpers, challenge solvers, low-and-slow), attacker economics.
+- Log replay tool (`scripts/replay_logs.py`, `docs/replay_schema.md`) and a synthetic log
+  generator in the same schema.
+- Load test and timing-leak test against a real Redis (`scripts/load_test.py`,
+  `results/performance.md`): per-step p50/p95/p99, Redis commands per request, KS tests on
+  client-observed latency across outcomes with and without the 400 ms floor.
+- Design changes found by the evaluation: risk weights are configuration; the reduced
+  adaptive cap rations the delay and downgrade tiers and spares clean traffic; the adaptive
+  baseline job counts requests that reach the cap; an instant-verification signal for
+  colluding carriers.
+- `docs/evaluation.md` states the weak spots up front and the limitations; `docs/privacy_and_ethics.md`;
+  `CITATION.cff`; `.zenodo.json`; artifact-availability statement in the README.
+
 ## 2.1.0
 
 - Analysis runner (`scripts/run_analysis.py`, `results/analysis.md`): attacker profiles per

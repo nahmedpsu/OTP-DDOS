@@ -65,7 +65,9 @@ def client_ip(http: HttpRequest, trusted_proxies):
     return peer
 
 
-def create_app(pipeline, report=None, trusted_proxies=()):
+def create_app(pipeline, report=None, trusted_proxies=(), debug_outcome_header=False):
+    """debug_outcome_header=True adds X-Debug-Outcome (server-side outcome and per-step timings) to
+    /otp/request responses. It exists for load tests only; it defeats the uniform response."""
     app = FastAPI(title="OTP Guard")
     p = pipeline
     proxies = [ipaddress.ip_network(x, strict=False) for x in trusted_proxies]
@@ -129,7 +131,12 @@ def create_app(pipeline, report=None, trusted_proxies=()):
             headers={"User-Agent": http.headers.get("user-agent", "")},
         )
         resp = p.process(req)
-        return JSONResponse(resp.body, status_code=resp.http_status)
+        headers = {}
+        if debug_outcome_header:
+            import json as _json
+            headers["X-Debug-Outcome"] = _json.dumps({"rejected_at": resp.rejected_at, "tier": resp.tier,
+                                                      "channel": resp.channel, "timings_ms": resp.timings_ms})
+        return JSONResponse(resp.body, status_code=resp.http_status, headers=headers)
 
     @app.post("/otp/verify")
     def otp_verify(body: VerifyBody, authorization: str | None = Header(default=None)):
@@ -159,7 +166,8 @@ def main():
         raise SystemExit(f"Refusing to start with fake components: {report.fake}")
     for n in report.notes:
         print("wiring:", n)
-    app = create_app(pipeline, report, trusted_proxies=[x for x in os.environ.get("TRUSTED_PROXIES", "").split(",") if x])
+    app = create_app(pipeline, report, trusted_proxies=[x for x in os.environ.get("TRUSTED_PROXIES", "").split(",") if x],
+                     debug_outcome_header=os.environ.get("LOAD_TEST_DEBUG_HEADER", "").lower() in ("1", "true"))
     uvicorn.run(app, host=os.environ.get("BIND", "0.0.0.0"), port=int(os.environ.get("PORT", "8000")))
 
 

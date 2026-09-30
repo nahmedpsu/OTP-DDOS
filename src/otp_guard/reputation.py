@@ -6,6 +6,7 @@ class Rep:
     sent: int = 0
     verified: int = 0
     failed: int = 0
+    fast_verified: int = 0     # verified within cfg.fast_verify_seconds of the send
 
 
 class ReputationStore:
@@ -31,6 +32,7 @@ class ReputationStore:
                 total.sent += b.get("sent", 0)
                 total.verified += b.get("verified", 0)
                 total.failed += b.get("failed", 0)
+                total.fast_verified += b.get("fast_verified", 0)
         return total
 
     def conversion_ratio(self, key, min_sample):
