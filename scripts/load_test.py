@@ -108,7 +108,8 @@ def start_api(floor_ms):
                                                             for plat in ("web", "ios", "android", "legacy_app")}}))
     env = dict(os.environ, PORT=str(API_PORT), REDIS_URL=f"redis://127.0.0.1:{REDIS_PORT}/1", RESPONSE_FLOOR_MS=str(floor_ms),
                LOAD_TEST_DEBUG_HEADER="1", PYTHONPATH=str(ROOT / "src"), PREFIX_TABLE_PATH=str(ROOT / "config" / "prefixes.json"),
-               SOURCE_LIMITS_PATH=str(LIMITS_PATH), ATTESTATION_GRACE_UNTIL="2030-01-01T00:00:00Z", SESSION_HMAC_KEY="load-test-key")
+               SOURCE_LIMITS_PATH=str(LIMITS_PATH), ATTESTATION_GRACE_UNTIL="2030-01-01T00:00:00Z", SESSION_HMAC_KEY="load-test-key",
+               WORKERS=os.environ.get("LOAD_TEST_WORKERS", "4"), ASN_LIMIT_DEFAULT="1000000000", IP_LIMIT_PER_MINUTE="1000000000")
     p = subprocess.Popen([sys.executable, "-m", "otp_guard.api"], env=env, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     import httpx
     for _ in range(100):
@@ -129,6 +130,11 @@ def phase2(n, concurrency, floor_ms, redis_client):
         # sessions are issued by the server; the fake recaptcha in the API has no scores, so patch via the store:
         # instead, use legacy-app sessions (no captcha) which the grace window permits
         client = httpx.Client(base_url=base, timeout=30)
+        local = threading.local()
+        def thread_client():
+            if not hasattr(local, "c"):
+                local.c = httpx.Client(base_url=base, timeout=30)
+            return local.c
         import redis as _redis
         r1 = _redis.Redis(port=REDIS_PORT, db=1)
         def session():
@@ -136,7 +142,8 @@ def phase2(n, concurrency, floor_ms, redis_client):
             r1.set("fp_first_seen:" + fp, json.dumps(time.time() - 7200))      # a browser seen two hours ago
             r = client.post("/session", json={"platform": "android", "fingerprint": fp, "app_version": "3.0"})
             return r.json()["session_token"]
-        toks = [session() for _ in range(64)]
+        # the per-session cap is 3 requests per 10 minutes: one session per three requests
+        toks = [session() for _ in range(n // 3 + 1)]
         nonce = itertools.count(); lock = threading.Lock()
         kinds = ["happy"] * 55 + ["no_session"] * 15 + ["bad_country"] * 15 + ["repeat_number"] * 15
         out = []
@@ -147,9 +154,10 @@ def phase2(n, concurrency, floor_ms, redis_client):
             mobile = {"happy": f"96650{rng.randrange(10**7):07d}", "no_session": "966501234567",
                       "bad_country": f"1415{rng.randrange(10**7):07d}", "repeat_number": "966501234567"}[kind]
             headers = {"X-App-Version": "3.0", "X-Forwarded-For": f"198.{(i >> 8) & 255}.{i & 255}.7"}
-            if kind != "no_session": headers["Authorization"] = "Bearer " + toks[i % len(toks)]
+            if kind != "no_session": headers["Authorization"] = "Bearer " + toks[i // 3]
+            c = thread_client()
             t0 = time.perf_counter()
-            r = client.post("/otp/request", json={"mobile": mobile, "nonce": f"n{nn}"}, headers=headers)
+            r = c.post("/otp/request", json={"mobile": mobile, "nonce": f"n{nn}"}, headers=headers)
             dt = (time.perf_counter() - t0) * 1000
             dbg = json.loads(r.headers.get("x-debug-outcome", "{}"))
             return kind, dbg.get("rejected_at") or "sent", dt, dbg.get("timings_ms") or {}
@@ -171,7 +179,8 @@ def phase2(n, concurrency, floor_ms, redis_client):
                     stat, pv = ks_2samp(by_outcome[a], by_outcome[b])
                     ks[f"{a} vs {b}"] = {"statistic": stat, "p_value": pv, "n_a": len(by_outcome[a]), "n_b": len(by_outcome[b]),
                                          "tost_2ms": tost_mean_diff(by_outcome[a], by_outcome[b], margin=2.0)}
-        return {"requests": n, "concurrency": concurrency, "floor_ms": floor_ms, "wall_s": wall, "throughput_rps": n / wall,
+        return {"requests": n, "concurrency": concurrency, "workers": int(os.environ.get("LOAD_TEST_WORKERS", "4")),
+                "floor_ms": floor_ms, "wall_s": wall, "throughput_rps": n / wall,
                 "throughput_note": ("bounded by concurrency / floor = %.1f req/s, not server capacity" % (concurrency / (floor_ms / 1000.0))) if floor_ms else "server capacity at this concurrency",
                 "pipeline_time_over_floor_fraction": over_floor / n if floor_ms else None,
                 "latency_by_outcome_ms": {k: {"p50": pct(v, 50), "p95": pct(v, 95), "p99": pct(v, 99), "mean": statistics.fmean(v), "n": len(v)} for k, v in by_outcome.items()},
@@ -222,7 +231,7 @@ def write_md(R, path):
         p2 = R[key]
         cov = "" if p2.get("pipeline_time_over_floor_fraction") is None else \
               f" Pipeline processing exceeded the floor in {100 * p2['pipeline_time_over_floor_fraction']:.2f} % of requests (those leak timing)."
-        L += ["", f"## Phase 2: HTTP through uvicorn, {p2['requests']} requests at concurrency {p2['concurrency']}, {title}", "",
+        L += ["", f"## Phase 2: HTTP through uvicorn ({p2.get('workers', 1)} worker processes), {p2['requests']} requests at concurrency {p2['concurrency']}, {title}", "",
               f"Throughput {p2['throughput_rps']:.1f} requests/s over {p2['wall_s']:.1f} s ({p2['throughput_note']}).{cov}", "",
               "| Server-side outcome | n | p50 (ms) | p95 (ms) | p99 (ms) | mean (ms) |", "|---|---:|---:|---:|---:|---:|"]
         for k, v in sorted(p2["latency_by_outcome_ms"].items()):

@@ -11,11 +11,11 @@ table shows what the *other* layers do. `stopped_by` counts where each request e
 |---|---:|---:|---:|---|
 | `naive_single_client`<br>One IP, one session, random numbers | 6 | 11 | 0.3 | step1 594, sent:sms:allow 5, sent:sms:delay 1 |
 | `datacenter_ip_rotation`<br>Fresh IP and fingerprint per request from a hosting ASN abroad | 0 | 0 | 0.0 | step7 600 |
-| `residential_rotation_bot`<br>Residential proxy pool, fresh fingerprint, reCAPTCHA score 0.6 | 67 | 12 | 1.0 | step7 340, no_channel 193, sent:sms:delay 67 |
-| `residential_captcha_farm`<br>Residential proxy pool, fresh fingerprint, reCAPTCHA score 0.9 | 300 | 10 | 0.0 | sent:sms:delay 300, no_channel 210, step7 90 |
-| `residential_aged_unique_fingerprints`<br>Residential pool, unique fingerprints pre-aged 2 h, reCAPTCHA 0.9 | 390 | 13 | 9.0 | sent:sms:allow 300, step7 210, sent:sms:delay 90 |
-| `residential_reused_browser_profile`<br>Residential pool, one real 48-hour-old browser profile reused | 313 | 11 | 1.3 | step1 270, sent:sms:allow 226, sent:sms:delay 87 |
-| `sequential_numbers`<br>Residential pool, numbers 966501000000 upward | 300 | 10 | 0.0 | sent:sms:delay 300, no_channel 300 |
+| `residential_rotation_bot`<br>Residential proxy pool, fresh fingerprint, reCAPTCHA score 0.6 | 25 | 4 | 0.0 | no_channel 391, step7 184, sent:sms:delay 25 |
+| `residential_captcha_farm`<br>Residential proxy pool, fresh fingerprint, reCAPTCHA score 0.9 | 60 | 2 | 0.0 | step7 540, sent:sms:delay 60 |
+| `residential_aged_unique_fingerprints`<br>Residential pool, unique fingerprints pre-aged 2 h, reCAPTCHA 0.9 | 150 | 5 | 0.0 | step7 450, sent:sms:delay 90, sent:sms:allow 60 |
+| `residential_reused_browser_profile`<br>Residential pool, one real 48-hour-old browser profile reused | 73 | 3 | 0.0 | step1 510, sent:sms:allow 47, sent:sms:delay 26 |
+| `sequential_numbers`<br>Residential pool, numbers 966501000000 upward | 60 | 2 | 0.0 | step5 510, sent:sms:delay 60, no_channel 30 |
 | `premium_prefix_pumping`<br>Residential pool, premium-rate prefix 96699 | 0 | 0 | 0.0 | step5 600 |
 | `spoofed_platform_header`<br>Residential pool, HTTP_PLATFORM: ios without attestation | 0 | 0 | 0.0 | step0 600 |
 
@@ -46,11 +46,11 @@ Cost column assumes 0.05 USD per SMS; change with `--sms-unit-cost`.
 |---|---:|---:|---:|---:|---:|---:|
 | `naive_single_client` | 100 | 6 | 300 | 18 | $5.0 | $0.3 |
 | `datacenter_ip_rotation` | 600 | 0 | 1800 | 0 | $30.0 | $0.0 |
-| `residential_rotation_bot` | 600 | 67 | 1800 | 60 | $30.0 | $3.35 |
-| `residential_captcha_farm` | 600 | 300 | 1800 | 0 | $30.0 | $15.0 |
-| `residential_aged_unique_fingerprints` | 600 | 390 | 1800 | 540 | $30.0 | $19.5 |
-| `residential_reused_browser_profile` | 600 | 313 | 1800 | 78 | $30.0 | $15.65 |
-| `sequential_numbers` | 600 | 300 | 1800 | 0 | $30.0 | $15.0 |
+| `residential_rotation_bot` | 600 | 25 | 1800 | 0 | $30.0 | $1.25 |
+| `residential_captcha_farm` | 600 | 60 | 1800 | 0 | $30.0 | $3.0 |
+| `residential_aged_unique_fingerprints` | 600 | 150 | 1800 | 0 | $30.0 | $7.5 |
+| `residential_reused_browser_profile` | 600 | 73 | 1800 | 0 | $30.0 | $3.65 |
+| `sequential_numbers` | 600 | 60 | 1800 | 0 | $30.0 | $3.0 |
 | `premium_prefix_pumping` | 600 | 0 | 1800 | 0 | $30.0 | $0.0 |
 | `spoofed_platform_header` | 600 | 0 | 1800 | 0 | $30.0 | $0.0 |
 
@@ -63,9 +63,9 @@ Hardest attacker (`residential_captcha_farm`) versus campaign delivery, both wit
 | 120 | 20 | 60 | 2 | 100.0 |
 | 120 | 50 | 60 | 2 | 100.0 |
 | 120 | 100 | 60 | 2 | 100.0 |
-| 300 | 20 | 150 | 5 | 100.0 |
-| 300 | 50 | 150 | 5 | 100.0 |
-| 300 | 100 | 150 | 5 | 100.0 |
-| 600 | 20 | 300 | 10 | 100.0 |
-| 600 | 50 | 300 | 10 | 100.0 |
-| 600 | 100 | 300 | 10 | 100.0 |
+| 300 | 20 | 60 | 2 | 100.0 |
+| 300 | 50 | 60 | 2 | 100.0 |
+| 300 | 100 | 60 | 2 | 100.0 |
+| 600 | 20 | 60 | 2 | 100.0 |
+| 600 | 50 | 60 | 2 | 100.0 |
+| 600 | 100 | 60 | 2 | 100.0 |

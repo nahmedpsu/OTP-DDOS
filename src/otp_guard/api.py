@@ -172,19 +172,28 @@ def create_app(pipeline, report=None, trusted_proxies=(), debug_outcome_header=F
     return app
 
 
-def main():
-    """`python -m otp_guard.api` runs the service with uvicorn, configured from the environment."""
+def app_from_env():
+    """uvicorn factory: each worker process builds its own pipeline from the environment. State
+    lives in Redis, so workers share limits, reputation and sessions (set SESSION_HMAC_KEY)."""
     import os
-    import uvicorn
     from .factory import build_pipeline
     pipeline, report = build_pipeline()
     if report.fake and os.environ.get("REQUIRE_REAL_PROVIDERS", "").lower() in ("1", "true", "yes"):
         raise SystemExit(f"Refusing to start with fake components: {report.fake}")
     for n in report.notes:
         print("wiring:", n)
-    app = create_app(pipeline, report, trusted_proxies=[x for x in os.environ.get("TRUSTED_PROXIES", "").split(",") if x],
-                     debug_outcome_header=os.environ.get("LOAD_TEST_DEBUG_HEADER", "").lower() in ("1", "true"))
-    uvicorn.run(app, host=os.environ.get("BIND", "0.0.0.0"), port=int(os.environ.get("PORT", "8000")))
+    return create_app(pipeline, report, trusted_proxies=[x for x in os.environ.get("TRUSTED_PROXIES", "").split(",") if x],
+                      debug_outcome_header=os.environ.get("LOAD_TEST_DEBUG_HEADER", "").lower() in ("1", "true"))
+
+
+def main():
+    """`python -m otp_guard.api` runs the service with uvicorn, configured from the environment.
+    WORKERS (default 1) sets the number of worker processes; the pipeline's own work is a few
+    milliseconds per request, so one worker saturates on the GIL at a few hundred requests/s."""
+    import os
+    import uvicorn
+    uvicorn.run("otp_guard.api:app_from_env", factory=True, host=os.environ.get("BIND", "0.0.0.0"),
+                port=int(os.environ.get("PORT", "8000")), workers=int(os.environ.get("WORKERS", "1")), log_level="warning")
 
 
 if __name__ == "__main__":

@@ -18,16 +18,20 @@ These are measured, not hypothetical. Each one is in `results/evaluation.md` or
 2. **Exposure before the feedback loop has data equals the attack rate times the OTP
    timeout.** With a 10-minute timeout an attacker at 30 requests a minute is paid 300 SMS
    before any conversion signal exists. Only a shorter timeout moves this (section C1).
-3. **A sequential-number walk from many networks is flagged, not stopped.** The
-   narrow-range signal alone lands in the `delay` tier, which still sends.
+3. **A sequential-number walk is now stopped** (66 leaked of 600, every seed contained)
+   because it stays inside one destination block, which the feedback loop denylists. An
+   earlier version of the design leaked 300 of 600 on this attacker; the fix is the block
+   key, not the narrow-range signal, which alone lands in the `delay` tier.
 4. **Carrier-grade NAT delivers only 50 % without configuration** (`CGNAT_ASNS`).
 5. **A campaign burst delivers 12.5 % under the default source caps** unless the cap is
    raised beforehand.
 6. **VPN users are blocked by policy**, as the problem statement asked. That is a product
    decision the design makes visible, not a bug, but it is friction.
-7. **A colluding carrier that submits codes with human-like delay on a range not in the
-   prefix table is indistinguishable from real traffic.** Only per-prefix caps, the spend
-   breaker and a maintained prefix table limit it (section D).
+7. **A colluding carrier that submits codes with human-like delay is indistinguishable
+   from real traffic on any key**, including the destination block (557 of 600 leaked,
+   324 verified fake accounts per run). A carrier that verifies instantly is denylisted
+   as machine-verified by minute 8; one that does not verify is contained by minute
+   10 (section F). The human-like case moves the cost downstream into fake accounts.
 8. **A challenge solver who buys interactive-challenge solutions receives the -20
    `challenge_passed` credit** and can move from `challenge` back to `delay`. In the
    evaluation this attacker never even reaches the challenge tier (dilution keeps its score
@@ -141,11 +145,12 @@ processing exceeded the floor (those leak timing whatever the floor) and labels 
 with-floor throughput for what it is: concurrency divided by the floor, not capacity.
 Results: `results/performance.md`.
 
-Measured: with the floor, sent versus the disallowed-country and repeated-number
-rejections are indistinguishable (p = 0.37, 0.72); without it every
-pair is distinguishable. The no-session rejection stays about 1 ms faster than the rest
-(p < 0.01) because it does no work before the floor and less framework work after it. It
-reveals only that no session was presented, which the sender knows; closing it would take
-jitter or equalised work in Step 1. Throughput: one uvicorn process, sync handlers,
-135 requests/s at concurrency 16 without the floor; run several workers in production.
+Measured with 4 workers and 6000 requests: with the floor, no pair of outcomes is
+distinguishable by KS test (smallest p = 0.07) and every pair is equivalent within 2 ms by
+TOST (largest p = 0.000, largest mean difference 0.32 ms); no request's pipeline time
+exceeded the floor. Without the floor every pair is distinguishable. With one worker at
+concurrency 32 the sent path reached about 650 ms of wall time through GIL contention while
+its pipeline time stayed under 400 ms, and the floor did not hold: the floor must exceed the
+deployment's wall-time p99 under load, which is a worker-count question. Capacity: 303
+requests/s at concurrency 32 on 4 workers with faked vendors.
 

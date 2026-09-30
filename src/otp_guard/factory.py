@@ -56,9 +56,13 @@ def build_config(env):
         ("GLOBAL_SPEND_UNITS_PER_HOUR", "global_spend_units_per_hour", int),
         ("RESPONSE_FLOOR_MS", "response_floor_ms", float),
         ("SMS_PROVIDER", "provider", str),
+        ("ASN_LIMIT_DEFAULT", "asn_limit_default", int),
+        ("IP_LIMIT_PER_MINUTE", "ip_limit_per_minute", int),
     ]:
         if env.get(name):
             setattr(cfg, attr, cast(env[name]))
+    if hasattr(cfg, "ip_limit_per_minute"):
+        cfg.ip_limit = (cfg.ip_limit_per_minute, 60)
     cfg.kill_switch = env.get("SMS_KILL_SWITCH", "").lower() in ("1", "true", "yes", "on")
     cfg.is_test_server = env.get("IS_TEST_SERVER", "").lower() in ("1", "true", "yes", "on")
     cfg.attestation_grace_until = _grace_ts(env.get("ATTESTATION_GRACE_UNTIL"))
