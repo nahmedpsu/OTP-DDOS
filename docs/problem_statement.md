@@ -117,4 +117,4 @@ the attacker cannot cheaply fake.
     blocked requests, so the pipeline cannot be probed and registered numbers cannot be
     enumerated.
 
-The full design is in `SMS_Validation_Process.md`.
+The full design is in `sms_validation_process.md`.

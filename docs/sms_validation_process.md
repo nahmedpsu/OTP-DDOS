@@ -4,7 +4,7 @@
 
 The SMS validation process is a layered security, risk-scoring and rate-limiting pipeline
 that every OTP request passes through before a message is sent. It addresses the original
-OTP flood incident and the evolved attacks described in `Problem_Statement.md`.
+OTP flood incident and the evolved attacks described in `problem_statement.md`.
 
 Two principles drive the design:
 
@@ -35,9 +35,11 @@ same uniform response (Step 11).
 | 11   | Channel selection, send, log, uniform response   | Audit, **Gap H** enumeration             |
 | FB   | Verification feedback loop (async)               | Conversion-based reputation              |
 
-An implementation of this pipeline lives in `otp_guard/` with real vendor adapters in
-`otp_guard/providers/` and an HTTP API in `otp_guard/api.py`; `tests/` exercises every
-step on both the memory and Redis backends, plus the attack scenarios. See `README.md`.
+An implementation of this pipeline lives in `src/otp_guard/` with real vendor adapters
+in `src/otp_guard/providers/` and an HTTP API in `src/otp_guard/api.py`. The pseudocode
+below is extracted per section into `docs/pseudocode/` with a pointer to the implementing
+function; `tests/` exercises every step on both the memory and Redis backends, and
+`results/` records the outcomes. See the repository `README.md`.
 
 ## Shared Components
 
@@ -466,6 +468,15 @@ attacker cannot cheaply fake, and choose a graded response (**Gap H**).
 In `elevated` mode every tier boundary moves down by 10 points. In `emergency` mode only
 `allow` with score < 10 may use SMS; everything else is downgraded or blocked.
 
+**A single signal never blocks.** The largest single contribution is the conversion penalty
+(+25), which on its own moves a clean-looking web client only to `delay`, a tier that still
+sends. That is deliberate: it protects a legitimate country or prefix from a penalty caused
+by someone else's attack. Stopping traffic needs signals to stack, and a distributed
+attacker supplies them by construction: a rotating client has a fresh fingerprint (+20),
+a reused one accumulates its own conversion history, generated numbers trip the pattern
+detectors, and any network key that keeps failing is denylisted outright by the feedback
+loop. `results/scenarios.md` shows both halves of this in the sequential-walk scenario.
+
 ```
 // Pseudocode for Validation Step 7
 function computeRiskScore(request):
@@ -813,7 +824,7 @@ should be changed only with evidence from the dashboards.
 
 ### v2 (this revision)
 
-Addresses Gaps A to H from `Problem_Statement.md` and adds the distinctive controls:
+Addresses Gaps A to H from `problem_statement.md` and adds the distinctive controls:
 
 1. Step 0 derives platform from attestation, not the header (Gap A).
 2. Step 1 adds signed session tokens, fingerprints and nonce replay protection (Gap B).

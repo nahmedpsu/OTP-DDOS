@@ -3,7 +3,7 @@ import itertools
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import Harness
+from otp_guard.testing import Harness
 from otp_guard.api import create_app
 from otp_guard.factory import WiringReport
 

@@ -23,8 +23,12 @@ def run_forever(pipeline, interval=60, baseline_source=None):
         time.sleep(interval)
 
 
-if __name__ == "__main__":
+def main():
     from .factory import build_pipeline
     logging.basicConfig(level=logging.INFO)
     p, _ = build_pipeline()
     run_forever(p)
+
+
+if __name__ == "__main__":
+    main()
