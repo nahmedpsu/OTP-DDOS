@@ -215,8 +215,8 @@ Other things the evaluation established:
   and is not a capacity figure. Timing leak, 6000 requests (3263 sent, 930 no session,
   925 disallowed country, 882 repeated number): with the 400 ms floor no pair of outcomes is
   distinguishable by Kolmogorov-Smirnov test (smallest p = 0.13); equivalence within 2 ms is shown by TOST
-  for 5 of 6 pairs and is borderline (p 0.05 to 0.07, mean difference about 1 ms) for the pairs
-  involving the no-session path; the largest mean difference is 0.97 ms. Pipeline time exceeded the floor in
+  for 5 of 6 pairs; the no-session versus repeated-number pair is borderline (p = 0.06, mean
+  difference 0.90 ms); the largest mean difference is 0.97 ms. Pipeline time exceeded the floor in
   0.08 % of requests. Without the floor every pair is distinguishable (p < 10⁻⁶).
   A single worker at this concurrency does exceed the floor by wall time; size workers so it does not.
 
