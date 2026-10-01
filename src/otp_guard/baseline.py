@@ -7,8 +7,12 @@ AdaptiveLimits.recompute with that observation, the key's conversion ratio and t
 
 The expected rate is the median of the key's per-minute mean for the same hour of the week
 over the last `weeks` weeks; the MAD is the median absolute deviation of those samples. Until
-a key has at least two weekly samples, the trailing 24-hour mean stands in, with 25 % of it as
-the deviation. Hourly samples are written at each hour boundary from the minute counters.
+a key has at least two weekly samples, the mean of the closed hours recorded in the last 24
+(however many there are: one, after the first hour) stands in, with 25 % of it as the deviation;
+with no closed hour at all the job leaves the static cap alone. Hourly samples are written at
+each hour boundary from the minute counters. The job learns from every request that reached
+Step 9, accepted or refused, so a sustained attack raises the profile it learns from: the
+evaluation measures that (section B3).
 """
 import statistics
 
@@ -49,8 +53,11 @@ class BaselineJob:
             mad = statistics.median(abs(s - med) for s in samples)
             return med, max(mad, 0.05 * med, 0.5)
         hour_index = int(now // 3600)
-        trailing = sum(self._hour_sum(key, h) for h in range(hour_index - 24, hour_index))
-        mean = trailing / (24 * 60.0)
+        closed = [self._hour_sum(key, h) for h in range(hour_index - 24, hour_index)
+                  if self.p.store.exists(f"volh:{key}:{h}")]          # only hours that were actually recorded
+        if not closed:
+            return None, None                                        # cold start: no history, the static cap stands
+        mean = sum(closed) / (len(closed) * 60.0)
         if mean <= 0:
             return None, None
         return mean, max(0.25 * mean, 0.5)

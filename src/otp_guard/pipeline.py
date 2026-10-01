@@ -49,6 +49,7 @@ class Request:
     rep_cache: dict = field(default_factory=dict)
     rep_split: dict = field(default_factory=dict)
     number_claims: list = field(default_factory=list)
+    count_stage: int = None            # set by the graded per-block counter (block_count_action = 'graded')
     risk_score: float = None
     tier: str = None
     requires_challenge: bool = False
@@ -344,9 +345,20 @@ class Pipeline:
         prefix = self.svc.prefixes.lookup(mobile)
         req.prefix = prefix
         if self.on("block_count_limit"):
-            # baseline design: a flat per-block daily count, no scoring, no feedback
-            if not self.rl("otp:blockcount", mobile[:self.cfg.destination_block_digits], self.cfg.block_count_limit).try_acquire():
-                return False
+            # baseline design: a flat per-block daily count, no scoring, no feedback. 'refuse' refuses the
+            # (limit+1)th send; 'graded' applies the same two-stage action as a block verdict (challenge,
+            # then non-SMS channels) to first-time clients once the block is over its limit.
+            limit, window = self.cfg.block_count_limit
+            block = mobile[:self.cfg.destination_block_digits]
+            if self.cfg.block_count_action == "refuse":
+                if not self.rl("otp:blockcount", block, (limit, window)).try_acquire():
+                    return False
+            else:
+                counter = self.rl("otp:blockcount", block, (10 ** 9, window))
+                counter.try_acquire()
+                n = counter.current_count()
+                if n > limit:
+                    req.count_stage = 1 if n <= 2 * limit else 2
         if self.on("fine_destination_key") and self.on("feedback") and self.cfg.block_action == "deny" \
                 and self.store.exists("deny:" + self.block_key(mobile)):
             req.signals.append("block_denied")        # a destination block under a hard-deny verdict
@@ -479,22 +491,42 @@ class Pipeline:
             req.signals.append("challenge_passed")
         if not self.on("risk_engine"):
             req.risk_score, req.tier = 0.0, "allow"
-            return True
+            self.apply_block_count(req)
+            return req.tier != "challenge" or self._challenge_outcome(req)
         req.risk_score = self.compute_risk_score(req)
         req.tier = self.decide_tier(req.risk_score, self.mode)
         if req.trusted_platform == "legacy_app" and req.tier == "allow":
             req.tier = "delay"
         self.apply_block_verdict(req)
+        self.apply_block_count(req)
         if req.tier == "block":
             return False
         if req.tier == "challenge":
-            if req.trusted_platform == "web":
-                req.requires_challenge = True
-                return False
-            req.tier = "downgrade"
+            return self._challenge_outcome(req)
+        return True
+
+    def _challenge_outcome(self, req):
+        """A web client is asked to solve the interactive challenge (and retries with the proof); an
+        app client has no challenge surface and is moved to non-SMS channels."""
+        if req.trusted_platform == "web":
+            req.requires_challenge = True
+            return False
+        req.tier = "downgrade"
         return True
 
     TIER_RANK = {"allow": 0, "delay": 1, "challenge": 2, "downgrade": 3, "block": 4}
+
+    def apply_block_count(self, req):
+        """The graded form of the flat per-block counter (cfg.block_count_action = 'graded'): the same
+        actions as a block verdict, so the counter and the sequential tests can be compared on equal
+        terms. Clients with verified history are exempt, as for a verdict."""
+        stage = getattr(req, "count_stage", None)
+        if not stage or self.is_known_good(req):
+            return
+        req.signals.append(f"block_count_stage{stage}")
+        floor = ("delay" if "challenge_passed" in req.signals else "challenge") if stage == 1 else "downgrade"
+        if self.TIER_RANK[req.tier] < self.TIER_RANK[floor]:
+            req.tier = floor
 
     def apply_block_verdict(self, req):
         """Graded action on a destination block under a sequential-test verdict: stage 1 makes the
@@ -508,6 +540,7 @@ class Pipeline:
         if not verdict or self.is_known_good(req):
             return
         req.signals.append(f"block_{verdict['reason']}")
+        req.signals.append(f"block_stage{verdict['stage']}")
         if verdict["stage"] == 1:
             floor = "delay" if "challenge_passed" in req.signals else "challenge"   # solved it: send, with delay
         else:
@@ -626,7 +659,7 @@ class Pipeline:
         a send that would exceed either budget is not made."""
         h = self.current_hour()
         cfg = self.cfg
-        if not cfg.budget_hard_ceiling:
+        if not cfg.budget_hard_ceiling or not self.on("circuit_breaker"):     # the ceiling is part of the breaker layer
             self.store.incr(f"global:sms:count:{h}"); self.store.expire(f"global:sms:count:{h}", 7200)
             self.store.incr(f"global:sms:spend:{h}", req.prefix.cost_units); self.store.expire(f"global:sms:spend:{h}", 7200)
             return True
@@ -665,6 +698,14 @@ class Pipeline:
             "reputation_keys": self.reputation_keys(req), "sent_at": self.clock.now(),
         }
         self.sms_history.put(record)
+        # Every piece of durable state is written before the message is handed to the sender: a
+        # synchronous sender (the default scheduler sends a zero-delay message inline) can report its
+        # result, and a provider can post a receipt, before enqueue() returns.
+        for key in record["reputation_keys"]:
+            self.rep.incr(key, "sent")
+        self.store.set("num_last_send:" + req.mobile, self.clock.now(), 86400)
+        self.store.set(f"otp:latest:{req.session_id}:{req.mobile}", log_id, self.cfg.otp_ttl)
+        self.feedback.on_sent(log_id, code)
 
         delay = 0
         if channel == "sms":
@@ -673,12 +714,6 @@ class Pipeline:
             self.svc.sender.enqueue("sms", req.mobile, message, log_id, delay, self.cfg.provider)
         else:
             self.svc.sender.enqueue(channel, req.mobile, message, log_id, 0)
-
-        for key in record["reputation_keys"]:
-            self.rep.incr(key, "sent")
-        self.store.set("num_last_send:" + req.mobile, self.clock.now(), 86400)
-        self.store.set(f"otp:latest:{req.session_id}:{req.mobile}", log_id, self.cfg.otp_ttl)
-        self.feedback.on_sent(log_id, code)
         if self.cfg.delivery_receipts and getattr(self.svc.sender, "instant_receipts", False):
             self.feedback.on_delivery(log_id, True)   # a fake or receipt-less provider: delivered on send
         return Response(200, dict(UNIFORM_BODY), tier=req.tier, channel=channel, log_id=log_id, risk_score=req.risk_score)

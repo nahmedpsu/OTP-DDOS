@@ -65,16 +65,18 @@ class AttackMetrics:
 
 @dataclass
 class FrictionGroup:
-    """Outcomes for one legitimate population. dispatched: a channel was chosen and the message
-    handed to the sender. delivered: the provider's receipt said delivered. completed: the person
-    entered the code. refused: rejected by a hard step, downgraded with no channel, or
-    undelivered."""
+    """Outcomes for one legitimate population. users: requests offered (counted before the session
+    gate). dispatched: a channel was chosen and the message handed to the sender. delivered: the
+    provider's receipt said delivered. completed: the person entered the code. refused: lost at the
+    gate, rejected by a hard step, downgraded with no channel, or undelivered (refused_by names the
+    stage). Subgroup counters add up to the whole and completed <= delivered <= dispatched <= users."""
     users: int = 0
     dispatched: int = 0
     delivered: int = 0
     completed: int = 0
     challenged: int = 0
     refused: int = 0
+    refused_by: dict = field(default_factory=dict)     # gate | step | no_channel | undelivered -> count
     delayed: int = 0
     added_delay_s_total: float = 0.0
     by_channel: dict = field(default_factory=dict)

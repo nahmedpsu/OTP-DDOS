@@ -1,10 +1,31 @@
 """Verification feedback loop and the OTP verify endpoint's own protections.
 All state lives in the pipeline's store so any instance can verify any code.
 
-A send moves through: sent -> (delivery receipt) -> verified | failed | undelivered.
+State machine of one send (otp:code:<log_id>), every transition an atomic read-modify-write
+(store.update: a lock on the memory store, WATCH/MULTI/EXEC on Redis), so two workers handling
+callbacks for the same message cannot both apply an effect:
+
+    delivery:   none --(positive receipt)--> delivered      first transition wins; a repeated
+                none --(negative receipt)--> failed         positive receipt changes nothing
+                none --(no receipt for receipt_grace_s)--> resolution 'undelivered'
+    resolution: none -> 'failed' (delivered, resolution_timeout_s passed, no code entered)
+                none -> 'undelivered' (failed receipt or no receipt)
+    done:       the code was entered (verified) or exhausted its attempts
+
+Receipt rules (on_delivery): a duplicate positive receipt is ignored (delivered_at is never
+moved); a negative receipt after a positive one is a *conflict*, counted on the entry and
+ignored (the carrier said it delivered; the person may still enter the code); a positive receipt
+after a negative one, or after the grace period resolved the send as undelivered, *reopens* the
+send if the code is still valid: the undelivered count is reversed and the resolution clock
+starts from this receipt (the carrier corrected itself, or delivered late). A receipt for a
+finished or unknown send is ignored.
+
 Only verified and failed feed the conversion ratio and the destination-block tests; an
-undelivered send (no receipt inside the grace period, or a failed one) is counted on its own
-and tells nothing about the person behind the number. Verification speed is clocked from the
+undelivered send tells nothing about the person behind the number. A late verification of a
+send already resolved 'failed' is reclassified: the reputation counts move from failed to
+verified and the block statistic gets the failure increment subtracted (then re-floored). That
+subtraction is exact unless the statistic hit its floor in between, and a verdict already
+issued is not revoked by it: it expires with its own TTL. Verification speed is clocked from the
 receipt. A carrier whose blocks all fail at once is an outage, not a pumper, and the block
 tests are suspended for that carrier while it lasts."""
 import math
@@ -13,7 +34,8 @@ import secrets
 
 class FeedbackLoop:
     TIMEOUTS = "otp:timeouts"
-    VERDICT_LOG = "verdict:log"       # blocks that reached a verdict in the last 24 h
+    VERDICT_LOG = "verdict:log"       # every verdict event of the last 24 h: member "<block>|<stage>|<time>"
+    BLOCK = "blocktest:"              # per-block sequential-test state: counts and the two running statistics
 
     def __init__(self, pipeline):
         self.p = pipeline
@@ -32,7 +54,8 @@ class FeedbackLoop:
         now = self.p.clock.now()
         self.p.store.set(self._key(log_id), {"code": code, "attempts": 0,
                                              "expires": now + cfg.otp_ttl, "done": False, "timed_out": False,
-                                             "resolution": None, "delivery": None, "delivered_at": None},
+                                             "resolution": None, "delivery": None, "delivered_at": None,
+                                             "conflicts": 0},
                          cfg.otp_ttl * 2)
         # reputation resolves resolution_timeout_s after delivery (a late verification is reclassified);
         # the code itself stays valid for otp_ttl. Without receipts the clock runs from the send.
@@ -40,24 +63,58 @@ class FeedbackLoop:
         self.p.store.zadd(self.TIMEOUTS, due, str(log_id))
 
     def on_delivery(self, log_id, ok, at=None):
-        """Delivery receipt from the provider (status callback) or the sender adapter."""
+        """Delivery receipt from the provider (status callback) or the sender adapter. Returns what
+        happened: 'delivered', 'failed', 'duplicate', 'conflict', 'reopened', 'expired' or 'ignored'
+        (see the module docstring for the rules)."""
         cfg = self.p.cfg
         if not cfg.delivery_receipts:
-            return                                           # send-clocked mode ignores receipts
-        entry = self.p.store.get(self._key(log_id))
-        if entry is None or entry["done"] or entry.get("resolution"):
-            return
+            return "ignored"                                 # send-clocked mode ignores receipts
         now = self.p.clock.now()
-        rec = self.p.sms_history[log_id]
-        self._outage_record(rec, "delivered" if ok else "undelivered", now)
-        if ok:
-            entry["delivery"], entry["delivered_at"] = "delivered", (at if at is not None else now)
-            self.p.store.set(self._key(log_id), entry, cfg.otp_ttl * 2)
+        out = {}
+
+        def fn(entry):
+            if entry is None or entry["done"]:
+                out["t"] = "ignored"
+                return None
+            if ok:
+                if entry["delivery"] == "delivered":
+                    out["t"] = "duplicate"                   # the first delivery transition stands
+                    return None
+                if entry["expires"] < now:
+                    out["t"] = "expired"
+                    return None
+                e = dict(entry)
+                e["delivery"], e["delivered_at"] = "delivered", (at if at is not None else now)
+                if e.get("resolution") == "undelivered":    # late or corrected report: reopen
+                    e["resolution"], e["timed_out"] = None, False
+                    out["t"] = "reopened"
+                else:
+                    out["t"] = "delivered"
+                return e
+            if entry["delivery"] == "delivered":
+                out["t"] = "conflict"                        # delivered, then "failed": keep the delivery
+                e = dict(entry); e["conflicts"] = e.get("conflicts", 0) + 1
+                return e
+            if entry["delivery"] == "failed" or entry.get("resolution"):
+                out["t"] = "duplicate"
+                return None
+            e = dict(entry); e["delivery"] = "failed"
+            out["t"] = "failed"
+            return e
+
+        entry, _ = self.p.store.update(self._key(log_id), fn, cfg.otp_ttl * 2)
+        t = out["t"]
+        if t in ("delivered", "reopened"):
+            rec = self.p.sms_history[log_id]
+            self._outage_record(rec, "delivered", now)
+            if t == "reopened":
+                for key in rec["reputation_keys"]:
+                    self.p.rep.incr(key, "undelivered", -1)
             self.p.store.zadd(self.TIMEOUTS, entry["delivered_at"] + min(cfg.resolution_timeout_s, cfg.otp_ttl), str(log_id))
-        else:
-            entry["delivery"] = "failed"
-            self.p.store.set(self._key(log_id), entry, cfg.otp_ttl * 2)
+        elif t == "failed":
+            self._outage_record(self.p.sms_history[log_id], "undelivered", now)
             self._resolve_undelivered(log_id)
+        return t
 
     def run_due_timeouts(self):
         """Called by a scheduler (cron, worker loop) every minute or so."""
@@ -82,11 +139,17 @@ class FeedbackLoop:
         cfg = self.p.cfg
         if not self.p.rl("otp:verify:session", session_id, cfg.verify_session_limit).try_acquire():
             return False
-        entry = self.p.store.get(self._key(log_id))
-        if entry is None or entry["done"] or entry["expires"] < self.p.clock.now():
+        now = self.p.clock.now()
+
+        def fn(entry):
+            if entry is None or entry["done"] or entry["expires"] < now:
+                return None
+            e = dict(entry); e["attempts"] += 1
+            return e
+
+        entry, counted = self.p.store.update(self._key(log_id), fn, cfg.otp_ttl * 2)
+        if not counted:
             return False
-        entry["attempts"] += 1
-        self.p.store.set(self._key(log_id), entry, cfg.otp_ttl * 2)
         if secrets.compare_digest(entry["code"], str(code)):
             self.on_verified(log_id)
             return True
@@ -110,26 +173,35 @@ class FeedbackLoop:
         return self.p.store.get(self._key(log_id))["code"]
 
     def _finish(self, log_id, resolution=None):
-        """resolution None closes the code; 'failed' or 'undelivered' resolves reputation but keeps
-        the code valid until otp_ttl."""
-        entry = self.p.store.get(self._key(log_id))
-        if entry is None or entry["done"]:
-            return None
-        if resolution:
-            entry["resolution"], entry["timed_out"] = resolution, True
-        else:
-            entry["done"] = True
-        self.p.store.set(self._key(log_id), entry, self.p.cfg.otp_ttl * 2)
-        return entry
+        """Atomically claims the transition. resolution None closes the code; 'failed' or
+        'undelivered' resolves reputation but keeps the code valid until otp_ttl. Returns the entry
+        as it was *before* the transition when this call made it, else None (already done, already
+        resolved, or unknown): exactly one of several concurrent callers gets a non-None result."""
+        before = {}
+
+        def fn(entry):
+            if entry is None or entry["done"]:
+                return None
+            if resolution and entry.get("resolution"):
+                return None
+            before["entry"] = entry
+            e = dict(entry)
+            if resolution:
+                e["resolution"], e["timed_out"] = resolution, True
+            else:
+                e["done"] = True
+            return e
+
+        _, changed = self.p.store.update(self._key(log_id), fn, self.p.cfg.otp_ttl * 2)
+        return before["entry"] if changed else None
 
     # ---- reputation effects ----
     def on_verified(self, log_id):
         rec = self.p.sms_history[log_id]
         cfg = self.p.cfg
-        before = self.p.store.get(self._key(log_id)) or {}
-        entry = self._finish(log_id)
-        if entry is None:
-            return                                            # already closed: a duplicate callback
+        before = self._finish(log_id)
+        if before is None:
+            return                                            # already closed: a duplicate or concurrent callback
         earlier = before.get("resolution")                   # already counted: reclassify
         clock_from = before.get("delivered_at") if (cfg.delivery_receipts and before.get("delivered_at") is not None) \
             else float(rec.get("sent_at", 0))
@@ -149,11 +221,8 @@ class FeedbackLoop:
 
     def on_failed_or_timeout(self, log_id, keep_code=False):
         rec = self.p.sms_history[log_id]
-        before = self.p.store.get(self._key(log_id)) or {}
-        if before.get("resolution"):
-            return                                            # already resolved: a duplicate timeout
         if self._finish(log_id, resolution="failed" if keep_code else None) is None:
-            return
+            return                                            # already resolved or closed: a duplicate
         cfg = self.p.cfg
         self._outage_record(rec, "kg_failed" if rec.get("known_good") else "failed", self.p.clock.now())
         suspended = self._outage_active(rec)
@@ -230,71 +299,84 @@ class FeedbackLoop:
                 "fast": math.log(cfg.sprt_attack_fast / cfg.sprt_legit_fast),
                 "slow": math.log((1 - cfg.sprt_attack_fast) / (1 - cfg.sprt_legit_fast))}
 
+    @staticmethod
+    def _empty_block_state(verdicts=0):
+        return {"v": 0, "f": 0, "fv": 0, "conv": 0.0, "speed": 0.0, "verdicts": verdicts}
+
     def _block_event(self, key, verified, fast=False, undo=False):
-        """One resolved send on a destination block, fed to the sequential tests. Counters live apart
-        from the reputation hash so that a verdict restarts them and an outage leaves them untouched.
-        In 'cusum' mode the two statistics are floored at zero after every event (Page's CUSUM), so a
-        block cannot bank goodwill with verified sends and spend it later; in 'sprt' mode the
-        statistics are plain cumulative log-likelihood ratios."""
+        """One resolved send on a destination block, fed to the sequential tests. The block's counts
+        and its two running statistics live in one document updated atomically, so concurrent
+        events from several workers are all counted and the threshold is crossed exactly once; the
+        crossing resets the document and the verdict is issued by the caller that crossed it. The
+        statistics are floored at -block_credit_thresholds x log(threshold) ('cusum'; 0 is Page's
+        CUSUM, which banks nothing) or unbounded ('sprt')."""
         cfg = self.p.cfg
         if "feedback" not in cfg.features:
             return
-        skey = "sprt:" + key
         inc = self._increments()
-        stat = self.p.store.get("cusum:" + key) or {"conv": 0.0, "speed": 0.0}
-        if verified:
-            self.p.store.hincrby(skey, "v", 1, ttl=cfg.denylist_ttl)
-            stat["conv"] += inc["verify"]
-            if fast:
-                self.p.store.hincrby(skey, "fv", 1, ttl=cfg.denylist_ttl)
-                stat["speed"] += inc["fast"]
+        thr = math.log(cfg.sprt_threshold)
+        floor = -cfg.block_credit_thresholds * thr if cfg.block_test == "cusum" else -math.inf
+        out = {}
+
+        def fn(cur):
+            out.clear()                                      # fn may run again after a lost compare-and-set
+            st = dict(cur) if cur else self._empty_block_state()
+            if verified:
+                st["v"] += 1
+                st["conv"] += inc["verify"]
+                if fast:
+                    st["fv"] += 1
+                    st["speed"] += inc["fast"]
+                else:
+                    st["speed"] += inc["slow"]
+                if undo:                                     # a late verification of a send counted as failed
+                    st["f"] = max(0, st["f"] - 1)
+                    st["conv"] -= inc["fail"]
             else:
-                stat["speed"] += inc["slow"]
-            if undo:
-                self.p.store.hincrby(skey, "f", -1, ttl=cfg.denylist_ttl)
-                stat["conv"] -= inc["fail"]
-        else:
-            self.p.store.hincrby(skey, "f", 1, ttl=cfg.denylist_ttl)
-            stat["conv"] += inc["fail"]
-        if cfg.block_test == "cusum":
-            floor = -cfg.block_credit_thresholds * math.log(cfg.sprt_threshold)
-            stat["conv"], stat["speed"] = max(floor, stat["conv"]), max(floor, stat["speed"])
-        self.p.store.set("cusum:" + key, stat, cfg.denylist_ttl)
-        self._sprt_block(key)
+                st["f"] += 1
+                st["conv"] += inc["fail"]
+            st["conv"], st["speed"] = max(floor, st["conv"]), max(floor, st["speed"])
+            conv_hit = "conversion" in cfg.block_tests and st["v"] + st["f"] >= cfg.sprt_min_events and st["conv"] > thr
+            speed_hit = "speed" in cfg.block_tests and st["v"] >= cfg.sprt_min_events and st["speed"] > thr
+            if conv_hit or speed_hit:
+                out["reason"] = "never_verified" if conv_hit else "machine_verified"
+                return self._empty_block_state(st.get("verdicts", 0) + 1)   # the next test starts from zero
+            return st
+
+        self.p.store.update(self.BLOCK + key, fn, cfg.denylist_ttl)
+        if "reason" in out:
+            self._issue_verdict(key, out["reason"])
 
     def block_llr(self, key):
-        """(conversion statistic, speed statistic, counts) for a block."""
-        cfg = self.p.cfg
-        c = self.p.store.hgetall("sprt:" + key)
-        v, f, fv = max(c.get("v", 0), 0), max(c.get("f", 0), 0), max(c.get("fv", 0), 0)
-        if cfg.block_test == "cusum":
-            stat = self.p.store.get("cusum:" + key) or {"conv": 0.0, "speed": 0.0}
-            return stat["conv"], stat["speed"], (v, f, fv)
-        inc = self._increments()
-        return v * inc["verify"] + f * inc["fail"], fv * inc["fast"] + (v - fv) * inc["slow"], (v, f, fv)
+        """(conversion statistic, speed statistic, (verified, failed, fast) counts) for a block."""
+        st = self.p.store.get(self.BLOCK + key) or self._empty_block_state()
+        return st["conv"], st["speed"], (st["v"], st["f"], st["fv"])
 
-    def _sprt_block(self, key):
-        """Sequential probability-ratio tests on a destination block. Two hypothesis pairs:
-        conversion (a flooder's numbers never verify) and verification speed (a machine enters codes
-        within seconds of delivery). A verdict is reached when either log-likelihood ratio exceeds
-        log(sprt_threshold); what the verdict does depends on cfg.block_action."""
+    def _issue_verdict(self, key, reason):
+        """Record one verdict event and apply cfg.block_action: 'deny' is a 24-hour denylist; 'graded'
+        makes the block's first-time clients solve a challenge (stage 1) and, on a second verdict
+        inside block_verdict_ttl, moves them to non-SMS channels (stage 2)."""
         cfg = self.p.cfg
-        conv, speed, (v, f, fv) = self.block_llr(key)
-        thr = math.log(cfg.sprt_threshold)
-        conv_hit = "conversion" in cfg.block_tests and v + f >= cfg.sprt_min_events and conv > thr
-        speed_hit = "speed" in cfg.block_tests and v >= cfg.sprt_min_events and speed > thr
-        if not (conv_hit or speed_hit):
-            return
-        self.p.store.delete("sprt:" + key)                   # the next test starts from zero
-        self.p.store.delete("cusum:" + key)
-        reason = "never_verified" if conv_hit else "machine_verified"
-        self.p.store.zadd(self.VERDICT_LOG, self.p.clock.now(), key, ttl=cfg.denylist_ttl)   # for dashboards and audits
+        now = self.p.clock.now()
         if cfg.block_action == "deny":
             self.p.store.set("deny:" + key, reason, cfg.denylist_ttl)
-            return
-        current = self.p.store.get("verdict:" + key)
-        stage = 2 if current else 1                         # a second verdict inside the TTL escalates
-        self.p.store.set("verdict:" + key, {"stage": stage, "reason": reason, "at": self.p.clock.now()}, cfg.block_verdict_ttl)
+            stage = "deny"
+        else:
+            current = self.p.store.get("verdict:" + key)
+            stage = 2 if current else 1                     # a second verdict inside the TTL escalates
+            self.p.store.set("verdict:" + key, {"stage": stage, "reason": reason, "at": now}, cfg.block_verdict_ttl)
+        # one member per event (not per block), so verdict counts, affected blocks and exposure can be told apart;
+        # the sequence number keeps two verdicts at the same instant distinct
+        seq = self.p.store.incr("verdict:seq")
+        self.p.store.zadd(self.VERDICT_LOG, now, f"{key}|{stage}|{now:.3f}|{seq}", ttl=cfg.denylist_ttl)
+
+    def verdict_events(self, since=float("-inf"), until=float("inf")):
+        """Every verdict event in the window: [{'block', 'stage', 'at'}], oldest first."""
+        out = []
+        for m in self.p.store.zrangebyscore(self.VERDICT_LOG, since, until):
+            block, stage, at, _seq = m.rsplit("|", 3)
+            out.append({"block": block, "stage": int(stage) if stage.isdigit() else stage, "at": float(at)})
+        return out
 
     def block_verdict(self, key):
         """None, or {'stage': 1|2, 'reason': ...} for a block under a graded verdict."""

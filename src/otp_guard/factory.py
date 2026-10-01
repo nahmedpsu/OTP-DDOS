@@ -108,6 +108,9 @@ def build_pipeline(env=None):
         report.real["recaptcha"] = "GoogleRecaptcha"
     else:
         report.fake.append("recaptcha")
+        if env.get("FAKE_VENDOR_LATENCY_MS"):           # load tests only: the fakes block like vendors would
+            for fake in (svc.recaptcha, svc.hlr, svc.sender):
+                fake.latency_ms = float(env["FAKE_VENDOR_LATENCY_MS"])
         if env.get("FAKE_RECAPTCHA_SCORES"):            # load tests only: "token:score,token:score"
             for item in env["FAKE_RECAPTCHA_SCORES"].split(","):
                 tok, score = item.split(":")

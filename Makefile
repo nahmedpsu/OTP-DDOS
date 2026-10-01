@@ -1,4 +1,4 @@
-.PHONY: install test test-report scenarios analysis evaluation evaluation-quick load-test replay-demo pseudocode smoke results run-api run-worker clean
+.PHONY: install test test-report scenarios analysis evaluation evaluation-quick load-test figures headline replay-demo pseudocode smoke results run-api run-worker clean
 
 PY ?= python3
 
@@ -23,8 +23,14 @@ evaluation:         ## 30-seed evaluation with CIs, ablation, sweeps, adaptive a
 evaluation-quick:   ## 3-seed version of the above, for CI
 	$(PY) scripts/run_evaluation.py --quick --out /tmp/otp-guard-eval
 
-load-test:          ## pipeline and HTTP latency on a real Redis, KS timing-leak test -> results/performance.{md,json}
+load-test:          ## pipeline and HTTP latency on a real Redis, KS timing-leak test, capacity -> results/performance.{md,json}
 	$(PY) scripts/load_test.py
+
+figures:            ## manuscript figures from the recorded results -> paper/figures/
+	$(PY) paper/figures.py
+
+headline:           ## provenance of every README number -> results/headline_numbers.md
+	$(PY) scripts/headline_numbers.py
 
 replay-demo:        ## generate synthetic logs in the replay schema and replay them under v1 and v2
 	$(PY) scripts/generate_synthetic_logs.py --out /tmp/otp-guard-logs.csv --attacker datacenter_rotation
@@ -36,7 +42,7 @@ pseudocode:         ## regenerate docs/pseudocode/ from the design document
 smoke:              ## boot the HTTP service on fakes and drive a flow; writes results/api_smoke.txt
 	$(PY) scripts/smoke_api.py
 
-results: test-report scenarios analysis evaluation load-test smoke   ## regenerate everything under results/
+results: test-report scenarios analysis evaluation load-test smoke figures headline   ## regenerate everything under results/ and paper/figures/
 
 run-api:            ## run the HTTP service from the environment (.env)
 	PYTHONPATH=src $(PY) -m otp_guard.api

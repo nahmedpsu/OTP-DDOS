@@ -121,6 +121,8 @@ class Config:
                                             # busy legitimate blocks); 1 = one threshold of credit (default); large = plain SPRT
     block_tests: tuple = ("conversion", "speed")
     block_count_limit: tuple = (5, 86400)   # the 'block_limit_only' baseline: sends per destination block per day
+    block_count_action: str = "refuse"      # 'refuse': the (limit+1)th request on a block is refused; 'graded': first-time
+                                            # clients beyond the limit are challenged, beyond twice the limit moved off SMS
     budget_hard_ceiling: bool = True        # no SMS at all beyond the hourly budget; reserved atomically before sending
     sms_text_template: str = "Your verification code is {code}"
     # Delivery receipts. With receipts on, a send counts as failed for reputation only after the

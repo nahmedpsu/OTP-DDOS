@@ -1,5 +1,6 @@
 """State backends. Everything the pipeline remembers goes through one small interface so
 the same code runs on the in-memory store (tests) and on Redis (production)."""
+import copy
 import json
 import threading
 
@@ -85,9 +86,23 @@ class MemoryStore:
 
     # ---- strings / numbers ----
     def get(self, key):
+        """Returns a copy, as a Redis read does: mutating the result never changes the store."""
         with self.lock:
             v = self._live(key)
-            return None if v is None else v[0]
+            return None if v is None else copy.deepcopy(v[0])
+
+    def update(self, key, fn, ttl=None):
+        """Atomic read-modify-write: fn(current) -> new value, or None to leave the key as it is.
+        Returns (value, changed). Concurrent callers are serialised, so fn sees every earlier
+        update; this is the only safe way to make a state transition that depends on the state."""
+        with self.lock:
+            v = self._live(key)
+            cur = None if v is None else copy.deepcopy(v[0])
+            new = fn(cur)
+            if new is None:
+                return cur, False
+            self._put(key, new, ttl=ttl)
+            return copy.deepcopy(new), True
 
     def set(self, key, val, ttl=None):
         with self.lock:
@@ -271,6 +286,28 @@ class RedisStore:
     def set(self, key, val, ttl=None):
         self.round_trips += 1
         self.r.set(key, self._enc(val), ex=int(ttl) if ttl else None)
+
+    def update(self, key, fn, ttl=None):
+        """Optimistic compare-and-set (WATCH / MULTI / EXEC): the write goes through only if nobody
+        changed the key since it was read; otherwise read again and retry. Returns (value, changed)."""
+        import redis
+        self.round_trips += 1
+        while True:
+            with self.r.pipeline() as pipe:
+                try:
+                    pipe.watch(key)
+                    cur = self._dec(pipe.get(key))
+                    new = fn(cur)
+                    if new is None:
+                        pipe.unwatch()
+                        return cur, False
+                    pipe.multi()
+                    pipe.set(key, self._enc(new), ex=int(ttl) if ttl else None)
+                    pipe.execute()
+                    return new, True
+                except redis.WatchError:
+                    self.round_trips += 1
+                    continue
 
     def setnx(self, key, val, ttl=None):
         self.round_trips += 1

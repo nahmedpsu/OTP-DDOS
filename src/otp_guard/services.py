@@ -26,13 +26,25 @@ class FakeAttestation:
         return AttestResult(True, attestation["platform"])
 
 
+def _vendor_sleep(obj):
+    """Load tests only: a fake with `latency_ms` set blocks like a vendor call would (lognormal, sigma 0.5)."""
+    ms = getattr(obj, "latency_ms", 0.0)
+    if ms:
+        import math
+        import random
+        import time
+        time.sleep(ms / 1000.0 * math.exp(random.gauss(0, 0.5)))
+
+
 class FakeRecaptcha:
     def __init__(self):
         self.scores = {}       # token -> score
         self.calls = 0
+        self.latency_ms = 0.0
 
     def verify(self, post):
         self.calls += 1
+        _vendor_sleep(self)
         token = (post or {}).get("g-recaptcha-response")
         if token in self.scores:
             return {"valid": True, "score": self.scores[token]}
@@ -41,6 +53,7 @@ class FakeRecaptcha:
     def verify_challenge(self, token):
         """Interactive (v2 checkbox / image) challenge: valid or not, no score."""
         self.calls += 1
+        _vendor_sleep(self)
         return token in self.scores
 
 
@@ -91,9 +104,11 @@ class FakeHlr:
         self.unreachable = set()
         self.voip = set()
         self.calls = 0
+        self.latency_ms = 0.0
 
     def lookup(self, mobile):
         self.calls += 1
+        _vendor_sleep(self)
         return HlrResult(
             assigned=mobile not in self.unassigned,
             reachable=mobile not in self.unreachable,
@@ -146,8 +161,10 @@ class FakeSender:
     def __init__(self, instant_receipts=True):
         self.sent = []
         self.instant_receipts = instant_receipts   # the pipeline treats every send as delivered at once
+        self.latency_ms = 0.0
 
     def enqueue(self, channel, mobile, text, log_id, delay, provider=None):
+        _vendor_sleep(self)                        # a synchronous provider call, when latency is simulated
         self.sent.append(SentMessage(channel, mobile, text, log_id, delay, provider))
 
     def by_channel(self, channel):

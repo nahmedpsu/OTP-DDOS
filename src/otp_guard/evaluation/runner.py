@@ -9,7 +9,7 @@ from dataclasses import replace
 from ..config import ALL_FEATURES, V1_FEATURES, OPTIONAL_FEATURES, BASELINE_DESIGNS, BASELINE_CFG
 from .calibration import value as cal
 from .sim import AttackerSpec, LegitSpec, SimSpec, run_sim
-from .stats import mean_ci
+from .stats import mean_ci, fraction_ci
 
 BOT_CAPTCHA = cal("recaptcha_bot_scores")
 
@@ -57,6 +57,11 @@ ADAPTIVE_ATTACKERS = {
         "Builds trust first: 500 identities and numbers verify everything (human-like delay) for 10 minutes, then the same "
         "identities flood without verifying, so verified-history exemptions and trusted numbers work in its favour",
         fp_mode="aged", captcha_beta=(9, 1.5), trust_building_minutes=10, trust_pool=500, verify_fraction=0.0, earns_revenue=True),
+    "trust_building_concentrated": AttackerSpec("trust_building_concentrated",
+        "Same preparation (500 identity/number pairs verify everything for 10 minutes), but the numbers lie in 3 destination "
+        "blocks the carrier terminates, so the block memory is what the flood phase must get past",
+        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), trust_building_minutes=10, trust_pool=500,
+        trust_concentrated=True, verify_fraction=0.0, earns_revenue=True),
     "receipt_faking_carrier": AttackerSpec("receipt_faking_carrier",
         "Concentrated pumper whose carrier reports every delivery as failed: the sends are billed but feed no block test",
         numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), fake_failed_receipts=True, earns_revenue=True),
@@ -90,20 +95,44 @@ def run_all(specs, processes=None):
         return pool.map(_job, specs, chunksize=2)
 
 
-def summarise_legit_only(results):
-    """Aggregate false-positive runs: verdicts and the real users they touched."""
+def _verdict_fields(results):
+    """Verdict accounting shared by every summary: events (not blocks), unique blocks, stages, the
+    requests hit (by stage) and those that never completed, and the block-minutes under a verdict."""
     def col(f):
         return [f(r) for r in results]
     return {
-        "n": len(results),
-        "block_verdicts": mean_ci(col(lambda r: r["block_verdicts"])),
+        "block_verdicts": mean_ci(col(lambda r: r["block_verdicts"])),                 # verdict events
+        "blocks_with_verdict": mean_ci(col(lambda r: r["blocks_with_verdict"])),       # distinct blocks
+        "verdicts_stage1": mean_ci(col(lambda r: r["verdicts_stage1"])),
+        "verdicts_stage2": mean_ci(col(lambda r: r["verdicts_stage2"])),
+        "verdict_exposure_block_min": mean_ci(col(lambda r: r["verdict_exposure_block_min"])),
         "legit_hit_by_verdict": mean_ci(col(lambda r: r["legit_hit_by_verdict"])),
+        "legit_hit_stage1": mean_ci(col(lambda r: r["legit_hit_stage1"])),
+        "legit_hit_stage2": mean_ci(col(lambda r: r["legit_hit_stage2"])),
+        "legit_hit_lost": mean_ci(col(lambda r: r["legit_hit_lost"])),
+        "legit_hit_by_verdict_pct": mean_ci([100.0 * r["legit_hit_by_verdict"] / max(r["friction"]["users"], 1) for r in results]),
+        "pending_at_end": sum(r["pending_at_end"]["events"] + r["pending_at_end"]["timeouts"] for r in results),
+    }
+
+
+def summarise_legit_only(results):
+    """Aggregate false-positive runs: verdict events and the real users they touched."""
+    def col(f):
+        return [f(r) for r in results]
+    out = {
+        "n": len(results),
         "legit_users": mean_ci(col(lambda r: r["friction"]["users"])),
         "legit_delivered_pct": mean_ci(col(lambda r: r["friction"]["delivered_pct"])),
+        "legit_completed_pct": mean_ci(col(lambda r: r["friction"]["completed_pct"])),
         "legit_challenge_rate_pct": mean_ci(col(lambda r: r["friction"]["challenge_rate_pct"])),
         "legit_refusal_rate_pct": mean_ci(col(lambda r: r["friction"]["refusal_rate_pct"])),
         "outage_alerts": mean_ci(col(lambda r: r["outage_alerts"])),
+        "occupancy_median": mean_ci(col(lambda r: r["legit_block_occupancy"]["median"])),
+        "occupancy_max": mean_ci(col(lambda r: r["legit_block_occupancy"]["max"])),
+        "blocks_touched": mean_ci(col(lambda r: r["legit_block_occupancy"]["touched"])),
     }
+    out.update(_verdict_fields(results))
+    return out
 
 
 def summarise(results):
@@ -119,10 +148,13 @@ def summarise(results):
     ttc = col(("attack", "time_to_containment_min"))
     n_contained = sum(1 for t in ttc if t is not None)
     minutes = results[0]["spec"]["minutes"]
-    return {
+    active = results[0]["spec"]["attacker"].get("active_minutes")
+    out = {
         "n": len(results),
+        "n_contained": n_contained,
         "contained_fraction": n_contained / len(results),
-        "time_to_containment_min": mean_ci([t if t is not None else minutes for t in ttc]),
+        # horizon-filled mean (uncontained runs counted as `minutes`); the tables report the conditional one below
+        "time_to_containment_horizon_filled_min": mean_ci([t if t is not None else minutes for t in ttc]),
         "leaked_before_containment": mean_ci(col(("attack", "leaked_before_containment"))),
         "leaked_total": mean_ci(col(("attack", "leaked_total"))),
         "steady_state_leak_per_min": mean_ci(col(("attack", "steady_state_leak_per_min"))),
@@ -147,10 +179,18 @@ def summarise(results):
         "attacker_blocks_leaked": mean_ci(col(("attacker_blocks_leaked",))),
         "attacker_verifications": mean_ci(col(("attacker_verifications",))),
         "attacker_challenges_solved": mean_ci(col(("attacker_challenges_solved",))),
-        "block_verdicts": mean_ci(col(("block_verdicts",))),
-        "legit_hit_by_verdict": mean_ci(col(("legit_hit_by_verdict",))),
-        "legit_hit_by_verdict_pct": mean_ci([100.0 * r["legit_hit_by_verdict"] / max(r["friction"]["users"], 1) for r in results]),
+        "legit_gate_loss_pct": mean_ci([100.0 * r["friction"]["refused_by"].get("gate", 0) / max(r["friction"]["users"], 1) for r in results]),
+        "legit_undelivered_pct": mean_ci([100.0 * r["friction"]["refused_by"].get("undelivered", 0) / max(r["friction"]["users"], 1) for r in results]),
+        "prep_requests": mean_ci([r["attack_phase"]["prep"].get("requests", 0) for r in results]),
+        "prep_leaked": mean_ci([r["attack_phase"]["prep"].get("leaked", 0) for r in results]),
+        "prep_verified": mean_ci([r["attack_phase"]["prep"].get("verified", 0) for r in results]),
+        "flood_requests": mean_ci([r["attack_phase"]["flood"].get("requests", 0) for r in results]),
+        "flood_leaked": mean_ci([r["attack_phase"]["flood"].get("leaked", 0) for r in results]),
+        "flood_verified": mean_ci([r["attack_phase"]["flood"].get("verified", 0) for r in results]),
+        "legit_hit_after_stop": mean_ci([sum(r["legit_hit_per_min"][active:]) if active else 0 for r in results]),
     }
+    out.update(_verdict_fields(results))
+    return out
 
 
 MODES = {"behavioural_only": True, "with_adaptive_caps": False}     # name -> caps_lifted
@@ -222,8 +262,6 @@ PUMPING_VARIANTS = {
     "relative_baseline": (frozenset(_NO_FINE | {"relative_baseline"}), {"resolution_timeout_s": 600}),
     "all_three": (frozenset(ALL_FEATURES | {"relative_baseline"}), {"resolution_timeout_s": 120}),
     "default_with_hard_deny": (ALL_FEATURES, {"resolution_timeout_s": 120, "block_action": "deny"}),
-    "default, CUSUM with no credit (floor 0)": (ALL_FEATURES, {"resolution_timeout_s": 120, "block_credit_thresholds": 0.0}),
-    "default, plain SPRT (unbounded credit)": (ALL_FEATURES, {"resolution_timeout_s": 120, "block_test": "sprt"}),
 }
 PUMPING_WARMUP_MIN = 130     # crosses an hour boundary with >= 200 resolved legitimate sends in the previous hour bucket
 
@@ -236,6 +274,106 @@ def study_pumping(seeds, minutes=20):
                 specs.append(SimSpec(attacker=randomised(a, s), minutes=minutes, features=feats, cfg_overrides=dict(cfg),
                                      caps_lifted=True, warmup_minutes=PUMPING_WARMUP_MIN, seed=s))
                 index.append((aname, vname, s))
+    return specs, index
+
+
+_COUNTER = frozenset({"attestation", "session", "block_count_limit"})
+DETECTOR_SETTINGS = {
+    # name -> (features, cfg overrides). The sequential tests at several thresholds and credit floors (a
+    # floor of -c x log(threshold) is a zero-floor CUSUM with threshold (1 + c) x log(threshold) and head
+    # start c x log(threshold)), the flat per-block counter at several limits with a refusing and a graded
+    # action, all run on the same seeds against the concentrated pumpers and against legitimate traffic.
+    "sequential, threshold 1000, credit 1 (default)": (ALL_FEATURES, {}),
+    "sequential, threshold 1000, credit 0 (Page's CUSUM)": (ALL_FEATURES, {"block_credit_thresholds": 0.0}),
+    "sequential, threshold 1000, credit 0.5": (ALL_FEATURES, {"block_credit_thresholds": 0.5}),
+    "sequential, threshold 1000, credit 2": (ALL_FEATURES, {"block_credit_thresholds": 2.0}),
+    "sequential, threshold 1000, unbounded credit (SPRT)": (ALL_FEATURES, {"block_test": "sprt"}),
+    "sequential, threshold 100, credit 0": (ALL_FEATURES, {"sprt_threshold": 100.0, "block_credit_thresholds": 0.0}),
+    "sequential, threshold 100, credit 1": (ALL_FEATURES, {"sprt_threshold": 100.0}),
+    "sequential, threshold 10000, credit 0": (ALL_FEATURES, {"sprt_threshold": 10000.0, "block_credit_thresholds": 0.0}),
+    "sequential, threshold 10000, credit 1": (ALL_FEATURES, {"sprt_threshold": 10000.0}),
+    "counter, 5 per block per day, refuse": (_COUNTER, {"block_count_limit": (5, 86400)}),
+    "counter, 20 per block per day, refuse": (_COUNTER, {"block_count_limit": (20, 86400)}),
+    "counter, 5 per block per day, graded": (_COUNTER, {"block_count_limit": (5, 86400), "block_count_action": "graded"}),
+    "counter, 10 per block per day, graded": (_COUNTER, {"block_count_limit": (10, 86400), "block_count_action": "graded"}),
+    "counter, 20 per block per day, graded": (_COUNTER, {"block_count_limit": (20, 86400), "block_count_action": "graded"}),
+}
+DETECTOR_ATTACKERS = ["concentrated_pumper_no_verify", "concentrated_pumper_verifies_instantly",
+                      "concentrated_pumper_verifies_humanlike", "concentrated_pumper_solves_challenges"]
+
+
+def study_detectors(seeds, minutes=20):
+    """Every detector setting against the four concentrated pumpers, on the same seeds and warm-up as the
+    pumping study: the attack side of the matched comparison."""
+    specs, index = [], []
+    for aname in DETECTOR_ATTACKERS:
+        a = PUMPING_ATTACKERS[aname]
+        for dname, (feats, cfg) in DETECTOR_SETTINGS.items():
+            for s in seeds:
+                specs.append(SimSpec(attacker=randomised(a, s), minutes=minutes, features=feats, cfg_overrides=dict(cfg),
+                                     caps_lifted=True, warmup_minutes=PUMPING_WARMUP_MIN, seed=s))
+                index.append((aname, dname, s))
+    return specs, index
+
+
+DETECTOR_FP_CONVERSIONS = [0.8, 0.65]
+
+
+def study_detector_fp(seeds, minutes=24 * 60):
+    """The legitimate-traffic side of the matched comparison: every detector setting for 24 hours at
+    144 sends per block per day (200 distinct blocks), 20 % autofill, deployed calibration, at the
+    calibrated conversion and at Twilio's global 65 %."""
+    specs, index = [], []
+    for dname, (feats, cfg) in DETECTOR_SETTINGS.items():
+        for conv in DETECTOR_FP_CONVERSIONS:
+            for s in seeds:
+                legit = LegitSpec(conversion=conv, autofill_fraction=0.2, blocks=200)
+                specs.append(SimSpec(attacker=ATTACKERS["naive_single_client"], legit=legit, legit_only=True, features=feats,
+                                     cfg_overrides=dict(cfg), minutes=minutes, warmup_minutes=0, caps_lifted=True, seed=s))
+                index.append((dname, conv, s))
+    return specs, index
+
+
+POISONER_VARIANTS = {
+    # name -> (cfg overrides, active minutes, run minutes)
+    "graded verdicts (default)": ({}, None, 20),
+    "hard deny (24 h denylist)": ({"block_action": "deny"}, None, 20),
+    "graded, attacker stops after 10 min (recovery)": ({}, 10, 30),
+}
+
+
+def study_poisoner(seeds):
+    specs, index = [], []
+    base = ADAPTIVE_ATTACKERS["block_poisoner"]
+    for vname, (cfg, active, minutes) in POISONER_VARIANTS.items():
+        for s in seeds:
+            a = replace(randomised(base, s), active_minutes=active)
+            specs.append(SimSpec(attacker=a, legit=LegitSpec(blocks=20), minutes=minutes, caps_lifted=True,
+                                 cfg_overrides=dict(cfg), seed=s))
+            index.append((vname, s))
+    return specs, index
+
+
+BASELINE_VARIANTS = {
+    # name -> (baseline, warm-up minutes, attacker requests/min during the warm-up)
+    "oracle: told the modelled legitimate rate (main study)": ("oracle", 10, 0.0),
+    "learned, cold start: no closed hour of history": ("learned", 10, 0.0),
+    "learned, one closed hour": ("learned", 70, 0.0),
+    "learned, three closed hours": ("learned", 190, 0.0),
+    "learned, three hours poisoned at the legitimate rate": ("learned", 190, cal("legit_traffic_rate_per_min")),
+}
+
+
+def study_baseline(seeds, attacker_names=("residential_captcha_farm", "residential_bot"), minutes=20):
+    """The deployed baseline job against the oracle the main study uses: cold start, little history,
+    and a profile poisoned by a sustained low-rate attack during the learning period."""
+    specs, index = [], []
+    for name in attacker_names:
+        for vname, (baseline, warm, poison) in BASELINE_VARIANTS.items():
+            for s in seeds:
+                specs.append(SimSpec(attacker=randomised(ATTACKERS[name], s), minutes=minutes, caps_lifted=False, seed=s,
+                                     baseline=baseline, warmup_minutes=warm, warmup_attack_rate=poison))
+                index.append((name, vname, s))
     return specs, index
 
 
@@ -276,19 +414,30 @@ def study_dilution(seeds, minutes=60):
 
 
 CAP_SWEEP = {"adaptive_floor": [0.1, 0.25, 0.5, 1.0], "base_cap_multiple": [1.5, 2.0, 3.0, 5.0]}
-CADENCES = {"every minute (worker default)": 60, "every 10 minutes": 600, "hourly": 3600}
+CADENCES = {"every minute (worker default)": 60, "every 2 minutes": 120, "every 5 minutes": 300, "every 10 minutes": 600, "hourly": 3600}
+CADENCE_PHASES = {"tick aligned with the attack start": 0, "tick offset by half a period": 1}
+CADENCE_LONG_ATTACK_MIN = 60
 
 
-def study_cadence(seeds, attacker_names=("residential_captcha_farm", "residential_bot", "sequential_numbers"), minutes=20):
-    """The adaptive controller at the worker's cadence versus slower ones: a 20-minute attack seen by
-    an hourly job is a static cap."""
+def study_cadence(seeds, attacker_names=("residential_captcha_farm", "residential_bot"), minutes=20):
+    """The adaptive controller at the worker's cadence versus slower ones, at two tick phases relative
+    to the attack start, plus a 60-minute attack for the hourly job (which a 20-minute attack can
+    straddle or miss depending on the phase)."""
     specs, index = [], []
     for name in attacker_names:
         for cname, tick in CADENCES.items():
+            for pname, half in CADENCE_PHASES.items():
+                if tick == 60 and half:
+                    continue                                   # a one-minute tick has no phase
+                for s in seeds:
+                    specs.append(SimSpec(attacker=randomised(ATTACKERS[name], s), minutes=minutes, caps_lifted=False,
+                                         adaptive_tick_s=tick, adaptive_phase_s=(tick // 2 if half else 0), seed=s))
+                    index.append((name, cname, pname, minutes, s))
+        for pname, half in CADENCE_PHASES.items():
             for s in seeds:
-                specs.append(SimSpec(attacker=randomised(ATTACKERS[name], s), minutes=minutes, caps_lifted=False,
-                                     adaptive_tick_s=tick, seed=s))
-                index.append((name, cname, s))
+                specs.append(SimSpec(attacker=randomised(ATTACKERS[name], s), minutes=CADENCE_LONG_ATTACK_MIN, caps_lifted=False,
+                                     adaptive_tick_s=3600, adaptive_phase_s=(1800 if half else 0), seed=s))
+                index.append((name, "hourly", pname, CADENCE_LONG_ATTACK_MIN, s))
     return specs, index
 
 
@@ -383,9 +532,13 @@ FP_SENDS_PER_BLOCK = [10, 30, 100]
 
 def block_test_false_positives(cfg, trials=20_000, seed=3, conversions=FP_CONVERSIONS, fast_shares=FP_FAST_SHARES,
                                sends=FP_SENDS_PER_BLOCK):
-    """Monte Carlo of the exact sequential tests on one block that sees only legitimate traffic, for
-    one 24-hour window: the chance that the block reaches a verdict, by true conversion and true
-    share of fast (autofill) verifications, with the tests parameterised as deployed (cfg)."""
+    """Monte Carlo of the exact sequential tests on one block that sees only legitimate traffic: the
+    block starts with empty statistics, receives exactly `n` resolved sends in the window, and the
+    quantity estimated is P(at least one verdict in that sequence), by true conversion and true share
+    of fast (autofill) verifications, with the tests parameterised as deployed (cfg). Each cell reports
+    the event count, the number of trials and a 95 % Wilson interval; a zero count is an upper bound
+    of about 3/trials, not evidence of a zero probability. This is one block's per-window hazard, not
+    the full day's harm process (verdict TTLs, resets and exemptions), which section H2 simulates."""
     import math
     thr = math.log(cfg.sprt_threshold)
     floor = -cfg.block_credit_thresholds * thr if cfg.block_test == "cusum" else -math.inf
@@ -415,7 +568,10 @@ def block_test_false_positives(cfg, trials=20_000, seed=3, conversions=FP_CONVER
                         if v + fl >= cfg.sprt_min_events and conv > thr:
                             verdicts["never_verified"] += 1
                             break
-                out[(n, p, f)] = {k: val / trials for k, val in verdicts.items()}
+                total = verdicts["never_verified"] + verdicts["machine_verified"]
+                _, lo, hi = fraction_ci(total, trials)
+                out[(n, p, f)] = {k: val / trials for k, val in verdicts.items()} | {
+                    "events": total, "trials": trials, "p_lo": float(lo), "p_hi": float(hi)}
     return out
 
 

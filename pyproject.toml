@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "otp-guard"
-version = "2.5.0"
+version = "2.6.0"
 description = "OTP flood protection: a layered SMS validation, risk-scoring and rate-limiting pipeline"
 readme = "README.md"
 license = {text = "MIT"}

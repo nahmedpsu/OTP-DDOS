@@ -134,10 +134,57 @@ These are measured, not hypothetical. Each one is in `results/evaluation.md` or
   contained seeds only, with the contained fraction alongside; the late-window leakage is
   labelled as such.
 
+## What changed after the second-round report
+
+- **Offered workload.** Every exogenous quantity of a request, including the CAPTCHA token
+  a challenge retry would present and which returning identity a returning request uses, is
+  drawn from the workload stream when the request is created; returning identities come from
+  the identities the trace itself offered earlier, not from what the defence verified. The
+  result carries a hash of the offered trace, and `tests/unit/test_simulator_invariants.py`
+  asserts it is identical across designs and cap modes for the same seed.
+- **Cohorts.** A request is bound at creation to one immutable pair of accumulators; warm-up
+  requests go to discarded ones. Conservation (subgroups add to the whole; completed <=
+  delivered <= dispatched <= users) is asserted at the end of every run.
+- **Funnel.** A legitimate request is counted as a user when offered, before the session
+  gate; losses are named by stage (gate, hard step, no channel, undelivered).
+- **Clock.** Arrivals carry timestamps inside their minute; the clock moves to each arrival
+  and each minute boundary whatever the pipeline decides. The run drains to a declared
+  horizon (receipt grace + resolution timeout + the slowest modelled entry) and reports
+  anything still pending (zero in every recorded run).
+- **Verdicts are events.** The verdict log has one member per verdict (block, stage, time);
+  tables report events, distinct blocks, stage-1 and stage-2 counts, the requests hit by
+  stage, those that never completed, and block-minutes under a verdict.
+- **Containment time** is the mean over contained seeds, printed with "contained k/n"; the
+  horizon-filled mean is kept in the JSON under its own name.
+- **Legitimate blocks** are sampled without replacement; occupancy (median and maximum
+  sends a block actually received) is reported.
+- **Detector comparison (F2).** The sequential tests at thresholds 100 / 1000 / 10000 and
+  credit 0 / 0.5 / 1 / 2 / unbounded, and the flat per-block counter at 5 / 10 / 20 per
+  day with a refusing and a graded action, all on the same seeds against the four
+  concentrated pumpers and for 24 hours of legitimate traffic at 80 % and 65 % conversion.
+  A credit floor of -c x log(threshold) is a zero-floor CUSUM with threshold
+  (1 + c) x log(threshold) and head start c x log(threshold); the grid spans both.
+- **Cadence (B2)** at 1, 2, 5, 10 and 60 minutes, two tick phases, and a 60-minute attack
+  for the hourly job. **Baseline job (B3)**: the deployed job against the oracle, with cold
+  start, one and three closed hours, and a poisoned learning period.
+- **Trust builders** keep one-to-one identity/number pairs, are reported by phase
+  (preparation / flood), and a concentrated variant puts the pairs' numbers inside three
+  destination blocks. **Poisoning (D2)**: graded, hard-deny and recovery variants with
+  stage counts, lost completions and hits after the attack stopped.
+- **Monte Carlo (H1)** reports event counts, trials and Wilson intervals, and states its
+  initialisation. **Spread (G)** reports per-run residuals, saturated runs apart.
+- **Implementation.** OTP state is written before the sender is called; receipt,
+  verification and block-test transitions are atomic (compare-and-set), with the receipt
+  rules defined in `feedback.py`; the hard ceiling belongs to the `circuit_breaker` flag;
+  the baseline job's fallback divides by the hours it has; the graded per-block counter
+  exists as a comparator. Concurrency is tested on a real Redis across two instances
+  (`tests/integration/test_real_redis.py`), which is the only place those properties are
+  established; vendors remain untested live.
+
 ## Metric definitions
 
-All per-run metrics are computed from one simulated attack window (20 minutes, after a
-10-minute legitimate-only warm-up so that history and baselines exist).
+All per-run metrics are computed from one simulated attack window (20 minutes unless the
+table says otherwise, after a legitimate-only warm-up so that history and baselines exist).
 
 | Metric | Definition |
 |---|---|
@@ -146,10 +193,11 @@ All per-run metrics are computed from one simulated attack window (20 minutes, a
 | **Late leak** (formerly "steady state") | Mean leaked SMS per minute over minutes ≥ *m*; over the last 5 minutes if not contained. It is a late-window rate, not evidence of stationarity: hourly budgets, daily reputation, expiring verdicts and the controller all keep moving. |
 | **Total leaked** | Sum over the 20-minute window. |
 | **Defender cost** | Leaked SMS × SMS price + attacker-attributable HLR lookups × lookup price + attacker-attributable reCAPTCHA assessments × assessment price. Prices in `src/otp_guard/evaluation/calibration.py`. |
-| **Friction: dispatched / delivered / completed %** | Dispatched: a channel was chosen and the message handed to the sender. Delivered: the provider's receipt said delivered. Completed: the person entered the code. All over legitimate requests. |
-| **Friction, stratified** | The same outcomes for first-time clients (no verified history) and returning clients (a fingerprint that verified before). The headline refusal figure for a design is the first-time rate, since returning clients are exempt from rationing and verdicts. |
+| **Friction: dispatched / delivered / completed %** | Dispatched: a channel was chosen and the message handed to the sender. Delivered: the provider's receipt said delivered. Completed: the person entered the code. All over legitimate requests *offered* (counted before the session gate). |
+| **Friction, stratified** | The same outcomes for first-time clients and returning clients, where *returning* is a property of the offered trace (an identity the trace offered before). Whether that identity holds verified history depends on what the defence did with its earlier request, so a returning client refused earlier is counted here as a returning client refused again. The headline refusal figure for a design is the first-time rate. |
 | **Friction: challenge rate %** | Legitimate requests that were shown an interactive challenge (90 % of simulated users then solve it). |
-| **Friction: refusal rate %** | Legitimate requests refused by a hard step, downgraded with no channel, or whose delivery failed. |
+| **Friction: refusal rate %** | Legitimate requests lost at the session gate, refused by a hard step, downgraded with no channel, or whose delivery failed (`refused_by` names the stage). |
+| **Verdict events / blocks with a verdict** | Events: every verdict the block tests issued in the window (a block can be judged more than once; a second verdict inside the TTL escalates to stage 2). Blocks: distinct blocks among them. *Requests hit*: legitimate requests that met a verdict (by stage); *never completed*: those among them whose code was never entered. *Block-minutes under verdict*: the union of the verdict intervals per block, capped at the run's end. |
 | **Friction: added delay** | Mean seconds of queueing added by the `delay` tier over delivered legitimate requests. |
 | **Attacker profit** | Leaked SMS × SMS price × revenue share − (proxy bytes × price per GB + CAPTCHA tokens + solved challenges) × prices. Only pumping profiles earn revenue. |
 

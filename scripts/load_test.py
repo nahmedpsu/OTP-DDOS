@@ -103,14 +103,14 @@ def phase1(n, redis_client):
 LIMITS_PATH = pathlib.Path("/tmp/otp-guard-load-test-limits.json")
 
 
-def start_api(floor_ms):
+def start_api(floor_ms, latency_ms=0):
     LIMITS_PATH.write_text(json.dumps({"App/RegisterOTP": {f"per_{p}_{plat}": 10 ** 9 for p in ("minute", "hour")
                                                             for plat in ("web", "ios", "android", "legacy_app")}}))
     env = dict(os.environ, PORT=str(API_PORT), REDIS_URL=f"redis://127.0.0.1:{REDIS_PORT}/1", RESPONSE_FLOOR_MS=str(floor_ms),
                LOAD_TEST_DEBUG_HEADER="1", PYTHONPATH=str(ROOT / "src"), PREFIX_TABLE_PATH=str(ROOT / "config" / "prefixes.json"),
                SOURCE_LIMITS_PATH=str(LIMITS_PATH), ATTESTATION_GRACE_UNTIL="2030-01-01T00:00:00Z", SESSION_HMAC_KEY="load-test-key",
                WORKERS=os.environ.get("LOAD_TEST_WORKERS", "4"), ASN_LIMIT_DEFAULT="1000000000", IP_LIMIT_PER_MINUTE="1000000000",
-               FAKE_RECAPTCHA_SCORES="good:0.9,mid:0.6")
+               FAKE_RECAPTCHA_SCORES="good:0.9,mid:0.6", FAKE_VENDOR_LATENCY_MS=str(latency_ms) if latency_ms else "")
     p = subprocess.Popen([sys.executable, "-m", "otp_guard.api"], env=env, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     import httpx
     for _ in range(100):
@@ -121,11 +121,11 @@ def start_api(floor_ms):
     raise RuntimeError("api did not start")
 
 
-def phase2(n, concurrency, floor_ms, redis_client):
+def phase2(n, concurrency, floor_ms, redis_client, latency_ms=0):
     import httpx
     from otp_guard.evaluation.stats import ks_2samp
     redis_client.flushall()
-    api = start_api(floor_ms)
+    api = start_api(floor_ms, latency_ms)
     try:
         base = f"http://127.0.0.1:{API_PORT}"
         # sessions are issued by the server; the fake recaptcha in the API has no scores, so patch via the store:
@@ -175,16 +175,21 @@ def phase2(n, concurrency, floor_ms, redis_client):
             r = c.post("/otp/request", json=body, headers=headers)
             dt = (time.perf_counter() - t0) * 1000
             dbg = json.loads(r.headers.get("x-debug-outcome", "{}"))
-            outcome = "challenge" if dbg.get("tier") == "challenge" and dbg.get("rejected_at") == "step7" else (dbg.get("rejected_at") or "sent")
+            if r.status_code >= 500:
+                outcome = "server_error"
+            else:
+                outcome = "challenge" if dbg.get("tier") == "challenge" and dbg.get("rejected_at") == "step7" else (dbg.get("rejected_at") or "sent")
             return kind, outcome, dt, dbg.get("timings_ms") or {}
         t0 = time.perf_counter()
         with ThreadPoolExecutor(concurrency) as ex:
             out = list(ex.map(one, range(n)))
         wall = time.perf_counter() - t0
         by_outcome = collections.defaultdict(list)
+        by_kind = collections.defaultdict(collections.Counter)      # offered kind -> outcome counts (admission under load)
         over_floor = 0
-        for _, outcome, dt, timings in out:
+        for kind, outcome, dt, timings in out:
             by_outcome[outcome].append(dt)
+            by_kind[kind][outcome] += 1
             over_floor += floor_ms > 0 and sum(timings.values()) > floor_ms
         ks = {}
         outcomes = sorted(by_outcome)
@@ -196,7 +201,8 @@ def phase2(n, concurrency, floor_ms, redis_client):
                     ks[f"{a} vs {b}"] = {"statistic": stat, "p_value": pv, "n_a": len(by_outcome[a]), "n_b": len(by_outcome[b]),
                                          "tost_2ms": tost_mean_diff(by_outcome[a], by_outcome[b], margin=2.0)}
         return {"requests": n, "concurrency": concurrency, "workers": int(os.environ.get("LOAD_TEST_WORKERS", "4")),
-                "floor_ms": floor_ms, "wall_s": wall, "throughput_rps": n / wall,
+                "floor_ms": floor_ms, "vendor_latency_ms": latency_ms, "wall_s": wall, "throughput_rps": n / wall,
+                "by_kind": {k: dict(v) for k, v in by_kind.items()},
                 "throughput_note": ("bounded by concurrency / floor = %.1f req/s, not server capacity" % (concurrency / (floor_ms / 1000.0))) if floor_ms else "server capacity at this concurrency",
                 "pipeline_time_over_floor_fraction": over_floor / n if floor_ms else None,
                 "latency_by_outcome_ms": {k: {"p50": pct(v, 50), "p95": pct(v, 95), "p99": pct(v, 99), "mean": statistics.fmean(v), "n": len(v)} for k, v in by_outcome.items()},
@@ -210,6 +216,7 @@ def main():
     ap.add_argument("--requests", type=int, default=3000)
     ap.add_argument("--http-requests", type=int, default=6000)
     ap.add_argument("--concurrency", type=int, default=32)
+    ap.add_argument("--vendor-latency-ms", type=float, default=50.0, help="phase 3: median blocking time of each fake vendor call")
     ap.add_argument("--out", default=str(ROOT / "results"))
     a = ap.parse_args()
     out = pathlib.Path(a.out); out.mkdir(exist_ok=True)
@@ -221,6 +228,11 @@ def main():
         print("phase 2 (floor 400) done", flush=True)
         R["phase2_http_floor_0"] = phase2(a.http_requests, a.concurrency, 0, rc)
         print("phase 2 (floor 0) done", flush=True)
+        # phase 3: capacity as deployed (floor on) with vendors that take time, at rising concurrency
+        R["phase3_capacity"] = []
+        for c in (32, 64, 128):
+            R["phase3_capacity"].append(phase2(a.requests, c, 400, rc, latency_ms=a.vendor_latency_ms))
+            print(f"phase 3 (concurrency {c}) done", flush=True)
     finally:
         rp.terminate(); rp.wait(timeout=5)
     (out / "performance.json").write_text(json.dumps(R, indent=1) + "\n")
@@ -260,6 +272,23 @@ def write_md(R, path):
         for k, v in p2["ks_tests"].items():
             t = v["tost_2ms"]
             L.append(f"| {k} | {v['n_a']} / {v['n_b']} | {v['statistic']:.3f} | {v['p_value']:.2e} | {t['mean_diff']:.2f} | {t['p_value']:.2e} |")
+    if R.get("phase3_capacity"):
+        p3 = R["phase3_capacity"]
+        L += ["", f"## Phase 3: capacity as deployed, {p3[0]['requests']} requests per row", "",
+              f"The 400 ms floor on, and every fake vendor call (reCAPTCHA, HLR, the SMS provider) blocking for a lognormal "
+              f"{p3[0]['vendor_latency_ms']:.0f} ms median (sigma 0.5), so a full send makes about three such calls; "
+              f"{p3[0].get('workers', 1)} worker processes. Throughput under the floor is bounded by concurrency / 0.4 s until the "
+              "server saturates; the *over floor* column is the share of requests whose processing exceeded the floor (those leak "
+              "timing and are the first sign of saturation); *admission* is the share of the happy-path requests that were sent, "
+              "which under fair admission does not move with load (a drop means saturation is refusing real users).", "",
+              "| Concurrency | Throughput (req/s) | Bound (concurrency / floor) | Sent p50 / p95 / p99 (ms) | Over floor | Happy path sent | Server errors |",
+              "|---:|---:|---:|---:|---:|---:|---:|"]
+        for p in p3:
+            sent = p["latency_by_outcome_ms"].get("sent", {"p50": 0, "p95": 0, "p99": 0})
+            happy = p["by_kind"].get("happy", {}); n_h = sum(happy.values()) or 1
+            errs = sum(v.get("server_error", 0) for v in p["by_kind"].values())
+            L.append(f"| {p['concurrency']} | {p['throughput_rps']:.1f} | {p['concurrency'] / 0.4:.0f} | {sent['p50']:.0f} / {sent['p95']:.0f} / {sent['p99']:.0f} | "
+                     f"{100 * (p['pipeline_time_over_floor_fraction'] or 0):.1f} % | {100 * happy.get('sent', 0) / n_h:.1f} % | {errs} |")
     path.write_text("\n".join(L) + "\n")
 
 

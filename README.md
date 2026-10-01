@@ -141,13 +141,16 @@ src/otp_guard/
   testing.py                    harness shared by tests and scripts
   evaluation/                   calibrated simulation, metrics, statistics, study runner
 tests/
-  unit/                         per step, per adapter, factory
-  integration/                  HTTP API, end-to-end attack and user scenarios
+  unit/                         per step, per adapter, factory, the review counterexamples, simulator invariants
+  integration/                  HTTP API, end-to-end scenarios, concurrency on a real redis-server (two instances)
+paper/
+  figures.py                    the manuscript figures, drawn from results/ (see paper/README.md)
 scripts/
   run_scenarios.py              attack scenarios -> results/scenarios.{md,json}
   run_analysis.py               single-seed walkthrough of attacker profiles and use cases -> results/analysis.{md,json}
   run_evaluation.py             30-seed evaluation with CIs, ablation, sweeps, adaptive attackers -> results/evaluation.*
-  load_test.py                  latency on a real Redis and KS timing-leak test -> results/performance.*
+  load_test.py                  latency on a real Redis, KS timing-leak test, capacity with the floor -> results/performance.*
+  headline_numbers.py           every README number -> study, seeds, JSON path (results/headline_numbers.md)
   replay_logs.py                replay anonymised logs (docs/replay_schema.md) through v1 and v2
   generate_synthetic_logs.py    synthetic logs in the replay schema
   extract_pseudocode.py         design -> docs/pseudocode/ (CI checks it is in sync)
@@ -164,11 +167,24 @@ make test           # every pipeline test on both memory and Redis backends; see
 make scenarios      # the attack scenarios, written to results/
 make analysis       # single-seed walkthrough of attacker profiles and use cases
 make evaluation     # the 30-seed evaluation (about 5 minutes on 4 cores)
-make load-test      # needs redis-server; about 2 minutes
+make load-test      # needs redis-server; about 10 minutes
 make replay-demo    # synthetic logs through the replay tool
 make smoke          # boot the HTTP service on fakes and drive one flow
+make figures        # manuscript figures -> paper/figures/
+make headline       # provenance of every README number -> results/headline_numbers.md
 make results        # regenerate everything under results/
 ```
+
+**What the tests establish, and where.** The unit suite runs every test on the memory store
+and on fakeredis. Concurrency properties are established only in
+`tests/integration/test_real_redis.py`, on a real `redis-server` across two pipeline
+instances: the hourly budget ceiling and the per-number claim under concurrent requests,
+concurrent verification callbacks counting once, concurrent block-test events counting
+exactly and crossing the threshold once, and compare-and-set serialisation. The simulator's
+invariants (identical offered workload across designs, cohort conservation, clock
+progression, drain) are in `tests/unit/test_simulator_invariants.py`. No test calls a live
+vendor; App Attest assertion checking depends on an enrollment flow this repository does
+not implement.
 
 ## The pipeline in one table
 
@@ -184,8 +200,8 @@ make results        # regenerate everything under results/
 | 7 | Risk score engine: allow, delay, challenge, downgrade, block | Probeable binary decisions |
 | 8 | Per-number progressive backoff and daily cap | Per-number flooding |
 | 9 | Adaptive limits per source, platform, country | Aggregate caps |
-| 10 | Global circuit breaker on count and spend | No global cap |
-| 11 | Channel selection, audit log, uniform response | Enumeration |
+| 10 | Global circuit breaker: operating mode from the hourly count and spend budgets | No global cap |
+| 11 | Atomic budget reservation (the hard ceiling), channel selection, audit log, uniform response | No global cap, enumeration |
 | FB | Verification feedback loop: verify-to-send ratio feeds reputation | Separates attackers only on keys they dominate; see the evaluation |
 
 Full detail, pseudocode and the reasoning behind every default: `docs/sms_validation_process.md`.

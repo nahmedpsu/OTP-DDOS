@@ -8,8 +8,10 @@ OTP flood incident and the evolved attacks described in `problem_statement.md`.
 
 Two principles drive the design:
 
-1. **Cheap, local checks first.** Reject obvious abuse before spending on network calls
-   (reCAPTCHA, HLR lookup) and long before spending on an SMS.
+1. **Cheapest checks first.** Steps 0 to 2 cost a store lookup or an attestation or IP
+   intelligence call; the reCAPTCHA assessment (Step 3) and the HLR lookup (Step 5) are the
+   paid vendor calls, made only for requests that survived the earlier steps, and the SMS
+   itself (Step 11) only for those that survived everything.
 2. **Trust is earned by behaviour, not claimed by headers.** Platform exemptions require
    attestation, clients need a signed session, and every client key carries a reputation
    derived from whether the OTPs it requested were ever verified.
@@ -31,8 +33,8 @@ same uniform response (Step 11).
 | 7    | Risk score engine and tier decision              | **Gap H** binary decisions               |
 | 8    | Per-number rate limit with progressive backoff   | Per-number flooding                      |
 | 9    | Adaptive rate limits per source, platform, country | Platform/country caps                  |
-| 10   | Global circuit breaker (count and spend)         | **Gap E** no global cap                  |
-| 11   | Channel selection, send, log, uniform response   | Audit, **Gap H** enumeration             |
+| 10   | Global circuit breaker: operating mode from the hourly count and spend budgets | **Gap E** no global cap |
+| 11   | Atomic budget reservation (the hard ceiling), channel selection, send, log, uniform response | Audit, **Gap E**, **Gap H** enumeration |
 | FB   | Verification feedback loop (async)               | Conversion-based reputation              |
 
 An implementation of this pipeline lives in `src/otp_guard/` with real vendor adapters
@@ -780,6 +782,19 @@ write the audit record, and answer the client without revealing what happened.
 | `allow`     | push (if the device is registered), SMS                        |
 | `delay`     | push, SMS after a delay of `min(5 * 2^k, 60)` s where k = previous requests in session |
 | `downgrade` | push, WhatsApp OTP, silent network authentication; **never SMS**; block if none available |
+
+**State before the send.** Step 11 writes the audit record, the reputation `sent` counters
+and the OTP entry (code, expiry, delivery state) *before* it hands the message to the
+sender, because the default scheduler sends a zero-delay message synchronously and a
+provider can report its result, or post a receipt, before `enqueue()` returns. Every later
+transition of that entry (receipt, code entry, resolution) is an atomic read-modify-write
+on the store (a lock in memory, WATCH/MULTI/EXEC on Redis): a repeated positive receipt
+never moves the delivery time, a negative receipt after a positive one is a counted
+conflict and ignored, a positive receipt after a negative one or after the grace period
+reopens the send while the code is valid, and two workers verifying the same code count it
+once. The rules are spelled out at the top of `src/otp_guard/feedback.py` and exercised in
+`tests/unit/test_second_round.py` and, across two instances on a real Redis, in
+`tests/integration/test_real_redis.py`.
 
 **The code travels in the message.** Step 11 generates the code before the send, fills the
 message template (`{code}`), hands the filled message to the sender and stores the code

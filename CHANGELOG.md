@@ -1,6 +1,40 @@
 # Changelog
 
-## 2.5.0 (unreleased)
+## 2.6.0 (unreleased)
+
+Implementation and evaluation repairs from the second-round review (`docs/evaluation.md`,
+"What changed after the second-round report"):
+
+- OTP state is written before the sender is called, so a synchronous sender callback or an
+  immediate provider receipt lands on registered state. Receipt, verification and block-test
+  transitions are atomic read-modify-writes (a lock in memory, WATCH/MULTI/EXEC on Redis;
+  `store.update`); the receipt rules (duplicate, conflicting, late and corrected reports) are
+  defined at the top of `feedback.py`. The memory store returns copies on read, as Redis does.
+- The verdict log records every verdict event with its stage; results report events, distinct
+  blocks, stage counts, requests hit by stage, lost completions and block-minutes under verdict.
+- Simulator: the offered workload is drawn entirely before the policy sees a request (including
+  retry tokens and returning-identity choice) and hashed, with a test that the hash is
+  identical across designs; requests are bound to immutable cohorts with conservation asserted;
+  users are counted before the session gate and losses named by stage; arrivals carry
+  timestamps and the clock advances independently of acceptance; runs drain to a declared
+  horizon; legitimate blocks are distinct; trust-building pools are one-to-one pairs with
+  per-phase accounting; attacks can stop early for recovery studies.
+- Evaluation: detector comparison on matched traffic (thresholds, credit floors, flat counters
+  with refusing and graded actions, against four pumpers and 24 hours of legitimate traffic at
+  two conversions); cadence grid with tick phases and a 60-minute attack; the deployed baseline
+  job against the oracle (cold start, one and three hours, poisoned); poisoner variants (hard
+  deny, recovery); Monte Carlo counts with Wilson intervals; spread residuals per run;
+  conditional containment time with contained counts in every table.
+- The hard budget ceiling belongs to the `circuit_breaker` flag (the ablation now removes the
+  whole layer); the baseline job's fallback averages the closed hours it has instead of 24;
+  a graded per-block counter (`block_count_action = "graded"`) exists as a comparator.
+- Tests on a real `redis-server` across two pipeline instances (budget ceiling, per-number
+  claim, concurrent callbacks, block events, compare-and-set); the fakes can simulate vendor
+  latency and the load test has a capacity phase with the floor on.
+- `paper/figures.py` draws the manuscript figures from the recorded results;
+  `scripts/headline_numbers.py` maps every README number to its study, seeds and JSON path.
+
+## 2.5.0
 
 Implementation and evaluation fixes from the Reviewer 2 report (`docs/evaluation.md`, "What
 changed after the Reviewer 2 report"): the code travels in the message; the challenge proof
