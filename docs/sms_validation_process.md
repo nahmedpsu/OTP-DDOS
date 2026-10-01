@@ -122,10 +122,13 @@ speed, that accumulate the log-likelihood ratio of each resolved send and are fl
 minus one threshold (`block_credit_thresholds = 1`), so a block can bank only a bounded
 amount of goodwill: a carrier that verifies a hundred codes and then stops is caught after
 about ten unverified sends. A plain cumulative SPRT (`block_test = "sprt"`) would need 143
-more after that history; Page's CUSUM with no credit (`block_credit_thresholds = 0`) would
-need five but, on a busy block whose users convert at 65 %, reaches a false verdict
-roughly a hundred times a day (`results/evaluation.md`, sections F and H). The credit is
-the dial between trust-building resistance and false positives. A 10 000-number block is touched by legitimate traffic a
+more after that history: detection delayed by the accumulated credit, not ruled out. Page's
+CUSUM with no credit (`block_credit_thresholds = 0`) would need five but, across 200 busy
+legitimate blocks converting at 65 %, produces about 150 false verdict events a day against
+7 with one threshold of credit (`results/evaluation.md`, section F2). Algebraically a floor
+of -c x log(threshold) is a zero-floor CUSUM with threshold (1 + c) x log(threshold) and a
+head start of c x log(threshold); the credit is the dial between detection delay and false
+positives. A 10 000-number block is touched by legitimate traffic a
 fraction of a time per day, so a block with several sends is almost certainly one
 party's. Two tests, each reaching a verdict when the likelihood ratio attacker:legitimate
 exceeds 1 000: conversion (real users verify 80 %, a flooder at most 10 %: five

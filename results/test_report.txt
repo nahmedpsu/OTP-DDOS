@@ -1,11 +1,316 @@
-........................................................................ [ 31%]
-........................................................................ [ 63%]
-........................................................................ [ 95%]
-...........                                                              [100%]
+........................................................................ [ 26%]
+........................................................................ [ 52%]
+........................................................................ [ 79%]
+.........................................................                [100%]
 =============================== warnings summary ===============================
 ../../../usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1
   /usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-227 passed, 1 warning in 124.71s (0:02:04)
+==================================== PASSES ====================================
+____________________ test_synthetic_logs_replay_round_trip _____________________
+----------------------------- Captured stdout call -----------------------------
+wrote 319 rows to /tmp/pytest-of-root/pytest-46/test_synthetic_logs_replay_rou0/logs.csv
+_______ test_recaptcha_rejects_wrong_action_or_hostname_and_fails_closed _______
+------------------------------ Captured log call -------------------------------
+WARNING  otp_guard.providers:recaptcha.py:26 recaptcha unavailable: down
+_____________ test_play_integrity_fails_closed_when_google_is_down _____________
+------------------------------ Captured log call -------------------------------
+WARNING  otp_guard.providers:attestation.py:55 play integrity unavailable:
+______________________ test_ipinfo_basic_plan_and_outage _______________________
+------------------------------ Captured log call -------------------------------
+WARNING  otp_guard.providers:ip_intel.py:27 ipinfo unavailable for 5.6.7.8:
+________________________ test_twilio_lookup_fails_open _________________________
+------------------------------ Captured log call -------------------------------
+WARNING  otp_guard.providers:hlr.py:26 twilio lookup unavailable for 966501234567:
+________________ test_routing_sender_routes_delays_and_reports _________________
+------------------------------ Captured log call -------------------------------
+ERROR    otp_guard.providers:senders.py:112 send failed log_id=2 channel=whatsapp: boom
+ERROR    otp_guard.providers:senders.py:102 no sender for channel=push provider=None
+_________________ test_slack_alert_posts_and_survives_failure __________________
+------------------------------ Captured log call -------------------------------
+ERROR    otp_guard.alerts:alerts.py:28 slack alert failed: 
+WARNING  otp_guard.alerts:alerts.py:14 ALERT x None
+ERROR    otp_guard.alerts:alerts.py:28 slack alert failed:
+___________ test_synchronous_provider_failure_is_classified[memory] ____________
+------------------------------ Captured log call -------------------------------
+ERROR    otp_guard.providers:senders.py:112 send failed log_id=1 channel=sms: provider down
+____________ test_synchronous_provider_failure_is_classified[redis] ____________
+------------------------------ Captured log call -------------------------------
+ERROR    otp_guard.providers:senders.py:112 send failed log_id=1 channel=sms: provider down
+=========================== short test summary info ============================
+PASSED tests/integration/test_api.py::test_health_reports_wiring
+PASSED tests/integration/test_api.py::test_web_session_requires_recaptcha
+PASSED tests/integration/test_api.py::test_full_web_flow_request_then_verify
+PASSED tests/integration/test_api.py::test_rejected_and_sent_requests_are_indistinguishable
+PASSED tests/integration/test_api.py::test_no_session_and_spoofed_platform
+PASSED tests/integration/test_api.py::test_attested_app_session_uses_one_time_challenge
+PASSED tests/integration/test_api.py::test_legacy_app_session_only_during_grace
+PASSED tests/integration/test_api.py::test_client_ip_ignores_forged_forwarded_for_from_untrusted_peer
+PASSED tests/integration/test_api.py::test_internal_timeout_tick_requires_credential
+PASSED tests/integration/test_real_redis.py::test_budget_ceiling_holds_across_instances
+PASSED tests/integration/test_real_redis.py::test_one_number_cannot_be_claimed_twice_across_instances
+PASSED tests/integration/test_real_redis.py::test_concurrent_verification_callbacks_count_once_across_instances
+PASSED tests/integration/test_real_redis.py::test_concurrent_block_events_across_instances_count_exactly
+PASSED tests/integration/test_real_redis.py::test_store_update_serialises_conflicting_writers
+PASSED tests/integration/test_replay.py::test_synthetic_logs_replay_round_trip
+PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[memory]
+PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[redis]
+PASSED tests/integration/test_scenarios.py::test_rotating_ips_across_datacenter_asn[memory]
+PASSED tests/integration/test_scenarios.py::test_rotating_ips_across_datacenter_asn[redis]
+PASSED tests/integration/test_scenarios.py::test_rotating_residential_ips_are_caught_by_conversion_feedback[memory]
+PASSED tests/integration/test_scenarios.py::test_rotating_residential_ips_are_caught_by_conversion_feedback[redis]
+PASSED tests/integration/test_scenarios.py::test_sms_pumping_to_premium_range_is_impossible[memory]
+PASSED tests/integration/test_scenarios.py::test_sms_pumping_to_premium_range_is_impossible[redis]
+PASSED tests/integration/test_scenarios.py::test_sequential_number_walk_is_stopped_early[memory]
+PASSED tests/integration/test_scenarios.py::test_sequential_number_walk_is_stopped_early[redis]
+PASSED tests/integration/test_scenarios.py::test_legitimate_user_journey[memory]
+PASSED tests/integration/test_scenarios.py::test_legitimate_user_journey[redis]
+PASSED tests/integration/test_scenarios.py::test_verify_endpoint_brute_force_protection[memory]
+PASSED tests/integration/test_scenarios.py::test_verify_endpoint_brute_force_protection[redis]
+PASSED tests/integration/test_scenarios.py::test_verify_endpoint_session_rate_limit[memory]
+PASSED tests/integration/test_scenarios.py::test_verify_endpoint_session_rate_limit[redis]
+PASSED tests/integration/test_scenarios.py::test_marketing_campaign_override_lifts_cap[memory]
+PASSED tests/integration/test_scenarios.py::test_marketing_campaign_override_lifts_cap[redis]
+PASSED tests/unit/test_evaluation.py::test_containment_definition
+PASSED tests/unit/test_evaluation.py::test_mean_ci_and_ks
+PASSED tests/unit/test_evaluation.py::test_simulation_runs_and_is_deterministic
+PASSED tests/unit/test_evaluation.py::test_v1_leaks_more_than_v2_for_datacenter_attacker
+PASSED tests/unit/test_factory.py::test_empty_env_builds_all_fakes_and_reports_them
+PASSED tests/unit/test_factory.py::test_full_env_wires_real_adapters
+PASSED tests/unit/test_factory.py::test_kill_switch_and_grace_parsing
+PASSED tests/unit/test_providers.py::test_recaptcha_maps_success_and_score
+PASSED tests/unit/test_providers.py::test_recaptcha_rejects_wrong_action_or_hostname_and_fails_closed
+PASSED tests/unit/test_providers.py::test_play_integrity_accepts_good_verdict_and_sends_bearer
+PASSED tests/unit/test_providers.py::test_play_integrity_rejects_bad_verdicts[override0]
+PASSED tests/unit/test_providers.py::test_play_integrity_rejects_bad_verdicts[override1]
+PASSED tests/unit/test_providers.py::test_play_integrity_rejects_bad_verdicts[override2]
+PASSED tests/unit/test_providers.py::test_play_integrity_rejects_bad_verdicts[override3]
+PASSED tests/unit/test_providers.py::test_play_integrity_rejects_bad_verdicts[override4]
+PASSED tests/unit/test_providers.py::test_play_integrity_fails_closed_when_google_is_down
+PASSED tests/unit/test_providers.py::test_app_attest_valid_assertion_and_counter_advances
+PASSED tests/unit/test_providers.py::test_app_attest_rejects_replay_wrong_nonce_bad_signature_wrong_app_unknown_key
+PASSED tests/unit/test_providers.py::test_composite_dispatches_on_platform
+PASSED tests/unit/test_providers.py::test_ipinfo_maps_asn_privacy_and_caches
+PASSED tests/unit/test_providers.py::test_ipinfo_basic_plan_and_outage
+PASSED tests/unit/test_providers.py::test_abuseipdb_composite_raises_abuse_score
+PASSED tests/unit/test_providers.py::test_twilio_lookup_mapping[True-mobile-True-True-False]
+PASSED tests/unit/test_providers.py::test_twilio_lookup_mapping[True-landline-True-False-False]
+PASSED tests/unit/test_providers.py::test_twilio_lookup_mapping[True-nonFixedVoip-True-True-True]
+PASSED tests/unit/test_providers.py::test_twilio_lookup_mapping[True-premium-True-False-False]
+PASSED tests/unit/test_providers.py::test_twilio_lookup_mapping[False-None-False-False-False]
+PASSED tests/unit/test_providers.py::test_twilio_lookup_fails_open
+PASSED tests/unit/test_providers.py::test_twilio_messaging_request_shapes
+PASSED tests/unit/test_providers.py::test_http_provider_and_fcm
+PASSED tests/unit/test_providers.py::test_routing_sender_routes_delays_and_reports
+PASSED tests/unit/test_providers.py::test_slack_alert_posts_and_survives_failure
+PASSED tests/unit/test_review_round3.py::test_sent_message_carries_the_code_that_verifies[memory]
+PASSED tests/unit/test_review_round3.py::test_sent_message_carries_the_code_that_verifies[redis]
+PASSED tests/unit/test_review_round3.py::test_template_without_placeholder_gets_the_code_appended[memory]
+PASSED tests/unit/test_review_round3.py::test_template_without_placeholder_gets_the_code_appended[redis]
+PASSED tests/unit/test_review_round3.py::test_challenge_proof_goes_through_the_adapter_interface[memory]
+PASSED tests/unit/test_review_round3.py::test_challenge_proof_goes_through_the_adapter_interface[redis]
+PASSED tests/unit/test_review_round3.py::test_google_adapter_verify_challenge_shape
+PASSED tests/unit/test_review_round3.py::test_per_number_claim_is_atomic_under_concurrency
+PASSED tests/unit/test_review_round3.py::test_number_claim_released_when_a_later_step_refuses[memory]
+PASSED tests/unit/test_review_round3.py::test_number_claim_released_when_a_later_step_refuses[redis]
+PASSED tests/unit/test_review_round3.py::test_duplicate_callbacks_are_idempotent[memory]
+PASSED tests/unit/test_review_round3.py::test_duplicate_callbacks_are_idempotent[redis]
+PASSED tests/unit/test_review_round3.py::test_hard_budget_ceiling_is_atomic_and_unconditional[memory]
+PASSED tests/unit/test_review_round3.py::test_hard_budget_ceiling_is_atomic_and_unconditional[redis]
+PASSED tests/unit/test_review_round3.py::test_cusum_block_test_banks_only_bounded_goodwill[memory]
+PASSED tests/unit/test_review_round3.py::test_cusum_block_test_banks_only_bounded_goodwill[redis]
+PASSED tests/unit/test_review_round3.py::test_plain_sprt_banks_goodwill_for_comparison[memory]
+PASSED tests/unit/test_review_round3.py::test_plain_sprt_banks_goodwill_for_comparison[redis]
+PASSED tests/unit/test_review_round3.py::test_block_tests_can_be_restricted[memory]
+PASSED tests/unit/test_review_round3.py::test_block_tests_can_be_restricted[redis]
+PASSED tests/unit/test_review_round3.py::test_default_worker_runs_the_baseline_job[memory]
+PASSED tests/unit/test_review_round3.py::test_default_worker_runs_the_baseline_job[redis]
+PASSED tests/unit/test_second_round.py::test_synchronous_sender_callback_lands_on_registered_state[memory]
+PASSED tests/unit/test_second_round.py::test_synchronous_sender_callback_lands_on_registered_state[redis]
+PASSED tests/unit/test_second_round.py::test_synchronous_provider_failure_is_classified[memory]
+PASSED tests/unit/test_second_round.py::test_synchronous_provider_failure_is_classified[redis]
+PASSED tests/unit/test_second_round.py::test_repeated_positive_receipt_does_not_move_the_delivery_clock[memory]
+PASSED tests/unit/test_second_round.py::test_repeated_positive_receipt_does_not_move_the_delivery_clock[redis]
+PASSED tests/unit/test_second_round.py::test_negative_receipt_after_delivery_is_a_counted_conflict[memory]
+PASSED tests/unit/test_second_round.py::test_negative_receipt_after_delivery_is_a_counted_conflict[redis]
+PASSED tests/unit/test_second_round.py::test_late_positive_receipt_reopens_an_undelivered_send[memory]
+PASSED tests/unit/test_second_round.py::test_late_positive_receipt_reopens_an_undelivered_send[redis]
+PASSED tests/unit/test_second_round.py::test_positive_receipt_corrects_an_earlier_failed_one[memory]
+PASSED tests/unit/test_second_round.py::test_positive_receipt_corrects_an_earlier_failed_one[redis]
+PASSED tests/unit/test_second_round.py::test_receipt_after_the_code_expired_or_was_used_is_ignored[memory]
+PASSED tests/unit/test_second_round.py::test_receipt_after_the_code_expired_or_was_used_is_ignored[redis]
+PASSED tests/unit/test_second_round.py::test_late_verification_after_failed_is_reclassified_but_a_verdict_stands[memory]
+PASSED tests/unit/test_second_round.py::test_late_verification_after_failed_is_reclassified_but_a_verdict_stands[redis]
+PASSED tests/unit/test_second_round.py::test_concurrent_verifications_of_one_message_count_once[memory]
+PASSED tests/unit/test_second_round.py::test_concurrent_verifications_of_one_message_count_once[redis]
+PASSED tests/unit/test_second_round.py::test_concurrent_block_events_are_all_counted_and_cross_once[memory]
+PASSED tests/unit/test_second_round.py::test_concurrent_block_events_are_all_counted_and_cross_once[redis]
+PASSED tests/unit/test_second_round.py::test_concurrent_duplicate_receipts_apply_once[memory]
+PASSED tests/unit/test_second_round.py::test_concurrent_duplicate_receipts_apply_once[redis]
+PASSED tests/unit/test_second_round.py::test_store_update_is_a_serialised_read_modify_write[memory]
+PASSED tests/unit/test_second_round.py::test_store_update_is_a_serialised_read_modify_write[redis]
+PASSED tests/unit/test_second_round.py::test_verdict_log_records_every_event_with_its_stage[memory]
+PASSED tests/unit/test_second_round.py::test_verdict_log_records_every_event_with_its_stage[redis]
+PASSED tests/unit/test_second_round.py::test_circuit_breaker_off_removes_the_hard_ceiling_too[memory]
+PASSED tests/unit/test_second_round.py::test_circuit_breaker_off_removes_the_hard_ceiling_too[redis]
+PASSED tests/unit/test_second_round.py::test_baseline_job_cold_start_uses_only_recorded_hours[memory]
+PASSED tests/unit/test_second_round.py::test_baseline_job_cold_start_uses_only_recorded_hours[redis]
+PASSED tests/unit/test_second_round.py::test_graded_block_counter_challenges_then_downgrades_first_time_clients[memory]
+PASSED tests/unit/test_second_round.py::test_graded_block_counter_challenges_then_downgrades_first_time_clients[redis]
+PASSED tests/unit/test_simulator_invariants.py::test_offered_workload_is_identical_across_designs
+PASSED tests/unit/test_simulator_invariants.py::test_cohorts_reconcile_and_the_funnel_is_monotone
+PASSED tests/unit/test_simulator_invariants.py::test_gate_losses_are_in_the_denominator
+PASSED tests/unit/test_simulator_invariants.py::test_clock_advances_the_nominal_duration_whatever_the_gate_does
+PASSED tests/unit/test_simulator_invariants.py::test_run_drains_to_its_horizon
+PASSED tests/unit/test_simulator_invariants.py::test_legitimate_blocks_are_distinct_and_occupancy_is_reported
+PASSED tests/unit/test_simulator_invariants.py::test_trust_builder_phases_add_up_and_pairs_are_one_to_one
+PASSED tests/unit/test_simulator_invariants.py::test_verdicts_are_counted_as_events_with_stages
+PASSED tests/unit/test_simulator_invariants.py::test_attack_can_stop_early_for_recovery_studies
+PASSED tests/unit/test_steps.py::test_web_happy_path_sends_sms_and_logs[memory]
+PASSED tests/unit/test_steps.py::test_web_happy_path_sends_sms_and_logs[redis]
+PASSED tests/unit/test_steps.py::test_attested_ios_from_any_host_is_allowed[memory]
+PASSED tests/unit/test_steps.py::test_attested_ios_from_any_host_is_allowed[redis]
+PASSED tests/unit/test_steps.py::test_step0_proxy_is_blocked_regardless_of_host[memory]
+PASSED tests/unit/test_steps.py::test_step0_proxy_is_blocked_regardless_of_host[redis]
+PASSED tests/unit/test_steps.py::test_step0_platform_header_spoofing_gets_no_exemption[memory]
+PASSED tests/unit/test_steps.py::test_step0_platform_header_spoofing_gets_no_exemption[redis]
+PASSED tests/unit/test_steps.py::test_step0_spoofed_platform_still_needs_recaptcha[memory]
+PASSED tests/unit/test_steps.py::test_step0_spoofed_platform_still_needs_recaptcha[redis]
+PASSED tests/unit/test_steps.py::test_step0_invalid_attestation_is_blocked[memory]
+PASSED tests/unit/test_steps.py::test_step0_invalid_attestation_is_blocked[redis]
+PASSED tests/unit/test_steps.py::test_step0_legacy_app_allowed_during_grace_with_delay_tier[memory]
+PASSED tests/unit/test_steps.py::test_step0_legacy_app_allowed_during_grace_with_delay_tier[redis]
+PASSED tests/unit/test_steps.py::test_step0_legacy_app_blocked_after_grace[memory]
+PASSED tests/unit/test_steps.py::test_step0_legacy_app_blocked_after_grace[redis]
+PASSED tests/unit/test_steps.py::test_step0_web_from_unauthorized_host_blocked[memory]
+PASSED tests/unit/test_steps.py::test_step0_web_from_unauthorized_host_blocked[redis]
+PASSED tests/unit/test_steps.py::test_step1_missing_or_forged_session_rejected[memory]
+PASSED tests/unit/test_steps.py::test_step1_missing_or_forged_session_rejected[redis]
+PASSED tests/unit/test_steps.py::test_step1_expired_session_rejected[memory]
+PASSED tests/unit/test_steps.py::test_step1_expired_session_rejected[redis]
+PASSED tests/unit/test_steps.py::test_step1_session_platform_must_match_trusted_platform[memory]
+PASSED tests/unit/test_steps.py::test_step1_session_platform_must_match_trusted_platform[redis]
+PASSED tests/unit/test_steps.py::test_step1_nonce_replay_rejected[memory]
+PASSED tests/unit/test_steps.py::test_step1_nonce_replay_rejected[redis]
+PASSED tests/unit/test_steps.py::test_step1_session_cap_three_per_ten_minutes[memory]
+PASSED tests/unit/test_steps.py::test_step1_session_cap_three_per_ten_minutes[redis]
+PASSED tests/unit/test_steps.py::test_step2_ip_limit_five_per_minute[memory]
+PASSED tests/unit/test_steps.py::test_step2_ip_limit_five_per_minute[redis]
+PASSED tests/unit/test_steps.py::test_step2_cgnat_asn_gets_the_higher_ip_cap[memory]
+PASSED tests/unit/test_steps.py::test_step2_cgnat_asn_gets_the_higher_ip_cap[redis]
+PASSED tests/unit/test_steps.py::test_step2_subnet_limit_catches_ip_rotation_inside_a_block[memory]
+PASSED tests/unit/test_steps.py::test_step2_subnet_limit_catches_ip_rotation_inside_a_block[redis]
+PASSED tests/unit/test_steps.py::test_step2_datacenter_asn_capped_at_fifty[memory]
+PASSED tests/unit/test_steps.py::test_step2_datacenter_asn_capped_at_fifty[redis]
+PASSED tests/unit/test_steps.py::test_step2_tor_exit_blocked[memory]
+PASSED tests/unit/test_steps.py::test_step2_tor_exit_blocked[redis]
+PASSED tests/unit/test_steps.py::test_rate_limit_is_atomic_under_concurrency
+PASSED tests/unit/test_steps.py::test_try_acquire_all_consumes_nothing_when_one_limit_is_full
+PASSED tests/unit/test_steps.py::test_step3_invalid_token_and_low_score_rejected[memory]
+PASSED tests/unit/test_steps.py::test_step3_invalid_token_and_low_score_rejected[redis]
+PASSED tests/unit/test_steps.py::test_step3_threshold_rises_in_elevated_mode[memory]
+PASSED tests/unit/test_steps.py::test_step3_threshold_rises_in_elevated_mode[redis]
+PASSED tests/unit/test_steps.py::test_step4_origin_must_be_allowed_domain[memory]
+PASSED tests/unit/test_steps.py::test_step4_origin_must_be_allowed_domain[redis]
+PASSED tests/unit/test_steps.py::test_step5_normalises_plus_and_leading_zeros[memory]
+PASSED tests/unit/test_steps.py::test_step5_normalises_plus_and_leading_zeros[redis]
+PASSED tests/unit/test_steps.py::test_step5_country_not_in_allow_list[memory]
+PASSED tests/unit/test_steps.py::test_step5_country_not_in_allow_list[redis]
+PASSED tests/unit/test_steps.py::test_step5_oman_blocked_from_web_and_legacy_but_allowed_from_attested_app[memory]
+PASSED tests/unit/test_steps.py::test_step5_oman_blocked_from_web_and_legacy_but_allowed_from_attested_app[redis]
+PASSED tests/unit/test_steps.py::test_step5_bulk_flag_alone_does_not_skip_country_check[memory]
+PASSED tests/unit/test_steps.py::test_step5_bulk_flag_alone_does_not_skip_country_check[redis]
+PASSED tests/unit/test_steps.py::test_step5_premium_prefix_blocked[memory]
+PASSED tests/unit/test_steps.py::test_step5_premium_prefix_blocked[redis]
+PASSED tests/unit/test_steps.py::test_step5_elevated_prefix_capped_per_hour_and_flagged[memory]
+PASSED tests/unit/test_steps.py::test_step5_elevated_prefix_capped_per_hour_and_flagged[redis]
+PASSED tests/unit/test_steps.py::test_step5_sequential_numbers_flagged_then_blocked[memory]
+PASSED tests/unit/test_steps.py::test_step5_sequential_numbers_flagged_then_blocked[redis]
+PASSED tests/unit/test_steps.py::test_step5_hlr_rejects_dead_numbers_and_is_cached[memory]
+PASSED tests/unit/test_steps.py::test_step5_hlr_rejects_dead_numbers_and_is_cached[redis]
+PASSED tests/unit/test_steps.py::test_step5_verified_number_skips_hlr[memory]
+PASSED tests/unit/test_steps.py::test_step5_verified_number_skips_hlr[redis]
+PASSED tests/unit/test_steps.py::test_step5_voip_number_is_a_risk_signal[memory]
+PASSED tests/unit/test_steps.py::test_step5_voip_number_is_a_risk_signal[redis]
+PASSED tests/unit/test_steps.py::test_step6_text_rules[memory]
+PASSED tests/unit/test_steps.py::test_step6_text_rules[redis]
+PASSED tests/unit/test_steps.py::test_step6_excluded_number[memory]
+PASSED tests/unit/test_steps.py::test_step6_excluded_number[redis]
+PASSED tests/unit/test_steps.py::test_step6_test_server_skip_needs_credential[memory]
+PASSED tests/unit/test_steps.py::test_step6_test_server_skip_needs_credential[redis]
+PASSED tests/unit/test_steps.py::test_step7_clean_user_scores_under_twenty[memory]
+PASSED tests/unit/test_steps.py::test_step7_clean_user_scores_under_twenty[redis]
+PASSED tests/unit/test_steps.py::test_step7_single_strong_signal_only_delays[memory]
+PASSED tests/unit/test_steps.py::test_step7_single_strong_signal_only_delays[redis]
+PASSED tests/unit/test_steps.py::test_step7_stacked_signals_block[memory]
+PASSED tests/unit/test_steps.py::test_step7_stacked_signals_block[redis]
+PASSED tests/unit/test_steps.py::test_step7_challenge_tier_returns_challenge_then_retry_passes[memory]
+PASSED tests/unit/test_steps.py::test_step7_challenge_tier_returns_challenge_then_retry_passes[redis]
+PASSED tests/unit/test_steps.py::test_step7_low_conversion_reputation_raises_score[memory]
+PASSED tests/unit/test_steps.py::test_step7_low_conversion_reputation_raises_score[redis]
+PASSED tests/unit/test_steps.py::test_step7_fresh_burst_of_legitimate_traffic_is_not_penalised[memory]
+PASSED tests/unit/test_steps.py::test_step7_fresh_burst_of_legitimate_traffic_is_not_penalised[redis]
+PASSED tests/unit/test_steps.py::test_step8_progressive_backoff_and_daily_cap[memory]
+PASSED tests/unit/test_steps.py::test_step8_progressive_backoff_and_daily_cap[redis]
+PASSED tests/unit/test_steps.py::test_step9_web_per_minute_cap_and_adaptive_tightening[memory]
+PASSED tests/unit/test_steps.py::test_step9_web_per_minute_cap_and_adaptive_tightening[redis]
+PASSED tests/unit/test_steps.py::test_step9_per_country_override_applies[memory]
+PASSED tests/unit/test_steps.py::test_step9_per_country_override_applies[redis]
+PASSED tests/unit/test_steps.py::test_step10_breaker_moves_to_elevated_then_emergency[memory]
+PASSED tests/unit/test_steps.py::test_step10_breaker_moves_to_elevated_then_emergency[redis]
+PASSED tests/unit/test_steps.py::test_step10_spend_units_trip_breaker_before_count[memory]
+PASSED tests/unit/test_steps.py::test_step10_spend_units_trip_breaker_before_count[redis]
+PASSED tests/unit/test_steps.py::test_step10_kill_switch[memory]
+PASSED tests/unit/test_steps.py::test_step10_kill_switch[redis]
+PASSED tests/unit/test_steps.py::test_step11_delay_tier_queues_sms_with_backoff[memory]
+PASSED tests/unit/test_steps.py::test_step11_delay_tier_queues_sms_with_backoff[redis]
+PASSED tests/unit/test_steps.py::test_step11_downgrade_uses_push_or_whatsapp_never_sms[memory]
+PASSED tests/unit/test_steps.py::test_step11_downgrade_uses_push_or_whatsapp_never_sms[redis]
+PASSED tests/unit/test_steps.py::test_step11_uniform_response_for_reject_and_send[memory]
+PASSED tests/unit/test_steps.py::test_step11_uniform_response_for_reject_and_send[redis]
+PASSED tests/unit/test_steps.py::test_step11_timing_floor_hides_which_step_rejected[memory]
+PASSED tests/unit/test_steps.py::test_step11_timing_floor_hides_which_step_rejected[redis]
+PASSED tests/unit/test_steps.py::test_step11_audit_log_has_risk_fields[memory]
+PASSED tests/unit/test_steps.py::test_step11_audit_log_has_risk_fields[redis]
+PASSED tests/unit/test_steps.py::test_datacenter_asn_is_denylisted_but_residential_asn_is_not[memory]
+PASSED tests/unit/test_steps.py::test_datacenter_asn_is_denylisted_but_residential_asn_is_not[redis]
+PASSED tests/unit/test_steps.py::test_sustained_flood_bonus_reaches_challenge_without_other_signals[memory]
+PASSED tests/unit/test_steps.py::test_sustained_flood_bonus_reaches_challenge_without_other_signals[redis]
+PASSED tests/unit/test_steps.py::test_v1_feature_profile_reproduces_the_original_gaps
+PASSED tests/unit/test_steps.py::test_reduced_adaptive_cap_spares_known_good_clients_only[memory]
+PASSED tests/unit/test_steps.py::test_reduced_adaptive_cap_spares_known_good_clients_only[redis]
+PASSED tests/unit/test_steps.py::test_instant_verification_is_a_signal[memory]
+PASSED tests/unit/test_steps.py::test_instant_verification_is_a_signal[redis]
+PASSED tests/unit/test_steps.py::test_destination_block_never_verifying_gets_a_graded_verdict[memory]
+PASSED tests/unit/test_steps.py::test_destination_block_never_verifying_gets_a_graded_verdict[redis]
+PASSED tests/unit/test_steps.py::test_graded_verdict_solved_challenge_sends_and_second_verdict_escalates[memory]
+PASSED tests/unit/test_steps.py::test_graded_verdict_solved_challenge_sends_and_second_verdict_escalates[redis]
+PASSED tests/unit/test_steps.py::test_deny_mode_denylists_the_block_at_step5[memory]
+PASSED tests/unit/test_steps.py::test_deny_mode_denylists_the_block_at_step5[redis]
+PASSED tests/unit/test_steps.py::test_destination_block_with_mostly_verified_sends_has_no_verdict[memory]
+PASSED tests/unit/test_steps.py::test_destination_block_with_mostly_verified_sends_has_no_verdict[redis]
+PASSED tests/unit/test_steps.py::test_destination_block_machine_verified_gets_a_verdict[memory]
+PASSED tests/unit/test_steps.py::test_destination_block_machine_verified_gets_a_verdict[redis]
+PASSED tests/unit/test_steps.py::test_humanlike_verification_has_no_verdict[memory]
+PASSED tests/unit/test_steps.py::test_humanlike_verification_has_no_verdict[redis]
+PASSED tests/unit/test_steps.py::test_send_without_receipt_is_undelivered_not_failed[memory]
+PASSED tests/unit/test_steps.py::test_send_without_receipt_is_undelivered_not_failed[redis]
+PASSED tests/unit/test_steps.py::test_failed_receipt_is_undelivered_and_feeds_no_block_test[memory]
+PASSED tests/unit/test_steps.py::test_failed_receipt_is_undelivered_and_feeds_no_block_test[redis]
+PASSED tests/unit/test_steps.py::test_resolution_clock_runs_from_the_receipt[memory]
+PASSED tests/unit/test_steps.py::test_resolution_clock_runs_from_the_receipt[redis]
+PASSED tests/unit/test_steps.py::test_fast_verification_is_clocked_from_the_receipt[memory]
+PASSED tests/unit/test_steps.py::test_fast_verification_is_clocked_from_the_receipt[redis]
+PASSED tests/unit/test_steps.py::test_delivery_collapse_on_a_carrier_suspends_block_tests[memory]
+PASSED tests/unit/test_steps.py::test_delivery_collapse_on_a_carrier_suspends_block_tests[redis]
+PASSED tests/unit/test_steps.py::test_conversion_collapse_of_known_good_clients_is_an_outage_but_a_flood_is_not[memory]
+PASSED tests/unit/test_steps.py::test_conversion_collapse_of_known_good_clients_is_an_outage_but_a_flood_is_not[redis]
+PASSED tests/unit/test_steps.py::test_late_verification_is_reclassified[memory]
+PASSED tests/unit/test_steps.py::test_late_verification_is_reclassified[redis]
+PASSED tests/unit/test_steps.py::test_relative_baseline_fires_when_a_healthy_key_drops[memory]
+PASSED tests/unit/test_steps.py::test_relative_baseline_fires_when_a_healthy_key_drops[redis]
+PASSED tests/unit/test_steps.py::test_session_layer_off_keeps_client_identity[memory]
+PASSED tests/unit/test_steps.py::test_session_layer_off_keeps_client_identity[redis]
+273 passed, 1 warning in 140.64s (0:02:20)

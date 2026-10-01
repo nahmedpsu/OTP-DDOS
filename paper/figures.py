@@ -54,8 +54,8 @@ def fig1_leakage(R, out):
     names = [n for n in ATTACKER_LABELS if n in ms["behavioural_only"]]
     y = list(range(len(names)))
     fig, axes = plt.subplots(1, 3, figsize=(11, 4.6), sharey=True)
-    panels = [("behavioural_only", "leaked_total", "SMS leaked of ~600 requests, caps lifted"),
-              ("with_adaptive_caps", "leaked_total", "SMS leaked, caps on (static v1, adaptive v2)"),
+    panels = [("behavioural_only", "leaked_total", "SMS leaked, caps lifted"),
+              ("with_adaptive_caps", "leaked_total", "SMS leaked, caps on"),
               ("with_adaptive_caps", "legit_completed_pct", "Legitimate completion %, caps on")]
     for ax, (mode, metric, title) in zip(axes, panels):
         style(ax, title)
@@ -164,6 +164,7 @@ def fig6_detectors(R, out):
     style(axes[0], "human-like verifying carrier"); style(axes[1], "carrier that never verifies")
     groups = {"sequential": (C["blue"], "sequential tests"), "counter": (C["orange"], "flat counter")}
     for ax, aname in zip(axes, ("concentrated_pumper_verifies_humanlike", "concentrated_pumper_no_verify")):
+        pts = []
         for dname in Dt[aname]:
             g = "counter" if dname.startswith("counter") else "sequential"
             col, _ = groups[g]
@@ -173,7 +174,20 @@ def fig6_detectors(R, out):
             ax.scatter(x, y, s=46, color=col, marker=marker, edgecolors=SURFACE, linewidths=1, zorder=3)
             short = dname.replace("sequential, threshold ", "T").replace(", credit ", " c").replace(" (default)", "*").replace(" (Page's CUSUM)", "") \
                          .replace("counter, ", "N").replace(" per block per day, ", " ").replace("unbounded credit (SPRT)", "SPRT")
-            ax.annotate(short, (x, y), textcoords="offset points", xytext=(5, 3), fontsize=6.5, color=INK2)
+            pts.append((x, y, short))
+        # direct labels, spread vertically where points stack (same x, close y)
+        pts.sort(key=lambda t: (round(t[0]), t[1]))
+        yspan = max(p[1] for p in pts) - min(p[1] for p in pts) or 1
+        last = None
+        for x, y, short in pts:
+            ty = y
+            if last is not None and abs(x - last[0]) < 3 and (ty - last[1]) < 0.035 * yspan:
+                ty = last[1] + 0.035 * yspan
+            ax.annotate(short, (x, y), xytext=(x + 1.2, ty), fontsize=6.5, color=INK2,
+                        arrowprops=dict(arrowstyle="-", color=AXIS, linewidth=0.5) if abs(ty - y) > 0.01 * yspan else None)
+            last = (x, ty)
+        ax.set_ylim(top=max(ax.get_ylim()[1], last[1] + 0.06 * yspan))      # room for the stacked labels
+        ax.set_xlim(right=max(ax.get_xlim()[1], max(p[0] for p in pts) + 22))
         ax.set_xlabel("legitimate completion % at 65 % conversion, 144 sends/block/day (24 h)", color=INK, fontsize=8)
     axes[0].set_ylabel("SMS leaked by the pumper in 20 min", color=INK)
     from matplotlib.lines import Line2D
