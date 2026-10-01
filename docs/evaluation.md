@@ -227,6 +227,12 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
   (randomised versus fixed attacker parameters).
 - **Economics**: an event-level bill (every session attempt's token, every request, every solved
   challenge, proxy traffic) and the break-even revenue share instead of one assumed share.
+- **Legitimate traffic is paired across scenarios.** Legitimate requests are drawn from their own
+  random stream, independent of the attacker, so at a given seed every scenario (no attack included)
+  offers the same legitimate users. Before this, an attack run and the no-attack run at the same
+  seed offered different users, and the first full run of the robustness study failed claim C1 on
+  its service clause in 32 of 108 cells for that reason alone (no cell failed on leakage); that run
+  is kept in `results/robustness_first_run.md`, and every study was rerun.
 - **Returning users** are a pre-existing population of account holders with stable identity and
   number and verified history written before the run; whether a request was actually treated as
   known-good is recorded separately.
