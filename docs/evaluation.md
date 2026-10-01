@@ -178,6 +178,59 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
   (`tests/integration/test_real_redis.py`), which is the only place those properties are
   established; vendors remain untested live.
 
+## What changed after the third-round report
+
+- **Fallback.** The simulator drew each request's WhatsApp reachability, stored it and hashed it,
+  but never wrote it into the registry the channel selector reads, so no downgraded user was ever
+  served over WhatsApp. That regression came from the second-round rewrite of the simulator and
+  invalidated every service figure for policies that downgrade (the graded counter above all).
+  The draw now reaches the selector before each request; `tests/unit/test_simulator_invariants.py`
+  asserts dispatch and completion at 0 %, 70 % and 100 % reachability.
+- **Verdict estimands.** Three quantities, reported separately: incidence (verdict events issued
+  inside the observation window), exposure (block-minutes under a verdict inside the window: the
+  union of active intervals intersected with the window, including verdicts issued before it, never
+  negative) and eventual events (issued at or after the attack start including the drain, i.e.
+  caused by sends inside the window). The second-round exposure clipped interval ends to the window
+  but kept drain-time starts, which produced negative block-minutes.
+- **Atomic compound transitions and exactly-once effects** (`feedback.py`): a negative receipt
+  marks the send failed and resolves it as undelivered in one compare-and-set; a timeout decides
+  inside the compare-and-set; a code entry counts the attempt and closes the send together; the
+  effects of a transition are recorded in the same write and applied idempotently, with a
+  write-ahead intent and a recovery sweep for a process that dies in between. The block verdict
+  lives in the block's document, so the stage is decided in the crossing write. Interleaving and
+  crash-injection tests on both backends; graded escalation and crash recovery across two
+  instances on a real Redis.
+- **The destination counter counts SMS sends** to the block in its window (stage read at Step 5,
+  send reserved atomically at Step 11); a refused or challenged request and its retry cost nothing
+  unless an SMS goes out. Windows: daily, or short and refilling.
+- **Matched comparison on a common pipeline** (section F2): every row runs the full pipeline with
+  only the destination policy changed; settings are selected on tuning seeds against a predeclared
+  service target and evaluated on held-out seeds, at three block densities, at 65 % and 80 %
+  conversion, with completion attributable to the policy measured per request against no policy
+  on the same offered trace. The second-round "system comparison" (counter rows without the risk
+  engine and feedback) is replaced.
+- **Predeclared robustness study** (section R; `config/evaluation_protocol.json`, committed and
+  pushed before any run that uses it).
+- **Attributable versus descriptive harm.** "Hit and never completed" is kept as a descriptive
+  count; attributable loss compares the same requests with the intervention enabled and disabled
+  (none, or observe-only verdicts for the poisoner).
+- **Learned baseline over its own timescale** (section B3): three previous weeks of the attack's
+  hour, stale profiles, schedule-aware poisoning, two workers, a restart; paired differences
+  against the clean weekly profile with bootstrap intervals, no equivalence claims.
+- **Containment** needs five sustained quiet minutes; a 60-minute attack reports survival; time to
+  first verdict is reported beside containment.
+- **Adaptive attackers**: a white-box threshold-aware carrier that replays its own pending outcomes
+  in the deployed application order, and a 30-minute trust builder; two design alternatives
+  (trust budget, receipt-robust tests) evaluated against them and for their legitimate cost.
+- **Statistics**: percentile-bootstrap intervals over runs (inside the data range) everywhere,
+  90th percentile and maximum for counts, leak share per run, and a variance decomposition
+  (randomised versus fixed attacker parameters).
+- **Economics**: an event-level bill (every session attempt's token, every request, every solved
+  challenge, proxy traffic) and the break-even revenue share instead of one assumed share.
+- **Returning users** are a pre-existing population of account holders with stable identity and
+  number and verified history written before the run; whether a request was actually treated as
+  known-good is recorded separately.
+
 ## Metric definitions
 
 All per-run metrics are computed from one simulated attack window (20 minutes unless the
@@ -185,7 +238,7 @@ table says otherwise, after a legitimate-only warm-up so that history and baseli
 
 | Metric | Definition |
 |---|---|
-| **Time to containment** | The earliest minute *m* such that for every minute ≥ *m* the attacker's leaked SMS are at most 5 % of the attacker's request rate in that minute, in minutes from attack start. A run that never satisfies the condition within its 20 minutes is censored: it is reported through the *contained fraction*, and the mean time is taken over contained seeds only. Because the condition is checked to the end of a finite run, a quiet final minute can satisfy it; the late-leak column shows what followed. |
+| **Time to containment** | The earliest minute *m* such that for every minute ≥ *m* the attacker's leaked SMS are at most 5 % of the attacker's request rate in that minute, with at least five such minutes before the run ends, in minutes from attack start. A run that never satisfies the condition within its 20 minutes is censored: it is reported through the *contained fraction*, and the mean time is taken over contained seeds only. Because the condition is checked to the end of a finite run, a quiet final minute can satisfy it; the late-leak column shows what followed. |
 | **SMS leaked before containment** | Sum of the attacker's leaked SMS over minutes before *m* (all leaked SMS if not contained). |
 | **Late leak** (formerly "steady state") | Mean leaked SMS per minute over minutes ≥ *m*; over the last 5 minutes if not contained. It is a late-window rate, not evidence of stationarity: hourly budgets, daily reputation, expiring verdicts and the controller all keep moving. |
 | **Total leaked** | Sum over the 20-minute window. |
@@ -194,6 +247,9 @@ table says otherwise, after a legitimate-only warm-up so that history and baseli
 | **Friction, stratified** | The same outcomes for first-time clients and returning clients, where *returning* is a property of the offered trace (an identity the trace offered before). Whether that identity holds verified history depends on what the defence did with its earlier request, so a returning client refused earlier is counted here as a returning client refused again. The headline refusal figure for a design is the first-time rate. |
 | **Friction: challenge rate %** | Legitimate requests that were shown an interactive challenge (90 % of simulated users then solve it). |
 | **Friction: refusal rate %** | Legitimate requests lost at the session gate, refused by a hard step, downgraded with no channel, or whose delivery failed (`refused_by` names the stage). |
+| **Verdict incidence / exposure / eventual** | Incidence: events issued inside [attack start, end of the last minute]. Exposure: block-minutes under a verdict inside that window (union of active intervals intersected with the window, including verdicts issued before it). Eventual: events issued at or after the attack start, including the drain. |
+| **Attributable loss** | Requests that completed in the paired run without the intervention (no destination policy, or verdicts recorded but not enforced) and did not complete with it, minus the reverse, on the same offered trace (request ids aligned; the workload hash is asserted equal). |
+| **Intervals** | 95 % percentile bootstrap over runs (2 000 resamples); paired differences are bootstrapped per seed. |
 | **Verdict events / blocks with a verdict** | Events: every verdict the block tests issued in the window (a block can be judged more than once; a second verdict inside the TTL escalates to stage 2). Blocks: distinct blocks among them. *Requests hit*: legitimate requests that met a verdict (by stage); *never completed*: those among them whose code was never entered. *Block-minutes under verdict*: the union of the verdict intervals per block, capped at the run's end. |
 | **Friction: added delay** | Mean seconds of queueing added by the `delay` tier over delivered legitimate requests. |
 | **Attacker profit** | Leaked SMS × SMS price × revenue share − (proxy bytes × price per GB + CAPTCHA tokens + solved challenges) × prices. Only pumping profiles earn revenue. |

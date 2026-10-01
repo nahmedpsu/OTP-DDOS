@@ -5,5 +5,5 @@
   "creators": [{"name": "nahmedpsu (GitHub)"}],
   "keywords": ["OTP", "SMS pumping", "artificially inflated traffic", "rate limiting", "fraud prevention"],
   "access_right": "open",
-  "version": "2.6.0", "license": "MIT"
+  "version": "2.7.0", "license": "MIT"
 }

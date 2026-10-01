@@ -1,6 +1,45 @@
 # Changelog
 
-## 2.6.0 (unreleased)
+## 2.7.0 (unreleased)
+
+Repairs from the third-round review (`docs/evaluation.md`, "What changed after the third-round
+report"):
+
+- **Fallback channels exist in the simulation.** The per-request WhatsApp reachability was drawn
+  and hashed but never written into the channel registry, so every downgraded user was refused
+  (a regression introduced in 2.6.0). It is now registered before each request; studies at 0 %,
+  70 % and 100 % reachability are reported.
+- **Verdict estimands.** Incidence inside the observation window, exposure as the union of active
+  intervals intersected with the window (inherited verdicts included, never negative) and
+  eventual events including the drain are reported separately.
+- **Compound transitions are atomic, effects exactly once.** A negative receipt resolves
+  undelivered in the same write; timeouts and code entries decide inside one compare-and-set;
+  effects are recorded in that write and applied idempotently with a recovery sweep; the block
+  verdict and its stage live in the block document (graded escalation under concurrency).
+  Crash-injection tests; graded escalation and crash recovery on a real Redis.
+- **The destination counter counts sends**, reserved at Step 11; a challenge and its retry are not
+  charged. Daily and short refilling windows.
+- **Matched comparison on a common pipeline**, selected on tuning seeds against a predeclared
+  service target and evaluated on held-out seeds at three densities, with attributable loss
+  per request against no policy; a full threshold x credit grid with matched false-alarm burden.
+- **Predeclared robustness study** (`config/evaluation_protocol.json`, committed before the runs):
+  held-out attack rates and pools, heterogeneous legitimate traffic, a 12-point joint parameter
+  shift, five claims with pass thresholds.
+- Weekly-profile baseline study (stale profiles, schedule-aware poisoning, two workers, restart)
+  with paired effects; baseline job safe across workers and restarts; partial hours skipped.
+- Threshold-aware carrier and long-preparation trust builder; two design alternatives (trust
+  budget, receipt-robust tests) evaluated against them and for their legitimate cost.
+- Containment needs five sustained quiet minutes; 60-minute attacks with survival curves; time to
+  first verdict. Poisoning against an observe-only counterfactual; recovery over a full verdict
+  lifetime.
+- Statistics: percentile-bootstrap intervals (inside the data range), tail summaries, leak share,
+  variance decomposition; event-level attacker bill with break-even revenue shares.
+- App Attest enrolment endpoint to Apple's published steps (synthetic-chain tests).
+- Load test: heavy-tailed and timing-out vendors, adversarial mixture.
+- Artifact: `results/study_specs.json` (every run's configuration and hash),
+  `results/attacker_profiles.md`, manuscript figures without embedded titles, headline map.
+
+## 2.6.0
 
 Implementation and evaluation repairs from the second-round review (`docs/evaluation.md`,
 "What changed after the second-round report"):
