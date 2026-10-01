@@ -537,8 +537,10 @@ that matters is the **destination block**: a pumper is paid only on the numbers 
 partner carrier terminates. A block that never verifies reaches a verdict after five
 sends; a block whose codes are almost all entered within seconds of delivery is
 machine-verified and reaches one too. A carrier that verifies with human-like delay
-defeats both (it must verify at least 42 % of its codes to do so, each a verified fake
-account, `evaluation/model.py`), and turns
+defeats the conversion test (it must verify at least 42 % of its codes to do so, each a
+verified fake account, `evaluation/model.py`); whether the speed test still catches it
+depends on the credit its block has banked (`block_credit_thresholds`: 158 leaked of 600
+with none, 440 with the default one threshold, all with unbounded credit), and it turns
 the pumping into verified fake accounts, whose cost falls on whatever the account is for.
 The `challenge_passed` credit can be bought from a solving service; it reduces friction
 for people, it is not a defence against solvers.

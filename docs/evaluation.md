@@ -21,11 +21,18 @@ These are measured, not hypothetical. Each one is in `results/evaluation.md` or
 2. **Exposure before the feedback loop has data equals the attack rate times the OTP
    timeout.** With a 10-minute timeout an attacker at 30 requests a minute is paid 300 SMS
    before any conversion signal exists. Only a shorter timeout moves this (section C1).
-3. **A sequential-number walk is now stopped** (about 60 leaked of 600, every seed
-   contained) because it stays inside one destination block, which reaches a verdict after
-   five unverified sends. An earlier version of the design leaked 300 of 600 on this
+3. **A sequential-number walk is contained, not stopped** (62 to 71 leaked of 600, every
+   seed contained) because it stays inside one destination block, which reaches a verdict
+   after five unverified sends. An earlier version of the design leaked 300 of 600 on this
    attacker; the fix is the block key, not the narrow-range signal, which alone lands in
-   the `delay` tier.
+   the `delay` tier. A plain limit of five sends per block per day (`block_limit_only`,
+   section A) does better here (5 leaked) and also stops the premium pumper at 5; the
+   sequential tests justify themselves only against carriers that verify (item 7).
+3b. **The adaptive cap's rationing exists only because the controller runs every minute.**
+   Against the diluted residential attackers the same design run every 10 minutes leaks
+   565 at 2 % first-time refusal and hourly 575 at 1.3 % (section B2), against 256 at
+   47.5 % every minute. The worker's default cadence is one minute; a deployment that runs
+   it less often has v1's rationing.
 4. **Carrier-grade NAT delivers only 50 % without configuration** (`CGNAT_ASNS`).
 5. **A campaign burst delivers 12.5 % under the default source caps** unless the cap is
    raised beforehand.
@@ -35,32 +42,53 @@ These are measured, not hypothetical. Each one is in `results/evaluation.md` or
    touch, and the cost has a closed form.** Leakage is about 5 B + rate x 2.5 min for a
    carrier that never verifies and 5 B for one that verifies within a second, with B the
    8-digit blocks touched (section G matches the model to within a few SMS at every
-   point of the spread sweep). Three blocks cost 104 and 18 SMS; 300 blocks leak like the
+   point of the spread sweep). Three blocks cost 99 and 36 SMS; 300 blocks leak like the
    flooder. **A colluding carrier that verifies at least 42 % of its codes with human-like
-   delay is indistinguishable from real traffic on any key**, including the destination
-   block (559 of 600 leaked, 323 verified fake accounts per run). The human-like case
-   moves the cost downstream into fake accounts.
+   delay is indistinguishable from real traffic on any key** by the conversion test; what
+   the speed test then does to it depends on the credit the block has banked (item 7d):
+   with the default one threshold of credit it leaks 440 of 600 with 264 verified fake
+   accounts per run, with no credit 158 and 93, with unbounded credit 575. The human-like
+   case moves the cost downstream into fake accounts.
 7b. **The block tests are calibrated, and a wrong calibration costs real users.** They
    assume 80 % legitimate conversion and 20 % of verifications within 5 s of delivery
-   (OS autofill). Section H1: at a true conversion of 65 % about 2 % of blocks with
-   30 or more sends a day reach a verdict; at 50 %, 9 to 25 %. Section H2 (24 hours of
-   legitimate traffic): at 80 % conversion 0 to 2 verdicts a day touching at most a
-   couple of real users; at 65 %, 3 to 18 verdicts touching 1 to 22 of 29 000 users, who
-   meet a challenge rather than a refusal (delivery stays at 99.3 %). The speed test is
-   the lesser risk: even a 30 % autofill share against a 20 % calibration adds under
-   1 % of blocks. `sprt_legit_conversion` and `sprt_legit_fast` must come from measured
-   traffic.
+   (OS autofill). Section H1: at a true conversion of 65 % 1 to 3 % of blocks with 10 to
+   100 sends a day reach a verdict; at 50 %, 9 to 41 %. Section H2 (24 hours of
+   legitimate traffic, five seeds per cell): at 80 % conversion 0 to 2 verdicts a day
+   touching at most a couple of real users; at 65 %, 6 to 21 verdicts touching 20 to 43 of
+   about 29 000 users, who meet a challenge rather than a refusal (delivery stays at
+   99.3 %). The speed test is the lesser risk: a 30 % autofill share against a 20 %
+   calibration adds 1 to 5 verdicts a day on dense blocks and under 1 % of blocks in the
+   Monte Carlo, and recalibrating removes it. `sprt_legit_conversion` and
+   `sprt_legit_fast` must come from measured traffic.
 7c. **A carrier outage looks like a pumper unless receipts and the outage detector say
    otherwise.** Section H3: with the send-clocked design a 30-minute outage on one prefix
-   flagged 1.4 blocks and touched 1.8 real users; with delivery receipts gating the tests
-   and the carrier-wide suspension, none. The receipt signal is only as honest as the
-   provider's reports, and the conversion signal (returning clients only, so a decoy
-   flood cannot buy a suspension) needs ten of them.
+   flagged 1.5 blocks and touched 2.9 real users; with delivery receipts gating the tests
+   and the carrier-wide suspension, 0.5 to 0.75 blocks and 1 to 2 users. The receipt
+   signal is only as honest as the provider's reports, and the conversion signal
+   (returning clients only, so a decoy flood cannot buy a suspension) needs ten of them.
+7d. **How much goodwill a block may bank is a trade-off the operator must choose.** The
+   block statistics are floored at minus `block_credit_thresholds` thresholds. At 0
+   (Page's CUSUM) a trust-building carrier is caught after five unverified sends whatever
+   its history, and the human-like concentrated pumper leaks 158, but a legitimate block
+   converting at 65 % reaches a false verdict 103 to 139 times a day and 700 to 870 real
+   users a day meet a challenge. At the default of 1 the same population produces 6 to 21
+   verdicts and 20 to 43 users, and the human-like pumper leaks 440. Unbounded credit
+   (plain SPRT) never catches it. Sections F and H carry all three.
+7e. **Faked receipts and bought trust defeat the block tests outright.** A carrier that
+   reports every delivery as failed feeds the tests nothing: 567 leaked without caps, 255
+   with, no verdict ever (section D). A pumper whose 500 identities and numbers verify
+   everything for ten minutes and then flood leaks 511 and 349 and keeps 194 to 262
+   verified fake accounts; the verified-history exemptions work in its favour. Only the
+   caps and the spend breaker bound either.
+7f. **The block key can be turned against real users.** An attacker that floods the blocks
+   real users concentrate on earns them verdicts: 8 to 12 blocks per run, 11 to 25 % of
+   real users made to solve a challenge, 11 to 20 % of requests challenged (section D). The
+   graded verdict keeps this at a challenge; the hard denylist would refuse them.
 8. **A challenge solver who buys interactive-challenge solutions receives the -20
    `challenge_passed` credit** and can move from `challenge` back to `delay`; a datacenter
-   attacker that does so turns 0 leaked SMS into about 50 per run (section D). A pumper
+   attacker that does so turns 0 leaked SMS into 53 to 56 per run (section D). A pumper
    that solves the challenge of a stage-1 block verdict earns a second verdict and is
-   moved off SMS: 122 leaked against 104 under the hard denylist (section F).
+   moved off SMS: 115 leaked against 102 under the hard denylist (section F).
 9. **The feedback loop separates attackers only on keys they dominate.** With the
    ablation baseline on the same seeds, removing it raises leakage for the reused-profile
    attacker (it dominates its fingerprint key) and for the sequential walk (it dominates a
@@ -248,9 +276,10 @@ account the defender now holds.
   little traffic it takes most of half an hour to see ten of them, during which a silent
   outage can produce verdicts; the delivery-receipt signal is faster and is what a
   provider with honest reports gives you.
-- **A colluding carrier can fake failed receipts** for other people's sends on its prefix
-  to suspend the tests there; every such window raises an outage alert. The simulation
-  does not model this.
+- **A colluding carrier can fake failed receipts.** For its own sends this is the
+  `receipt_faking_carrier` profile in section D (no verdict ever); for other people's
+  sends on its prefix it would suspend the tests there and raise an outage alert on every
+  such window. The simulation models the first, not the second.
 - **The confidence intervals cover seed-to-seed variation only**, not calibration error.
 
 ## Performance and timing-leak method
