@@ -114,13 +114,16 @@ resolved sends of history on the key and so cannot act in the first hours of a k
 life; in the evaluation it adds nothing on top of the destination-block key, and it is not
 a default (`results/evaluation.md`, section F).
 
-**Destination blocks are judged by sequential tests of the CUSUM form**, not by the
+**Destination blocks are judged by sequential tests with bounded credit**, not by the
 shared-key thresholds above. Each block keeps two statistics, conversion and verification
 speed, that accumulate the log-likelihood ratio of each resolved send and are floored at
-zero after every event (Page's CUSUM), so a block cannot bank goodwill: a carrier that
-verifies a hundred codes and then stops is caught after the same five unverified sends as
-one that never verified. (The plain cumulative SPRT, kept as `block_test = "sprt"` for
-comparison, would need 143 more failures after that history.) A 10 000-number block is touched by legitimate traffic a
+minus one threshold (`block_credit_thresholds = 1`), so a block can bank only a bounded
+amount of goodwill: a carrier that verifies a hundred codes and then stops is caught after
+about ten unverified sends. A plain cumulative SPRT (`block_test = "sprt"`) would need 143
+more after that history; Page's CUSUM with no credit (`block_credit_thresholds = 0`) would
+need five but, on a busy block whose users convert at 65 %, reaches a false verdict
+roughly a hundred times a day (`results/evaluation.md`, sections F and H). The credit is
+the dial between trust-building resistance and false positives. A 10 000-number block is touched by legitimate traffic a
 fraction of a time per day, so a block with several sends is almost certainly one
 party's. Two tests, each reaching a verdict when the likelihood ratio attacker:legitimate
 exceeds 1 000: conversion (real users verify 80 %, a flooder at most 10 %: five

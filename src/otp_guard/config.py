@@ -115,8 +115,10 @@ class Config:
                                             # Android SMS Retriever, WebOTP) a fifth or more of real users are this fast.
     sprt_attack_fast: float = 0.9           # P(verify within fast_verify_seconds | machine)
     sprt_min_events: int = 3
-    block_test: str = "cusum"               # 'cusum': evidence against the attacker hypothesis is floored at zero, so a
-                                            # block cannot bank goodwill (a trust-building carrier); 'sprt': plain cumulative
+    block_test: str = "cusum"               # 'cusum': the statistic is floored at -block_credit_thresholds x log(threshold), so a
+                                            # block can bank only a bounded amount of goodwill; 'sprt': plain cumulative (unbounded)
+    block_credit_thresholds: float = 1.0    # 0 = Page's CUSUM (no credit at all: catches a trust-builder after 5 failures but flags
+                                            # busy legitimate blocks); 1 = one threshold of credit (default); large = plain SPRT
     block_tests: tuple = ("conversion", "speed")
     block_count_limit: tuple = (5, 86400)   # the 'block_limit_only' baseline: sends per destination block per day
     budget_hard_ceiling: bool = True        # no SMS at all beyond the hourly budget; reserved atomically before sending

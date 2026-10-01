@@ -109,11 +109,17 @@ def _block_events(h, key, seq):
         h.p.feedback._block_event(key, verified=ev != "f", fast=ev == "fast")
 
 
-def test_cusum_block_test_does_not_bank_goodwill(h):
-    """B13: after 100 slow verifications, five failures still reach a verdict in CUSUM mode."""
+def test_cusum_block_test_banks_only_bounded_goodwill(h):
+    """B13: after 100 slow verifications a block holds one threshold of credit, so a verdict needs
+    about ten failures instead of five, not the 143 a plain SPRT would need; with no credit, five."""
     h.cfg.block_action = "deny"
     _block_events(h, "block:96650123", ["v"] * 100 + ["f"] * 5)
+    assert not h.p.store.exists("deny:block:96650123")
+    _block_events(h, "block:96650123", ["f"] * 5)
     assert h.p.store.exists("deny:block:96650123")
+    h.cfg.block_credit_thresholds = 0.0
+    _block_events(h, "block:96650127", ["v"] * 100 + ["f"] * 5)
+    assert h.p.store.exists("deny:block:96650127")
 
 
 def test_plain_sprt_banks_goodwill_for_comparison(h):

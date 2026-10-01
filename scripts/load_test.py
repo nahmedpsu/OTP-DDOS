@@ -165,6 +165,7 @@ def phase2(n, concurrency, floor_ms, redis_client):
             if kind == "challenge":
                 headers["Authorization"] = "Bearer " + wtoks[i // 10]
                 headers["Origin"] = "https://example.com"
+                headers["Host"] = "example.com"              # step 0 rejects web requests for any other host
                 body["recaptcha_token"] = "mid"
             else:
                 headers["X-App-Version"] = "3.0"

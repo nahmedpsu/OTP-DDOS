@@ -257,7 +257,8 @@ class FeedbackLoop:
             self.p.store.hincrby(skey, "f", 1, ttl=cfg.denylist_ttl)
             stat["conv"] += inc["fail"]
         if cfg.block_test == "cusum":
-            stat["conv"], stat["speed"] = max(0.0, stat["conv"]), max(0.0, stat["speed"])
+            floor = -cfg.block_credit_thresholds * math.log(cfg.sprt_threshold)
+            stat["conv"], stat["speed"] = max(floor, stat["conv"]), max(floor, stat["speed"])
         self.p.store.set("cusum:" + key, stat, cfg.denylist_ttl)
         self._sprt_block(key)
 

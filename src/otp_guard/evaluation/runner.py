@@ -222,6 +222,8 @@ PUMPING_VARIANTS = {
     "relative_baseline": (frozenset(_NO_FINE | {"relative_baseline"}), {"resolution_timeout_s": 600}),
     "all_three": (frozenset(ALL_FEATURES | {"relative_baseline"}), {"resolution_timeout_s": 120}),
     "default_with_hard_deny": (ALL_FEATURES, {"resolution_timeout_s": 120, "block_action": "deny"}),
+    "default, CUSUM with no credit (floor 0)": (ALL_FEATURES, {"resolution_timeout_s": 120, "block_credit_thresholds": 0.0}),
+    "default, plain SPRT (unbounded credit)": (ALL_FEATURES, {"resolution_timeout_s": 120, "block_test": "sprt"}),
 }
 PUMPING_WARMUP_MIN = 130     # crosses an hour boundary with >= 200 resolved legitimate sends in the previous hour bucket
 
@@ -386,6 +388,7 @@ def block_test_false_positives(cfg, trials=20_000, seed=3, conversions=FP_CONVER
     share of fast (autofill) verifications, with the tests parameterised as deployed (cfg)."""
     import math
     thr = math.log(cfg.sprt_threshold)
+    floor = -cfg.block_credit_thresholds * thr if cfg.block_test == "cusum" else -math.inf
     cv, cf = math.log(cfg.sprt_attack_conversion / cfg.sprt_legit_conversion), \
         math.log((1 - cfg.sprt_attack_conversion) / (1 - cfg.sprt_legit_conversion))
     sv, ss = math.log(cfg.sprt_attack_fast / cfg.sprt_legit_fast), math.log((1 - cfg.sprt_attack_fast) / (1 - cfg.sprt_legit_fast))
@@ -396,17 +399,20 @@ def block_test_false_positives(cfg, trials=20_000, seed=3, conversions=FP_CONVER
             for f in fast_shares:
                 verdicts = {"never_verified": 0, "machine_verified": 0}
                 for _ in range(trials):
-                    v = fl = fv = 0
+                    v = fl = 0
+                    conv = speed = 0.0          # the running statistics exactly as feedback._block_event keeps them
                     for _ in range(n):
                         if rng.random() < p:
                             v += 1
-                            fv += rng.random() < f
-                            if v >= cfg.sprt_min_events and fv * sv + (v - fv) * ss > thr:
+                            conv = max(floor, conv + cv)
+                            speed = max(floor, speed + (sv if rng.random() < f else ss))
+                            if v >= cfg.sprt_min_events and speed > thr:
                                 verdicts["machine_verified"] += 1
                                 break
                         else:
                             fl += 1
-                        if v + fl >= cfg.sprt_min_events and v * cv + fl * cf > thr:
+                            conv = max(floor, conv + cf)
+                        if v + fl >= cfg.sprt_min_events and conv > thr:
                             verdicts["never_verified"] += 1
                             break
                 out[(n, p, f)] = {k: val / trials for k, val in verdicts.items()}

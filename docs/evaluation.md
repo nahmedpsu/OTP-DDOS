@@ -96,7 +96,8 @@ These are measured, not hypothetical. Each one is in `results/evaluation.md` or
   delay.
 - Spread ranges are drawn without replacement; the observed count of blocks requested is
   reported and used by the model.
-- Block tests are CUSUM (evidence floored at zero); a trust-building pumper, a
+- Block tests are CUSUM with bounded credit (evidence floored at minus one threshold;
+  the no-credit and unbounded variants are evaluated side by side); a trust-building pumper, a
   receipt-faking carrier and a block poisoner are evaluated; six baseline designs are
   compared; the ablation reports paired per-seed differences and legitimate delivery.
 - The hourly budget is an atomic hard ceiling; per-number claims are atomic with release
