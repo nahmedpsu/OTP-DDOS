@@ -1,0 +1,61 @@
+{
+  "_comment": "Predeclared before the runs that use it (third-round review, R5, R10, R12). Committed on its own; the evaluation reads it and does not change it. scripts/run_evaluation.py records its SHA-256 in results/evaluation.json.",
+  "version": 1,
+  "seeds": {
+    "tuning": [100, 101, 102],
+    "evaluation": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    "note": "Settings are selected on the tuning seeds only and then evaluated on the evaluation seeds, which the selection never sees."
+  },
+  "matched_comparison": {
+    "pipeline": "common: every row runs ALL_FEATURES (risk engine, feedback, backoff, number intelligence, caps lifted); only the destination admission policy differs",
+    "policies": {
+      "none": "no destination policy (block tests off, no counter): the reference for attributable harm",
+      "sequential": "block tests, graded action; grid sprt_threshold x block_credit_thresholds",
+      "counter_graded_daily": "per-block counter of SMS sends, daily window, graded action (challenge past the limit, non-SMS past twice the limit)",
+      "counter_graded_short": "per-block counter of SMS sends, short window that refills, graded action",
+      "counter_refuse_daily": "per-block counter of SMS sends, daily window, refusing action"
+    },
+    "grids": {
+      "sequential_thresholds": [100, 300, 1000, 3000, 10000],
+      "sequential_credits": [0.0, 0.5, 1.0, 2.0, "unbounded"],
+      "counter_graded_daily_limits": [5, 10, 20, 40, 80, 160],
+      "counter_graded_short": [[1, 600], [2, 600], [4, 600], [3, 3600], [6, 3600], [12, 3600]],
+      "counter_refuse_daily_limits": [20, 80, 320]
+    },
+    "densities": {"200": "144 legitimate sends per block per day", "1000": "29 per block per day", "uniform": "about 4 per block per day"},
+    "legitimate_runs": {"minutes": 1440, "conversion_tuning": 0.65, "conversion_evaluation": [0.65, 0.8], "autofill": 0.2, "whatsapp_fraction": 0.7},
+    "attack_runs": {"attackers": ["concentrated_pumper_no_verify", "concentrated_pumper_verifies_instantly", "concentrated_pumper_verifies_humanlike", "concentrated_pumper_solves_challenges"], "minutes": 20, "warmup_minutes": 130, "caps_lifted": true},
+    "full_grid_density": "200",
+    "reduced_grid_at_other_densities": "counters, the default sequential setting and none",
+    "service_target": "legitimate completion % on the tuning seeds >= completion % of the default sequential setting (threshold 1000, credit 1) at the same density minus 0.5 percentage points",
+    "selection_rule": "within each policy family and density, among settings meeting the service target, the one with the lowest mean leakage summed over the four pumpers on the tuning seeds; ties to the more permissive setting",
+    "false_alarm_matching": "at density 200, for each credit value, the lowest threshold whose mean verdict events per day at 65 % conversion on the tuning seeds do not exceed the default's; reported at matched false-alarm burden on the evaluation seeds",
+    "reported": "service (completion, refusal, challenge) at 65 % and 80 %, leakage per pumper, verdict incidence and exposure, descriptive hits, and completion attributable to the policy (paired per request against 'none' on the same seed); paired differences against the default with bootstrap intervals"
+  },
+  "robustness": {
+    "points": 12,
+    "design": "Latin hypercube over the ranges below, generator seed 2026",
+    "ranges": {
+      "conversion": [0.6, 0.9],
+      "autofill_fraction": [0.0, 0.35],
+      "human_captcha_mean": [0.65, 0.9],
+      "whatsapp_fraction": [0.3, 1.0],
+      "returning_fraction": [0.05, 0.4],
+      "legit_rate_per_min": [10, 40]
+    },
+    "held_out_family": {
+      "legitimate_heterogeneity": {"block_conversion_sd": 0.1, "bad_route_fraction": 0.05, "bad_route_failure": 0.5, "resend_prob": 0.3, "bursts": [[5, 8, 3.0]]},
+      "attacker_rates_per_min": [60, 120],
+      "attacker_pool_sizes": [50000, 500000],
+      "note": "Attack rates and pools outside the 10-60 requests/min and 500-50 000 address ranges every tuned default was developed on; legitimate traffic with block-level conversion heterogeneity, poor routes, resends and a demand burst, none of which the defaults were tuned against."
+    },
+    "seeds_per_point": 3,
+    "claims": {
+      "C1": "Signature attacks (datacenter rotation, premium-prefix pumping, single client) with adaptive caps: leaked <= 5 % of attack requests and legitimate completion >= the no-attack completion at the same point and seed minus 2 percentage points. Holds if true in >= 90 % of (point, seed, attacker) cells.",
+      "C2": "Residential farm (human-like CAPTCHA scores), caps lifted: leaked >= 90 % of attack requests. Holds if true in >= 90 % of cells.",
+      "C3": "Concentrated pumper whose carrier never verifies, caps lifted: contained (5 sustained quiet minutes) with leaked <= 30 % of attack requests. Holds if true in >= 90 % of cells.",
+      "C4": "Default sequential tests, 6 hours of legitimate traffic on 200 blocks: at points with conversion >= 0.75, verdict events <= 1 per 1000 legitimate requests. Holds if true in >= 90 % of those cells; points below 0.75 are reported, not judged.",
+      "C5": "Residential farm with caps: v2 (adaptive) leaks <= 0.7 x v1 (static) on the same point and seed, and refuses at least 10 percentage points more first-time users. Holds if both are true in >= 90 % of cells."
+    }
+  }
+}
