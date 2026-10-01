@@ -46,3 +46,15 @@ def test_v1_leaks_more_than_v2_for_datacenter_attacker():
     rows = economics(s1, s2, "datacenter_rotation", earns_revenue=True)
     assert rows[0]["breakeven_share"] is not None and rows[1]["breakeven_share"] is None   # v2 leaked nothing
     assert rows[0]["attacker_cost_usd"] > 0 and rows[0]["tokens"] >= rows[0]["requests"]
+
+
+def test_every_enforcing_poisoner_variant_has_a_matched_observe_reference():
+    from otp_guard.evaluation import runner as R_
+    for vname, (cfg, active, minutes, wa) in R_.POISONER_VARIANTS.items():
+        ref = R_.poisoner_reference(vname)
+        if cfg.get("block_action") == "observe":
+            assert ref is None
+            continue
+        assert ref is not None, vname
+        rcfg, ractive, rminutes, rwa = R_.POISONER_VARIANTS[ref]
+        assert rcfg == {"block_action": "observe"} and (ractive, rminutes, rwa) == (active, minutes, wa)

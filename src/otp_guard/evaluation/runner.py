@@ -519,8 +519,23 @@ POISONER_VARIANTS = {
     "hard deny (24 h denylist)": ({"block_action": "deny"}, None, 20, 0.7),
     "observe only (counterfactual: verdicts recorded, nothing enforced)": ({"block_action": "observe"}, None, 20, 0.7),
     "graded, attacker stops after 10 min (recovery, 70-minute run)": ({}, 10, 70, 0.7),
+    # observe-only counterfactuals for the variants that change the offered trace or the run
+    "observe only, no fallback channel": ({"block_action": "observe"}, None, 20, 0.0),
+    "observe only, every user reachable on WhatsApp": ({"block_action": "observe"}, None, 20, 1.0),
+    "observe only, attacker stops after 10 min (70-minute run)": ({"block_action": "observe"}, 10, 70, 0.7),
 }
 POISONER_REFERENCE = "observe only (counterfactual: verdicts recorded, nothing enforced)"
+
+
+def poisoner_reference(vname):
+    """The observe-only variant with the same run length, attack length and fallback reachability (same offered trace)."""
+    cfg, active, minutes, wa = POISONER_VARIANTS[vname]
+    if cfg.get("block_action") == "observe":
+        return None
+    for rname, (rcfg, ractive, rminutes, rwa) in POISONER_VARIANTS.items():
+        if rcfg.get("block_action") == "observe" and (ractive, rminutes, rwa) == (active, minutes, wa):
+            return rname
+    return None
 
 
 def study_poisoner(seeds):

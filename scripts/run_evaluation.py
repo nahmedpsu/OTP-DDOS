@@ -60,15 +60,8 @@ def _job(spec):
     return run_sim(spec)
 
 
-def run_jobs(specs, procs):
-    """Longest runs first (24-hour runs dominate), results returned in the input order."""
-    order = sorted(range(len(specs)), key=lambda i: -(specs[i].minutes + specs[i].warmup_minutes + 60 * 24 * 7 * specs[i].profile_weeks / 60))
-    with mp.Pool(procs or mp.cpu_count()) as pool:
-        out = pool.map(_job, [specs[i] for i in order], chunksize=1)
-    res = [None] * len(specs)
-    for i, r in zip(order, out):
-        res[i] = r
-    return res
+REUSE = {}
+REUSED = [0, 0.0]      # runs taken from --reuse, wall time of the invocation that produced them
 
 
 def spec_key(spec):
@@ -78,6 +71,46 @@ def spec_key(spec):
     return json.dumps(d, sort_keys=True, default=str)
 
 
+def spec_hash(spec):
+    return hashlib.sha1(spec_key(spec).encode()).hexdigest()[:12]
+
+
+def load_reuse(path):
+    out = {}
+    prior = pathlib.Path(path).with_name("evaluation.json")
+    if prior.exists():
+        REUSED[1] = json.loads(prior.read_text())["meta"].get("wall_s", 0.0)
+    with gzip.open(path, "rt") as f:
+        for line in f:
+            r = json.loads(line)
+            key = (r.pop("spec_hash"), r["spec"]["seed"])
+            r.pop("study", None); r.pop("index", None)
+            out[key] = r
+    return out
+
+
+def run_jobs(specs, procs):
+    """Longest runs first (24-hour runs dominate), results returned in the input order. Runs whose
+    spec and seed match a row of --reuse are taken from it."""
+    res = [None] * len(specs)
+    todo = []
+    for i, sp in enumerate(specs):
+        hit = REUSE.get((spec_hash(sp), sp.seed))
+        if hit is not None:
+            res[i] = hit
+        else:
+            todo.append(i)
+    if REUSE:
+        REUSED[0] += len(specs) - len(todo)
+        print(f"  reused {len(specs) - len(todo)}, running {len(todo)}", flush=True)
+    order = sorted(todo, key=lambda i: -(specs[i].minutes + specs[i].warmup_minutes + 60 * 24 * 7 * specs[i].profile_weeks / 60))
+    with mp.Pool(procs or mp.cpu_count()) as pool:
+        out = pool.map(_job, [specs[i] for i in order], chunksize=1)
+    for i, r in zip(order, out):
+        res[i] = r
+    return res
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=30)
@@ -85,7 +118,11 @@ def main():
     ap.add_argument("--procs", type=int, default=None)
     ap.add_argument("--quick", action="store_true", help="few seeds, short legitimate runs: for CI")
     ap.add_argument("--out", default=str(ROOT / "results"))
+    ap.add_argument("--reuse", default=None, help="an earlier evaluation_runs.jsonl.gz: runs with an identical spec (same "
+                    "spec_hash and seed) are taken from it instead of rerun; the simulation is deterministic, so this only saves time")
     a = ap.parse_args()
+    global REUSE
+    REUSE = load_reuse(a.reuse) if a.reuse else {}
     out = pathlib.Path(a.out); out.mkdir(exist_ok=True)
     seeds = list(range(3 if a.quick else a.seeds))
     sseeds = list(range(2 if a.quick else a.sweep_seeds))
@@ -153,7 +190,7 @@ def main():
     with gzip.open(out / "evaluation_runs.jsonl.gz", "wt") as f:
         for (study, idx, spec), r in zip(all_jobs, all_results):
             r = dict(r); r["study"] = study; r["index"] = idx
-            r["spec_hash"] = hashlib.sha1(spec_key(spec).encode()).hexdigest()[:12]
+            r["spec_hash"] = spec_hash(spec)
             f.write(json.dumps(r, default=str) + "\n")
     write_study_specs(all_jobs, out / "study_specs.json")
     write_attacker_profiles(out / "attacker_profiles.md")
@@ -162,7 +199,8 @@ def main():
     cfg_default.sprt_legit_fast = max(0.005, legit_fast_share(cfg_default.fast_verify_seconds))   # as the sim sets it
     k_conv, k_fast = sends_to_verdict(cfg_default)
     protocol_sha = hashlib.sha256(R_.PROTOCOL_PATH.read_bytes()).hexdigest()
-    R = {"meta": {"seeds": len(seeds), "sweep_seeds": len(sseeds), "runs": len(all_jobs), "wall_s": wall,
+    R = {"meta": {"seeds": len(seeds), "sweep_seeds": len(sseeds), "runs": len(all_jobs), "wall_s": wall + (REUSED[1] if REUSED[0] else 0.0),
+                  "reused_runs": REUSED[0],
                   "calibration": CALIBRATION, "quick": a.quick, "protocol_sha256": protocol_sha,
                   "tuning_seeds": tuning_seeds, "evaluation_seeds": eval_seeds, "legit_day_minutes": day,
                   "intervals": "95 % percentile bootstrap over runs (2000 resamples); paired differences likewise",
@@ -237,12 +275,12 @@ def main():
 
     Po = {}
     g = group(*by["poisoner"], lambda i: i[0])
-    ref = g[R_.POISONER_REFERENCE]
     for vname, rs in g.items():
         Po[vname] = summarise(rs)
-        if vname != R_.POISONER_REFERENCE and rs[0]["spec"]["minutes"] == ref[0]["spec"]["minutes"] \
-                and rs[0]["spec"]["legit"]["whatsapp_fraction"] == ref[0]["spec"]["legit"]["whatsapp_fraction"]:
-            Po[vname]["attributable_loss_vs_observe"] = attributable_loss(rs, ref)
+        ref = R_.poisoner_reference(vname)
+        if ref is not None:
+            Po[vname]["attributable_loss_vs_observe"] = attributable_loss(rs, g[ref])
+            Po[vname]["observe_reference"] = ref
     R["poisoner"] = Po
 
     Al = {}
@@ -452,7 +490,9 @@ def write_markdown(R, path):
     meta = R["meta"]
     L = ["# Evaluation", "",
          f"Generated by `scripts/run_evaluation.py`: {meta['runs']} simulation runs in two stages, {meta['seeds']} seeds for the main "
-         f"study and {meta['sweep_seeds']} for most other studies, {meta['wall_s']:.0f} s wall time. Values are means with 95 % "
+         f"study and {meta['sweep_seeds']} for most other studies, {meta['wall_s']:.0f} s wall time"
+         + (f" (of which {meta['reused_runs']} runs were taken unchanged, by spec hash and seed, from an earlier invocation)" if meta.get("reused_runs") else "")
+         + ". Values are means with 95 % "
          "percentile-bootstrap intervals over runs in brackets (they stay inside the range of the data); paired differences are "
          "bootstrapped per seed and marked * when the interval excludes zero (many differences are inspected, so an isolated * is not "
          "evidence by itself). Metric definitions and limitations: `docs/evaluation.md`. Every configuration behind a table is in "
@@ -582,8 +622,9 @@ def write_markdown(R, path):
           "The poisoner floods the 20 blocks legitimate users concentrate on. *Requests hit*: legitimate requests that met a verdict, by "
           "stage; *hit and never completed* is descriptive (it includes people who would not have entered the code anyway). "
           "*Attributable loss* is causal on the same offered trace: requests that completed with verdicts recorded but not enforced "
-          "(the observe-only counterfactual) and did not complete under the variant, net of the reverse. The recovery variant stops the "
-          "attack after 10 minutes of a 70-minute run, longer than the verdicts' one-hour lifetime.", "",
+          "(the observe-only counterfactual with the same fallback reachability and run length) and did not complete under the variant, "
+          "net of the reverse. The recovery variant stops the attack after 10 minutes of a 70-minute run, longer than the verdicts' "
+          "one-hour lifetime. Observe-only rows are the counterfactuals.", "",
           "| Variant | Run (min) | WhatsApp reachable | Verdict events | Blocks with a verdict | Stage 1 / stage 2 | Block-minutes under verdict | Requests hit | Hit and never completed | Attributable loss (requests) | Attributable loss (% of users) | Hit after the attack stopped | Legit completed % | Legit challenged % |",
           "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for vname, (cfg, active, minutes, wa) in R_.POISONER_VARIANTS.items():

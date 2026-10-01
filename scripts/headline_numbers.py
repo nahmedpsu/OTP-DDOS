@@ -61,6 +61,8 @@ ENTRIES = [
     ("Receipt-faking carrier, robust receipts: paired leak difference", "evaluation.json", ("alternatives", "attack", "behavioural_only", "receipt_faking_carrier", "receipt-robust block tests", "paired_leak_vs_default"), "10 seeds, paired"),
     ("Trust builder, trust budget, caps: paired leak difference", "evaluation.json", ("alternatives", "attack", "with_adaptive_caps", "trust_building_pumper", "trust budget (8 exempt requests/min)", "paired_leak_vs_default"), "10 seeds, paired"),
     ("Poisoner, graded: attributable loss (requests)", "evaluation.json", ("poisoner", "graded verdicts (default)", "attributable_loss_vs_observe", "net_lost"), "10 seeds, paired per request"),
+    ("Poisoner, graded, no fallback channel: attributable loss (requests)", "evaluation.json", ("poisoner", "graded, no fallback channel", "attributable_loss_vs_observe", "net_lost"), "10 seeds, paired per request"),
+    ("Poisoner, recovery run (70 min): attributable loss (requests)", "evaluation.json", ("poisoner", "graded, attacker stops after 10 min (recovery, 70-minute run)", "attributable_loss_vs_observe", "net_lost"), "10 seeds, paired per request"),
     ("Poisoner, hard deny: attributable loss (requests)", "evaluation.json", ("poisoner", "hard deny (24 h denylist)", "attributable_loss_vs_observe", "net_lost"), "10 seeds, paired per request"),
     ("Fallback 0 %: graded 20/day counter completed %", "evaluation.json", ("false_positives", "fallback", "counter graded 20/day|0.0", "legit_completed_pct"), "5 seeds"),
     ("Fallback 70 %: graded 20/day counter completed %", "evaluation.json", ("false_positives", "fallback", "counter graded 20/day|0.7", "legit_completed_pct"), "5 seeds"),
