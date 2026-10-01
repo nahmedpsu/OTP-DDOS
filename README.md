@@ -207,18 +207,24 @@ Other things the evaluation established:
   under v1 and loses money under v2; a concentrated pumper whose carrier verifies with
   human-like delay stays profitable under both and additionally hands the defender
   323 verified fake accounts per 20 minutes; the instant verifier loses money under v2.
-- **Performance** (`results/performance.md`, real Redis, 4 uvicorn workers on 4 vCPUs, vendors
-  faked): a full send costs 16.3 ms p50 / 30.9 ms p99 in process with
-  46 Redis round trips (41 before delivery receipts, the block-test counters and the outage
-  windows were added). Over HTTP at concurrency 32 the service serves 183 requests/s
-  without the floor; with it, throughput is concurrency divided by the floor (69 requests/s here)
-  and is not a capacity figure. Timing leak, 6000 requests (3263 sent, 930 no session,
-  925 disallowed country, 882 repeated number): with the 400 ms floor no pair of outcomes is
-  distinguishable by Kolmogorov-Smirnov test (smallest p = 0.13); equivalence within 2 ms is shown by TOST
-  for 5 of 6 pairs; the no-session versus repeated-number pair is borderline (p = 0.06, mean
-  difference 0.90 ms); the largest mean difference is 0.97 ms. Pipeline time exceeded the floor in
-  0.08 % of requests. Without the floor every pair is distinguishable (p < 10⁻⁶).
-  A single worker at this concurrency does exceed the floor by wall time; size workers so it does not.
+- **Performance** (`results/performance.md`, real Redis, 4 uvicorn workers on 4 vCPUs, idle box,
+  vendors faked): a full send costs 14.8 ms p50 / 27.0 ms p99 in process with
+  46 Redis round trips. This run was about 1.7x slower across every step than the
+  2.3.0 run on the same container type, including steps unchanged since 2.3.0 (step 1: 0.43 to
+  0.70 ms, step 3: 0.09 to 0.14 ms, step 7: 1.73 to 2.66 ms), so the machine, not the code,
+  accounts for the bulk of the difference. The cost attributable to delivery receipts, the
+  block-test counters and the outage windows sits in step 11 (2.2 to 5.2 ms p50 here) and
+  5 extra round trips (41 to 46); on a 2-vCPU box running the same code against the 2.3.0
+  code the whole send cost 8.7 versus 8.3 ms, about 0.5 ms. Over HTTP at concurrency 32 the
+  service serves 203 requests/s without the floor; with it, throughput is concurrency divided
+  by the floor (70 requests/s here) and is not a capacity figure. Timing leak, 6000 requests
+  (3262 sent, 930 no session, 925 disallowed country, 883 repeated number): with the
+  400 ms floor the Kolmogorov-Smirnov test finds no difference for 5 of 6 pairs and a marginal
+  one for sent vs repeated number (p = 0.04, mean difference 0.4 ms);
+  TOST shows every pair equivalent within 2 ms (largest p = 0.0000, largest mean difference 0.47 ms);
+  pipeline time exceeded the floor in 0.00 % of requests. Without the floor every pair is
+  distinguishable (p < 10⁻⁶). A single worker at this concurrency does exceed the floor by wall time;
+  size workers so it does not.
 
 `results/analysis.md` is an earlier single-seed walkthrough without background traffic; it
 overstates containment for residential attackers and is kept for the use-case tables.

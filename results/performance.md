@@ -9,65 +9,65 @@ Redis round trips per request: **46.2** (commands: 217.4; the 24 hourly reputati
 | Step | n | p50 (ms) | p95 (ms) | p99 (ms) |
 |---|---:|---:|---:|---:|
 | step0 | 3000 | 0.00 | 0.01 | 0.01 |
-| step1 | 3000 | 0.76 | 1.31 | 1.85 |
-| step10 | 1615 | 0.64 | 1.03 | 1.54 |
-| step11 | 1615 | 5.74 | 9.35 | 12.03 |
-| step2 | 2541 | 0.87 | 1.47 | 2.01 |
-| step3 | 2541 | 0.16 | 0.28 | 0.41 |
-| step4 | 2541 | 0.01 | 0.01 | 0.02 |
-| step5 | 2541 | 3.31 | 5.34 | 6.80 |
+| step1 | 3000 | 0.70 | 1.15 | 1.60 |
+| step10 | 1615 | 0.59 | 0.92 | 1.35 |
+| step11 | 1615 | 5.22 | 8.35 | 10.39 |
+| step2 | 2541 | 0.79 | 1.28 | 1.76 |
+| step3 | 2541 | 0.14 | 0.24 | 0.36 |
+| step4 | 2541 | 0.01 | 0.01 | 0.01 |
+| step5 | 2541 | 3.05 | 4.91 | 6.65 |
 | step6 | 2077 | 0.00 | 0.00 | 0.00 |
-| step7 | 2077 | 2.89 | 4.86 | 6.20 |
-| step8 | 2077 | 0.15 | 0.30 | 0.47 |
-| step9 | 1615 | 0.98 | 1.62 | 2.20 |
+| step7 | 2077 | 2.66 | 4.36 | 5.38 |
+| step8 | 2077 | 0.14 | 0.25 | 0.40 |
+| step9 | 1615 | 0.90 | 1.47 | 2.32 |
 
 | Outcome | n | p50 (ms) | p95 (ms) | p99 (ms) |
 |---|---:|---:|---:|---:|
-| sent | 1615 | 16.31 | 24.65 | 30.87 |
-| step1 | 459 | 0.01 | 0.02 | 0.04 |
-| step5 | 464 | 1.85 | 3.00 | 3.77 |
-| step8 | 462 | 8.31 | 13.38 | 16.79 |
+| sent | 1615 | 14.78 | 22.74 | 27.01 |
+| step1 | 459 | 0.01 | 0.02 | 0.05 |
+| step5 | 464 | 1.70 | 2.63 | 3.51 |
+| step8 | 462 | 7.76 | 11.86 | 18.58 |
 
 ## Phase 2: HTTP through uvicorn (4 worker processes), 6000 requests at concurrency 32, with the 400 ms response floor
 
-Throughput 69.3 requests/s over 86.6 s (bounded by concurrency / floor = 80.0 req/s, not server capacity). Pipeline processing exceeded the floor in 0.08 % of requests (those leak timing).
+Throughput 69.6 requests/s over 86.2 s (bounded by concurrency / floor = 80.0 req/s, not server capacity). Pipeline processing exceeded the floor in 0.00 % of requests (those leak timing).
 
 | Server-side outcome | n | p50 (ms) | p95 (ms) | p99 (ms) | mean (ms) |
 |---|---:|---:|---:|---:|---:|
-| sent | 3263 | 444.3 | 451.9 | 479.9 | 446.5 |
-| step1 | 930 | 444.8 | 451.9 | 470.1 | 447.5 |
-| step5 | 925 | 444.9 | 451.8 | 462.9 | 446.6 |
-| step8 | 882 | 444.8 | 451.9 | 483.6 | 446.6 |
+| sent | 3262 | 444.1 | 451.0 | 456.1 | 445.6 |
+| step1 | 930 | 444.1 | 450.9 | 453.2 | 445.4 |
+| step5 | 925 | 444.1 | 451.2 | 456.0 | 445.7 |
+| step8 | 883 | 444.0 | 450.7 | 453.6 | 445.2 |
 
 Two-sample Kolmogorov-Smirnov tests on client-observed latency (an attacker's view): a small p-value means the outcomes are distinguishable by timing. The TOST column is an equivalence test on the mean difference with a +/-2 ms margin: a small p-value there means the means are demonstrably within 2 ms of each other.
 
 | Pair | n | KS statistic | KS p-value | mean diff (ms) | TOST p (equivalent within 2 ms) |
 |---|---:|---:|---:|---:|---:|
-| sent vs step1 | 3263 / 930 | 0.037 | 2.66e-01 | -0.97 | 4.98e-02 |
-| sent vs step5 | 3263 / 925 | 0.043 | 1.30e-01 | -0.09 | 1.84e-07 |
-| sent vs step8 | 3263 / 882 | 0.036 | 3.26e-01 | -0.07 | 2.86e-05 |
-| step1 vs step5 | 930 / 925 | 0.026 | 9.00e-01 | 0.89 | 4.52e-02 |
-| step1 vs step8 | 930 / 882 | 0.030 | 7.80e-01 | 0.90 | 6.31e-02 |
-| step5 vs step8 | 925 / 882 | 0.034 | 6.64e-01 | 0.01 | 6.75e-05 |
+| sent vs step1 | 3262 / 930 | 0.026 | 6.95e-01 | 0.13 | 3.12e-22 |
+| sent vs step5 | 3262 / 925 | 0.021 | 8.90e-01 | -0.08 | 9.99e-16 |
+| sent vs step8 | 3262 / 883 | 0.053 | 3.88e-02 | 0.39 | 5.40e-16 |
+| step1 vs step5 | 930 / 925 | 0.025 | 9.15e-01 | -0.21 | 3.85e-11 |
+| step1 vs step8 | 930 / 883 | 0.037 | 5.42e-01 | 0.26 | 2.01e-13 |
+| step5 vs step8 | 925 / 883 | 0.055 | 1.27e-01 | 0.47 | 2.10e-08 |
 
 ## Phase 2: HTTP through uvicorn (4 worker processes), 6000 requests at concurrency 32, floor disabled (control)
 
-Throughput 183.0 requests/s over 32.8 s (server capacity at this concurrency).
+Throughput 202.9 requests/s over 29.6 s (server capacity at this concurrency).
 
 | Server-side outcome | n | p50 (ms) | p95 (ms) | p99 (ms) | mean (ms) |
 |---|---:|---:|---:|---:|---:|
-| sent | 3261 | 200.6 | 385.1 | 442.3 | 220.5 |
-| step1 | 930 | 57.3 | 84.0 | 114.9 | 60.7 |
-| step5 | 925 | 75.5 | 127.6 | 156.3 | 80.7 |
-| step8 | 884 | 123.0 | 224.9 | 273.8 | 135.7 |
+| sent | 3265 | 184.9 | 295.0 | 352.6 | 194.6 |
+| step1 | 930 | 56.0 | 78.0 | 105.4 | 58.8 |
+| step5 | 925 | 72.1 | 106.0 | 130.0 | 75.6 |
+| step8 | 880 | 114.6 | 179.7 | 230.8 | 119.2 |
 
 Two-sample Kolmogorov-Smirnov tests on client-observed latency (an attacker's view): a small p-value means the outcomes are distinguishable by timing. The TOST column is an equivalence test on the mean difference with a +/-2 ms margin: a small p-value there means the means are demonstrably within 2 ms of each other.
 
 | Pair | n | KS statistic | KS p-value | mean diff (ms) | TOST p (equivalent within 2 ms) |
 |---|---:|---:|---:|---:|---:|
-| sent vs step1 | 3261 / 930 | 0.967 | 0.00e+00 | 159.86 | 1.00e+00 |
-| sent vs step5 | 3261 / 925 | 0.882 | 3.11e-322 | 139.86 | 1.00e+00 |
-| sent vs step8 | 3261 / 884 | 0.488 | 1.14e-151 | 84.80 | 1.00e+00 |
-| step1 vs step5 | 930 / 925 | 0.513 | 8.53e-112 | -20.00 | 1.00e+00 |
-| step1 vs step8 | 930 / 884 | 0.894 | 0.00e+00 | -75.06 | 1.00e+00 |
-| step5 vs step8 | 925 / 884 | 0.628 | 1.86e-167 | -55.06 | 1.00e+00 |
+| sent vs step1 | 3265 / 930 | 0.983 | 0.00e+00 | 135.75 | 1.00e+00 |
+| sent vs step5 | 3265 / 925 | 0.946 | 0.00e+00 | 118.95 | 1.00e+00 |
+| sent vs step8 | 3265 / 880 | 0.705 | 1.65e-321 | 75.39 | 1.00e+00 |
+| step1 vs step5 | 930 / 925 | 0.557 | 3.18e-133 | -16.81 | 1.00e+00 |
+| step1 vs step8 | 930 / 880 | 0.914 | 0.00e+00 | -60.36 | 1.00e+00 |
+| step5 vs step8 | 925 / 880 | 0.724 | 5.21e-229 | -43.56 | 1.00e+00 |
