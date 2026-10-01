@@ -15,7 +15,7 @@ table shows what the *other* layers do. `stopped_by` counts where each request e
 | `residential_captcha_farm`<br>Residential proxy pool, fresh fingerprint, reCAPTCHA score 0.9 | 60 | 2 | 0.0 | step7 540, sent:sms:delay 60 |
 | `residential_aged_unique_fingerprints`<br>Residential pool, unique fingerprints pre-aged 2 h, reCAPTCHA 0.9 | 150 | 5 | 0.0 | step7 450, sent:sms:delay 90, sent:sms:allow 60 |
 | `residential_reused_browser_profile`<br>Residential pool, one real 48-hour-old browser profile reused | 73 | 3 | 0.0 | step1 510, sent:sms:allow 47, sent:sms:delay 26 |
-| `sequential_numbers`<br>Residential pool, numbers 966501000000 upward | 60 | 2 | 0.0 | step5 510, sent:sms:delay 60, no_channel 30 |
+| `sequential_numbers`<br>Residential pool, numbers 966501000000 upward | 60 | 2 | 0.0 | step5 540, sent:sms:delay 60 |
 | `premium_prefix_pumping`<br>Residential pool, premium-rate prefix 96699 | 0 | 0 | 0.0 | step5 600 |
 | `spoofed_platform_header`<br>Residential pool, HTTP_PLATFORM: ios without attestation | 0 | 0 | 0.0 | step0 600 |
 

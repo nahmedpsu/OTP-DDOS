@@ -32,7 +32,10 @@ class AttackerSpec:
     captcha_classes: tuple = ("captcha_farm",)   # classes the per-seed randomisation may draw from
     fp_mode: str = "fresh"             # fresh | aged | reused | single
     numbers: str = "random"            # random | sequential | premium | elevated | concentrated
-    n_blocks: int = 3                  # concentrated: how many 8-digit destination blocks the pumper's carrier serves
+    n_blocks: int = 3                  # concentrated: how many destination ranges the pumper's carrier serves
+    block_range_digits: int = 8        # concentrated: fixed leading digits per range (8 = 10 000 numbers, 7 = 100 000, 9 = 1 000)
+    earns_revenue: bool = False        # pumping attackers are paid per terminated SMS; flooders are not
+    rate_multiple_of_legit: float = None   # if set, rate_per_min = multiple x legitimate rate (dilution study)
     verify_fraction: float = 0.0       # colluding carrier submits codes
     verify_delay_s: float = 1.0
     solves_challenges: bool = False    # pays a solving service for interactive challenges
@@ -92,6 +95,8 @@ def _asn_ip(asn_index, idx):
 class Simulation:
     def __init__(self, spec: SimSpec):
         self.spec = spec
+        if spec.attacker.rate_multiple_of_legit is not None:
+            spec.attacker.rate_per_min = spec.attacker.rate_multiple_of_legit * spec.legit.rate_per_min
         self.rng = random.Random(spec.seed)
         h = Harness()
         self.h = h
@@ -147,11 +152,12 @@ class Simulation:
         if a.numbers == "elevated":
             return f"{ELEVATED_PREFIX}{k:07d}"
         if a.numbers == "concentrated":
-            # the pumper is paid only on the blocks its partner carrier terminates: a few 8-digit
-            # blocks inside a standard prefix, chosen once per attacker
+            # the pumper is paid only on the ranges its partner carrier terminates: n_blocks ranges of
+            # 10**(12 - block_range_digits) numbers inside a standard prefix, chosen once per attacker
+            fixed, tail = a.block_range_digits - 5, 12 - a.block_range_digits
             if "blocks" not in self.attack_state:
-                self.attack_state["blocks"] = [f"{STANDARD_PREFIXES[0]}{self.rng.randrange(1000):03d}" for _ in range(a.n_blocks)]
-            return f"{self.rng.choice(self.attack_state['blocks'])}{self.rng.randrange(10**4):04d}"
+                self.attack_state["blocks"] = [f"{STANDARD_PREFIXES[0]}{self.rng.randrange(10**fixed):0{fixed}d}" for _ in range(a.n_blocks)]
+            return f"{self.rng.choice(self.attack_state['blocks'])}{self.rng.randrange(10**tail):0{tail}d}"
         return f"{self.rng.choice(STANDARD_PREFIXES)}{self.rng.randrange(10**7):07d}"
 
     def attacker_ip(self, k):

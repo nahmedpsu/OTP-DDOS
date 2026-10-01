@@ -1,6 +1,15 @@
 # Changelog
 
-## 2.3.0
+## 2.3.0 (unreleased)
+
+- Review round 2: `adaptive_caps` is a feature flag (v1 runs static caps; the adaptive cap
+  gets an ablation column); the relative baseline is opt-in and evaluated with a 130-minute
+  warm-up; destination blocks use sequential probability-ratio tests instead of fixed
+  50/100-send thresholds; a "block key + 2-minute resolution" variant is the default and is
+  reported separately; a destination-spread sweep (3 to 300 ranges of 1 000 to 100 000
+  numbers) and a dilution curve (0.5x to 10x legitimate volume for an hour); economics
+  credit revenue only to pumping attackers and include the concentrated pumpers and their
+  verified fake accounts.
 
 - Fixes from review: the ablation baseline now runs on the same seeds as the ablation
   columns; client identities are preserved when the session layer is switched off; numpy,

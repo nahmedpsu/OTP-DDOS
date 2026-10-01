@@ -39,10 +39,12 @@ ALL_FEATURES = frozenset({
     "feedback",             # conversion signals and auto-denylist
     "backoff",              # Step 8 progressive backoff and daily cap (off: fixed 1 per minute)
     "circuit_breaker",      # Step 10
+    "adaptive_caps",        # Step 9 multiplier from the baseline job and the known-good exemption (off: static caps)
     "fine_destination_key", # reputation on the 8-digit destination block (the range a pumper cannot rotate)
-    "relative_baseline",    # conversion penalty when a key's recent ratio falls well below its own history
 })
-V1_FEATURES = frozenset()   # the v1 design: header-trusted platform, IP cap, reCAPTCHA, country, text, 1/min, source caps
+# Evaluated but not a default: it needs hours of per-key history (see results/evaluation.md, section F).
+OPTIONAL_FEATURES = frozenset({"relative_baseline"})
+V1_FEATURES = frozenset()   # the v1 design: header-trusted platform, IP cap, reCAPTCHA, country, text, 1/min, static source caps
 
 
 @dataclass
@@ -92,7 +94,15 @@ class Config:
     fast_verify_min_verified: int = 20
     fast_verify_ratio: float = 0.8
     fast_verify_points: int = 15
-    fast_verify_block_denylist_min: int = 50  # a destination block with this many verifications, > fast_verify_ratio of them instant, is denylisted
+    # Sequential probability-ratio tests on destination blocks (keys only an attacker would dominate; legitimate
+    # traffic touches a 10 000-number block a fraction of a time per day). Deny when the likelihood ratio
+    # attacker:legitimate exceeds sprt_threshold.
+    sprt_threshold: float = 1000.0
+    sprt_legit_conversion: float = 0.8      # P(verify | real user)
+    sprt_attack_conversion: float = 0.1     # P(verify | flooder)
+    sprt_legit_fast: float = 0.005          # P(verify within fast_verify_seconds | real user)
+    sprt_attack_fast: float = 0.9           # P(verify within fast_verify_seconds | machine)
+    sprt_min_events: int = 3
     tier_bounds: tuple = (20, 40, 60, 80)
     elevated_shift: int = 10
 

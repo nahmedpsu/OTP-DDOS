@@ -40,5 +40,7 @@ def test_v1_leaks_more_than_v2_for_datacenter_attacker():
     r1, r2 = run_sim(spec1), run_sim(spec2)
     assert r1["attack"]["leaked_total"] > 0 and r2["attack"]["leaked_total"] == 0
     s1, s2 = summarise([r1]), summarise([r2])
-    rows = economics(s1, s2, "datacenter_rotation")
-    assert len(rows) == 4 and rows[0]["design"] == "v1" and rows[2]["attacker_revenue_usd"] == 0
+    rows = economics(s1, s2, "datacenter_rotation", earns_revenue=False)
+    assert len(rows) == 4 and rows[0]["design"] == "v1" and all(r["attacker_revenue_usd"] == 0 for r in rows)
+    rows = economics(s1, s2, "datacenter_rotation", earns_revenue=True)
+    assert rows[0]["attacker_revenue_usd"] > 0 and rows[2]["attacker_revenue_usd"] == 0

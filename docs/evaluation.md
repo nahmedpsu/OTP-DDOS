@@ -8,13 +8,16 @@ Results: [`results/evaluation.md`](../results/evaluation.md) (simulation),
 These are measured, not hypothetical. Each one is in `results/evaluation.md` or
 `results/analysis.md`.
 
-1. **A residential attacker with human-like CAPTCHA scores whose volume stays below about
-   1.8 times the legitimate traffic on the same country and prefix keys is not separated
-   from real users by any behavioural signal.** The conversion penalty depends on a key's
-   verify-to-send ratio; legitimate traffic on the same key dilutes it. With the source caps
-   lifted such an attacker leaks at close to its full request rate for the whole run. The
-   only containment comes from the adaptive volume caps and the circuit breaker, and those
-   also refuse legitimate users. Section C2 of the results quantifies that trade-off.
+1. **A residential attacker with human-like CAPTCHA scores is not separated from real
+   users by any behavioural signal at any volume tested.** The conversion penalty attaches
+   to keys the attacker shares with real users (country, prefix, residential ASN), so it
+   raises everyone's score by the same amount: it rations rather than separates. Below
+   about 1.8 times the legitimate volume it does not fire at all; the dilution curve
+   (section G) shows that at 10 times the legitimate volume for an hour it still lets
+   most of the attack through while challenging a fifth of real users. With the source
+   caps lifted such an attacker leaks at close to its full request rate. The only
+   containment comes from the volume caps and the circuit breaker, and those also refuse
+   legitimate users. Section C2 quantifies that trade-off.
 2. **Exposure before the feedback loop has data equals the attack rate times the OTP
    timeout.** With a 10-minute timeout an attacker at 30 requests a minute is paid 300 SMS
    before any conversion signal exists. Only a shorter timeout moves this (section C1).
@@ -27,8 +30,12 @@ These are measured, not hypothetical. Each one is in `results/evaluation.md` or
    raised beforehand.
 6. **VPN users are blocked by policy**, as the problem statement asked. That is a product
    decision the design makes visible, not a bug, but it is friction.
-7. **A colluding carrier that submits codes with human-like delay is indistinguishable
-   from real traffic on any key**, including the destination block (557 of 600 leaked,
+7. **Pumper containment depends on how narrowly the carrier's ranges concentrate.** The
+   block key separates a pumper whose ranges fit inside 8-digit blocks; ranges of 100 000
+   numbers span ten keys each and leak several times more, and at 300 ranges the pumper
+   leaks like the diluting flooder (section G, figure). **A colluding carrier that submits
+   codes with human-like delay is indistinguishable from real traffic on any key**,
+   including the destination block (557 of 600 leaked,
    324 verified fake accounts per run). A carrier that verifies instantly is denylisted
    as machine-verified by minute 8; one that does not verify is contained by minute
    10 (section F). The human-like case moves the cost downstream into fake accounts.
@@ -78,8 +85,15 @@ All per-run metrics are computed from one simulated attack window (20 minutes, a
 - Tables report the mean and a 95 % t-interval across seeds. The lower bound of a count
   or rate is clamped at 0. Sweeps and ablation use 10 seeds.
 - Two modes are reported: **behavioural only** (source caps lifted, so the score, feedback
-  and number layers are visible) and **with adaptive caps** (per-minute web cap at 3 times
-  the legitimate rate, adaptive baseline job running every simulated minute).
+  and number layers are visible) and **with source caps** (per-minute web cap at 3 times
+  the legitimate rate). In the second mode v2 runs the adaptive baseline job and the
+  known-good exemption; v1 runs static caps, because the adaptive cap is v2's Step 9 and is
+  behind the `adaptive_caps` feature flag. An earlier version gave v1 the adaptive cap as
+  well, which made the two designs look tied against the residential attackers.
+- The pumping study uses a 130-minute legitimate warm-up so that the opt-in relative
+  baseline has the history it needs; the main study's 10-minute warm-up cannot exercise it.
+- Destination-block decisions use sequential probability-ratio tests rather than fixed
+  sample sizes, so a pumper's leakage no longer scales as 50 SMS per block.
 - The ablation switches off one layer at a time via `Config.features`. Its `full v2`
   baseline is run on the same seeds as every ablation column; the 30-seed main study is
   not used as the baseline. When the session layer is off, client identities are still

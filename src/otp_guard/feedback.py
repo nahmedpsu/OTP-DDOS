@@ -1,5 +1,6 @@
 """Verification feedback loop and the OTP verify endpoint's own protections.
 All state lives in the pipeline's store so any instance can verify any code."""
+import math
 import secrets
 
 
@@ -88,14 +89,32 @@ class FeedbackLoop:
                 self.p.rep.incr(key, "failed", -1)
             if fast:
                 self.p.rep.incr(key, "fast_verified")
-                if key.startswith("block:"):
-                    # a destination block whose codes are nearly all entered within seconds is being
-                    # verified by a machine: the colluding carrier reading its own traffic
-                    r = self.p.rep.get(key)
-                    if r.verified >= cfg.fast_verify_block_denylist_min and r.fast_verified / r.verified > cfg.fast_verify_ratio \
-                            and "feedback" in cfg.features:
-                        self.p.store.set("deny:" + key, 1, cfg.denylist_ttl)
+            if key.startswith("block:"):
+                self._sprt_block(key)
         self.p.rep.mark_trusted("num:" + rec["phone_number"])
+
+    def _sprt_block(self, key):
+        """Sequential probability-ratio tests on a destination block. Two hypotheses pairs:
+        conversion (flooder never verifies) and verification speed (a machine enters codes within
+        seconds). Deny the block when either log-likelihood ratio exceeds log(sprt_threshold)."""
+        cfg = self.p.cfg
+        if "feedback" not in cfg.features or self.p.store.exists("deny:" + key):
+            return
+        r = self.p.rep.get(key)
+        resolved = r.verified + r.failed
+        thr = math.log(cfg.sprt_threshold)
+        if resolved >= cfg.sprt_min_events:
+            llr = r.verified * math.log(cfg.sprt_attack_conversion / cfg.sprt_legit_conversion) + \
+                  r.failed * math.log((1 - cfg.sprt_attack_conversion) / (1 - cfg.sprt_legit_conversion))
+            if llr > thr:
+                self.p.store.set("deny:" + key, 1, cfg.denylist_ttl)
+                return
+        if r.verified >= cfg.sprt_min_events:
+            slow = r.verified - r.fast_verified
+            llr = r.fast_verified * math.log(cfg.sprt_attack_fast / cfg.sprt_legit_fast) + \
+                  slow * math.log((1 - cfg.sprt_attack_fast) / (1 - cfg.sprt_legit_fast))
+            if llr > thr:
+                self.p.store.set("deny:" + key, 1, cfg.denylist_ttl)
 
     def on_failed_or_timeout(self, log_id, keep_code=False):
         rec = self.p.sms_history[log_id]
@@ -103,12 +122,15 @@ class FeedbackLoop:
         cfg = self.p.cfg
         for key in rec["reputation_keys"]:
             self.p.rep.incr(key, "failed")
+            if key.startswith("block:"):
+                self._sprt_block(key)
+                continue
             r = self.p.rep.get(key)
             resolved = r.verified + r.failed
             if resolved >= cfg.denylist_min_sample and r.verified / resolved < cfg.denylist_ratio \
                     and "feedback" in cfg.features:
                 # Fine-grained keys only. A residential ASN is thousands of real people; denylisting it
                 # would hand the attacker a denial of service. Hosting ASNs carry no such users.
-                if key.startswith(("ip:", "subnet:", "fp:", "block:")) or \
+                if key.startswith(("ip:", "subnet:", "fp:")) or \
                         (key.startswith("asn:") and rec.get("asn_is_datacenter")):
                     self.p.store.set("deny:" + key, 1, cfg.denylist_ttl)

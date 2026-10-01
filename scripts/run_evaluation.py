@@ -21,9 +21,10 @@ sys.path.insert(0, str(ROOT / "src"))
 from otp_guard.config import ALL_FEATURES, V1_FEATURES                                   # noqa: E402
 from otp_guard.evaluation.calibration import CALIBRATION                                  # noqa: E402
 from otp_guard.evaluation.runner import (ATTACKERS, ADAPTIVE_ATTACKERS, MODES, SWEEP_AXES, CAP_SWEEP,   # noqa: E402
-                                         PUMPING_ATTACKERS, PUMPING_VARIANTS,
-                                         study_multi_seed, study_ablation, study_sweep, study_cap_sweep,
-                                         study_adaptive, study_pumping, run_all, summarise, economics)
+                                         PUMPING_ATTACKERS, PUMPING_VARIANTS, SPREAD_BLOCKS, SPREAD_RANGE_DIGITS,
+                                         DILUTION_MULTIPLES, study_multi_seed, study_ablation, study_sweep,
+                                         study_cap_sweep, study_adaptive, study_pumping, study_spread,
+                                         study_dilution, run_all, summarise, economics)
 from otp_guard.evaluation.stats import mean_ci                                            # noqa: E402
 
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
@@ -66,6 +67,8 @@ def main():
     add("capsweep", *study_cap_sweep(sseeds))
     add("adaptive", *study_adaptive(sseeds))
     add("pumping", *study_pumping(sseeds))
+    add("spread", *study_spread(sseeds))
+    add("dilution", *study_dilution(list(range(3 if a.quick else 5))))
     print(f"{len(jobs)} runs on {a.procs or 'all'} processes", flush=True)
     t0 = time.time()
     results = run_all([j[2] for j in jobs], a.procs)
@@ -127,15 +130,31 @@ def main():
         F.setdefault(aname, {})[vname] = summarise(rs)
     R["pumping"] = F
 
-    # E. economics (behavioural-only and caps modes, v1 vs v2)
+    # G. spread sweep and dilution curve
+    G = {}
+    g = group(*by["spread"], lambda i: (i[0], i[1], i[2]))
+    for (verify, nb, digits), rs in g.items():
+        G[f"verify={verify},blocks={nb},digits={digits}"] = summarise(rs)
+    R["spread"] = G
+    Dl = {}
+    g = group(*by["dilution"], lambda i: i[0])
+    for m, rs in g.items():
+        Dl[str(m)] = summarise(rs)
+    R["dilution"] = Dl
+
+    # E. economics: only pumping attackers earn; v1 vs v2 default
     E = {}
     for mode in MODES:
-        for name in ATTACKERS:
-            E.setdefault(mode, {})[name] = economics(A[mode][name]["v1"], A[mode][name]["v2"], name)
+        for name, a in ATTACKERS.items():
+            E.setdefault(mode, {})[name] = economics(A[mode][name]["v1"], A[mode][name]["v2"], name, a.earns_revenue)
+    for name, a in PUMPING_ATTACKERS.items():
+        if a.earns_revenue:
+            E.setdefault("pumping_study", {})[name] = economics(F[name]["v1"], F[name]["fine_key_plus_fast_resolution (default)"], name, True)
     R["economics"] = E
 
     (out / "evaluation.json").write_text(json.dumps(R, indent=1, default=str) + "\n")
     write_tradeoff_chart(R, out)
+    write_spread_chart(R, out)
     write_markdown(R, out / "evaluation.md")
     print("wrote", out / "evaluation.md")
 
@@ -185,6 +204,34 @@ def write_tradeoff_chart(R, out):
     plt.close(fig)
 
 
+def write_spread_chart(R, out):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.4), dpi=150, sharey=True)
+    fig.patch.set_facecolor("#fcfcfb")
+    for ax, verify, title in ((axes[0], 0.0, "carrier does not verify"), (axes[1], 1.0, "carrier verifies within 1 s")):
+        ax.set_facecolor("#fcfcfb")
+        for i, digits in enumerate(SPREAD_RANGE_DIGITS):
+            xs, ys, lo, hi = [], [], [], []
+            for nb in SPREAD_BLOCKS:
+                s = R["spread"][f"verify={verify},blocks={nb},digits={digits}"]
+                xs.append(nb * 10 ** (12 - digits)); m, l, h_, _ = s["leaked_total"]; ys.append(m); lo.append(max(l, 0)); hi.append(h_)
+            ax.plot(xs, ys, color=PALETTE[i], linewidth=2, marker="o", markersize=5, label=f"ranges of {SPREAD_RANGE_DIGITS[digits]} numbers")
+            ax.fill_between(xs, lo, hi, color=PALETTE[i], alpha=0.15, linewidth=0)
+        ax.set_xscale("log"); ax.set_title(title, loc="left", color="#0b0b0b", fontsize=10)
+        ax.set_xlabel("distinct destination numbers the pumper spreads over", color="#0b0b0b")
+        ax.grid(True, color="#e6e5e0", linewidth=0.8); ax.set_axisbelow(True)
+        for sp in ("top", "right"): ax.spines[sp].set_visible(False)
+        for sp in ("left", "bottom"): ax.spines[sp].set_color("#c3c2b7")
+        ax.tick_params(colors="#52514e")
+    axes[0].set_ylabel("SMS leaked in 20 minutes (of ~600 requests)", color="#0b0b0b")
+    axes[0].legend(frameon=False, fontsize=8, loc="upper left")
+    fig.suptitle("Pumper destination spread vs leakage (reputation key: 8 digits = 10 000 numbers)", x=0.01, ha="left", color="#0b0b0b", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(out / "pumper_spread.png"); fig.savefig(out / "pumper_spread.svg"); plt.close(fig)
+
+
 def write_markdown(R, path):
     meta = R["meta"]
     L = ["# Evaluation", "",
@@ -195,7 +242,8 @@ def write_markdown(R, path):
          "(20 requests/min, 80 % conversion, verification delay lognormal median 25 s) in the background. Per seed the "
          "attacker's pool size (500 to 50 000 addresses), rate (10 to 60 requests/min) and CAPTCHA score class are "
          "randomised. Modes: **behavioural only** lifts the source caps so the other layers are visible; "
-         "**with adaptive caps** runs the source cap at 3x the legitimate rate with the adaptive baseline job.", ""]
+         "**with source caps** runs the source cap at 3x the legitimate rate: adaptive (baseline job and known-good "
+         "exemption) for v2, static for v1, since the adaptive cap is v2's Step 9 and is behind the `adaptive_caps` flag.", ""]
 
     L += ["## A. Attacker profiles, v1 versus v2", ""]
     for mode in MODES:
@@ -256,11 +304,12 @@ def write_markdown(R, path):
         L.append("")
     L += ["Adaptive attacker descriptions:", ""] + [f"- `{n}`: {a.description}" for n, a in ADAPTIVE_ATTACKERS.items()] + [""]
 
-    L += ["## F. Pumping on concentrated destination blocks (behavioural-only mode)", "",
+    L += ["## F. Pumping on concentrated destination blocks (behavioural-only mode, 130-minute warm-up)", "",
           "The one key a pumper cannot rotate is the destination: it is paid only on the numbers its partner carrier terminates. "
-          "Each attacker targets 3 blocks of 10 000 numbers inside a standard prefix. Variants: the 24-hour cumulative ratio with a "
-          "10-minute resolution timeout (the design as first written); the 8-digit destination-block key; a 2-minute resolution "
-          "timeout (late verifications are reclassified); a relative baseline (recent hour versus the key's own history); all three.", "",
+          "Each attacker targets 3 blocks of 10 000 numbers inside a standard prefix. Variants: v1; the 24-hour cumulative ratio with a "
+          "10-minute resolution timeout (the design as first written); the 8-digit destination-block key with sequential "
+          "probability-ratio denylists; a 2-minute resolution timeout (late verifications are reclassified); both (the default); "
+          "a relative baseline (recent hour versus the key's own history, which needs the long warm-up); all three.", "",
           "| Attacker | Variant | Contained | Time to containment (min) | Steady-state leak (SMS/min) | Total leaked | Attacker verifications (verified fake accounts) | Legit delivered % | Legit challenged % | Legit refused % |",
           "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for aname in PUMPING_ATTACKERS:
@@ -270,16 +319,43 @@ def write_markdown(R, path):
                      f"{ci(s['attacker_verifications'],0)} | {ci(s['legit_delivered_pct'])} | {ci(s['legit_challenge_rate_pct'])} | {ci(s['legit_refusal_rate_pct'])} |")
     L += ["", "Attacker descriptions:", ""] + [f"- `{n}`: {a.description}" for n, a in PUMPING_ATTACKERS.items()] + [""]
 
+    L += ["## G. Pumper destination spread, and the dilution curve", "",
+          "![pumper spread](pumper_spread.png)", "",
+          "Spread sweep (behavioural-only, 10 seeds): the pumper's carrier serves 3, 30 or 300 ranges of 1 000, 10 000 or 100 000 "
+          "numbers; the reputation key is the 8-digit block (10 000 numbers), so 1 000-number ranges sit inside one key, 10 000-number "
+          "ranges align with it, and 100 000-number ranges span ten keys each. At the far end the pumper is the diluting flooder.", "",
+          "| Carrier verifies | Ranges | Numbers per range | Distinct destinations | Total leaked | Contained | Steady-state leak (SMS/min) |",
+          "|---|---:|---:|---:|---:|---:|---:|"]
+    for verify in (0.0, 1.0):
+        for nb in SPREAD_BLOCKS:
+            for digits, label in SPREAD_RANGE_DIGITS.items():
+                s = R["spread"][f"verify={verify},blocks={nb},digits={digits}"]
+                L.append(f"| {'yes, within 1 s' if verify else 'no'} | {nb} | {label} | {nb * 10 ** (12 - digits):,} | {ci(s['leaked_total'],0)} | {s['contained_fraction']:.2f} | {ci(s['steady_state_leak_per_min'])} |")
+    L += ["", "Dilution curve (behavioural-only, 60-minute attack, 5 seeds): the captcha-farm attacker at multiples of the legitimate rate. "
+          "The conversion penalty starts once the attacker exceeds about 1.8x the legitimate volume on the shared keys, but starting is not separating.", "",
+          "| Attack rate / legitimate rate | Requests | Leaked | Leaked % of requests | Legit delivered % | Legit challenged % | Legit refused % |",
+          "|---:|---:|---:|---:|---:|---:|---:|"]
+    for m in DILUTION_MULTIPLES:
+        s = R["dilution"][str(m)]
+        pct = 100 * s["leaked_total"][0] / max(s["requests"][0], 1)
+        L.append(f"| {m} | {ci(s['requests'],0)} | {ci(s['leaked_total'],0)} | {pct:.0f} % | {ci(s['legit_delivered_pct'])} | {ci(s['legit_challenge_rate_pct'])} | {ci(s['legit_refusal_rate_pct'])} |")
+    L.append("")
+
     L += ["## E. Attacker economics (20-minute window)", "",
-          "Revenue = leaked SMS x SMS termination price x revenue share (share is ASSUMED, low 0.2 and high 0.5). "
-          "Attacker cost = proxies (bytes x price per GB) + CAPTCHA tokens + solved challenges. Defender cost = SMS + HLR lookups + reCAPTCHA assessments attributable to the attacker. Only pumping attackers earn revenue; the others are pure cost to the defender.", ""]
-    for mode in MODES:
-        L += [f"### Mode: {mode.replace('_', ' ')}", "",
-              "| Attacker | Design | Share | Leaked SMS | Attacker revenue (USD) | Attacker cost (USD) | Attacker profit (USD) | Defender cost (USD) |",
-              "|---|---|---:|---:|---:|---:|---:|---:|"]
-        for name in ATTACKERS:
+          "Revenue = leaked SMS x SMS termination price x revenue share (share is ASSUMED, low 0.2 and high 0.5), and only for "
+          "pumping attackers: a flooder on random numbers is paid nothing, whatever leaks. Attacker cost = proxies (bytes x price per GB) "
+          "+ CAPTCHA tokens + solved challenges. Defender cost = SMS + HLR lookups + reCAPTCHA assessments attributable to the attacker. "
+          "Verified fake accounts: codes the attacker's carrier entered, each a registered account the defender now holds.", ""]
+    for mode in list(MODES) + ["pumping_study"]:
+        names = ATTACKERS if mode in MODES else {n: a for n, a in PUMPING_ATTACKERS.items() if a.earns_revenue}
+        L += [f"### {'Mode: ' + mode.replace('_', ' ') if mode in MODES else 'Pumping study (v1 versus the v2 default: block key + 2-minute resolution)'}", "",
+              "| Attacker | Design | Share | Leaked SMS | Attacker revenue (USD) | Attacker cost (USD) | Attacker profit (USD) | Defender cost (USD) | Verified fake accounts |",
+              "|---|---|---:|---:|---:|---:|---:|---:|---:|"]
+        for name in names:
             for row in R["economics"][mode][name]:
-                L.append(f"| `{name}` | {row['design']} | {row['share']} | {row['leaked_sms']:.0f} | {row['attacker_revenue_usd']:.2f} | {row['attacker_cost_usd']:.2f} | {row['attacker_profit_usd']:.2f} | {row['defender_cost_usd']:.2f} |")
+                if not row["share"] and row is not R["economics"][mode][name][0]:
+                    continue                                   # flooders: one row, no revenue
+                L.append(f"| `{name}` | {row['design']} | {row['share'] or '–'} | {row['leaked_sms']:.0f} | {row['attacker_revenue_usd']:.2f} | {row['attacker_cost_usd']:.2f} | {row['attacker_profit_usd']:.2f} | {row['defender_cost_usd']:.2f} | {row['verified_fake_accounts']:.0f} |")
         L.append("")
 
     L += ["## Calibration sources", "", "| Parameter | Value | Source |", "|---|---|---|"]

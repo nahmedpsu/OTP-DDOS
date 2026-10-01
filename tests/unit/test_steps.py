@@ -564,7 +564,7 @@ def test_instant_verification_is_a_signal(h):
     h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
     for i in range(20):
         tok, _ = h.session(age_hours=3)
-        r = h.send(h.web_request(session=tok, ip=f"198.72.{i}.1", mobile=f"97159{i:07d}"))
+        r = h.send(h.web_request(session=tok, ip=f"198.72.{i}.1", mobile=f"97159{i:03d}0000"))   # a different block each time
         assert r.channel == "sms"
         h.clock.advance(1)
         assert h.p.feedback.verify(h.p.sms_history[r.log_id]["session_id"], r.log_id, h.p.feedback.code_for(r.log_id))
@@ -585,9 +585,11 @@ def _pump(h, block, i, verify=None, delay=1):
     return r
 
 
-def test_destination_block_never_verifying_is_denylisted(h):
+def test_destination_block_never_verifying_is_denylisted_by_sprt(h):
+    """Five unverified sends on one block: (0.9/0.2)^5 > 1000, so the block is denied. A real
+    user population at 80 % conversion produces that with probability 0.2^5 = 0.03 %."""
     h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
-    for i in range(60):
+    for i in range(5):
         assert _pump(h, "96650123", i).channel == "sms"
     h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
     assert h.p.store.exists("deny:block:96650123")
@@ -595,17 +597,28 @@ def test_destination_block_never_verifying_is_denylisted(h):
     assert _pump(h, "96655000", 1).channel == "sms"            # another block is unaffected
 
 
-def test_destination_block_machine_verified_is_denylisted(h):
+def test_destination_block_with_mostly_verified_sends_is_not_denylisted(h):
     h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
-    for i in range(55):
-        _pump(h, "96650777", i, verify=True, delay=1)
+    for i in range(10):
+        _pump(h, "96650456", i, verify=(i % 5 != 0), delay=30)      # 80 % verified, human-like delay
+    h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    assert not h.p.store.exists("deny:block:96650456")
+
+
+def test_destination_block_machine_verified_is_denylisted_by_sprt(h):
+    """Three codes entered within a second: (0.9/0.005)^3 > 1000."""
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
+    sent = 0
+    for i in range(6):
+        r = _pump(h, "96650777", i, verify=True, delay=1)
+        sent += r.channel == "sms"
         h.clock.advance(5)
-    assert h.p.store.exists("deny:block:96650777")
+    assert h.p.store.exists("deny:block:96650777") and sent <= 4
 
 
 def test_humanlike_verification_is_not_denylisted(h):
     h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
-    for i in range(55):
+    for i in range(30):
         _pump(h, "96650888", i, verify=True, delay=30)
     assert not h.p.store.exists("deny:block:96650888")
 
@@ -621,7 +634,9 @@ def test_late_verification_is_reclassified(h):
 
 def test_relative_baseline_fires_when_a_healthy_key_drops(h):
     """A country converting at 80 % for hours, then a flood: cumulative ratio still above 0.3,
-    but the recent hour is far below the key's own baseline."""
+    but the recent hour is far below the key's own baseline. Opt-in feature."""
+    from otp_guard.config import ALL_FEATURES
+    h.cfg.features = frozenset(ALL_FEATURES | {"relative_baseline"})
     h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
     for i in range(250):                                       # history: 80 % conversion
         tok, _ = h.session(age_hours=3)

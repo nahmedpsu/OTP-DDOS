@@ -6,7 +6,7 @@ import multiprocessing as mp
 import random
 from dataclasses import replace
 
-from ..config import ALL_FEATURES, V1_FEATURES
+from ..config import ALL_FEATURES, V1_FEATURES, OPTIONAL_FEATURES
 from .calibration import value as cal
 from .sim import AttackerSpec, LegitSpec, SimSpec, run_sim
 from .stats import mean_ci
@@ -31,7 +31,7 @@ ATTACKERS = {
     "sequential_numbers": AttackerSpec("sequential_numbers", "Residential pool, numbers walked upward",
                                        numbers="sequential", captcha_beta=tuple(BOT_CAPTCHA["captcha_farm"])),
     "premium_pumping": AttackerSpec("premium_pumping", "Residential pool, premium-rate prefix", numbers="premium",
-                                    captcha_beta=tuple(BOT_CAPTCHA["captcha_farm"])),
+                                    captcha_beta=tuple(BOT_CAPTCHA["captcha_farm"]), earns_revenue=True),
     "spoofed_platform": AttackerSpec("spoofed_platform", "Residential pool, HTTP_PLATFORM: ios without attestation",
                                      platform_spoof=True, captcha_beta=tuple(BOT_CAPTCHA["captcha_farm"])),
 }
@@ -39,12 +39,12 @@ ATTACKERS = {
 ADAPTIVE_ATTACKERS = {
     "pumper_verifies_instantly": AttackerSpec("pumper_verifies_instantly",
         "Colluding carrier on the elevated range submits every code within 1 s (conversion 100 %)",
-        numbers="elevated", fp_mode="aged", verify_fraction=1.0, verify_delay_s=1.0, captcha_beta=(9, 1.5)),
+        numbers="elevated", fp_mode="aged", verify_fraction=1.0, verify_delay_s=1.0, captcha_beta=(9, 1.5), earns_revenue=True),
     "pumper_verifies_humanlike": AttackerSpec("pumper_verifies_humanlike",
         "Colluding carrier submits 60 % of codes after 30 s (looks like real conversion)",
-        numbers="elevated", fp_mode="aged", verify_fraction=0.6, verify_delay_s=30.0, captcha_beta=(9, 1.5)),
+        numbers="elevated", fp_mode="aged", verify_fraction=0.6, verify_delay_s=30.0, captcha_beta=(9, 1.5), earns_revenue=True),
     "pumper_standard_range_humanlike": AttackerSpec("pumper_standard_range_humanlike",
-        "Same, but the colluding range is not in the prefix table (class standard)",
+        "Random numbers across all standard prefixes, 60 % verified after 30 s: a flooder that verifies, not a pumper (it earns nothing)",
         numbers="random", fp_mode="aged", verify_fraction=0.6, verify_delay_s=30.0, captcha_beta=(9, 1.5)),
     "challenge_solver": AttackerSpec("challenge_solver",
         "Datacenter rotation abroad (score lands in the challenge tier) and pays a solving service for every challenge",
@@ -139,25 +139,29 @@ def study_ablation(seeds, attackers=None, minutes=20, caps_lifted=False):
 
 PUMPING_ATTACKERS = {
     "concentrated_pumper_no_verify": AttackerSpec("concentrated_pumper_no_verify",
-        "Pumper on 3 destination blocks inside a standard prefix; aged fingerprints, farmed captcha; carrier does not verify",
-        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5)),
+        "Pumper on 3 destination blocks of 10 000 numbers inside a standard prefix; aged fingerprints, farmed captcha; carrier does not verify",
+        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), earns_revenue=True),
     "concentrated_pumper_verifies_instantly": AttackerSpec("concentrated_pumper_verifies_instantly",
         "Same blocks; the carrier submits every code within 1 s",
-        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), verify_fraction=1.0, verify_delay_s=1.0),
+        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), verify_fraction=1.0, verify_delay_s=1.0, earns_revenue=True),
     "concentrated_pumper_verifies_humanlike": AttackerSpec("concentrated_pumper_verifies_humanlike",
         "Same blocks; the carrier submits 60 % of codes after 30 s",
-        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), verify_fraction=0.6, verify_delay_s=30.0),
+        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), verify_fraction=0.6, verify_delay_s=30.0, earns_revenue=True),
     "residential_captcha_farm": ATTACKERS["residential_captcha_farm"],
 }
 
+_NO_FINE = frozenset(ALL_FEATURES - {"fine_destination_key"})
 PUMPING_VARIANTS = {
-    # name -> (features, cfg overrides)
-    "baseline_24h_cumulative_10min": (frozenset(ALL_FEATURES - {"fine_destination_key", "relative_baseline"}), {"resolution_timeout_s": 600}),
-    "fine_destination_key": (frozenset(ALL_FEATURES - {"relative_baseline"}), {"resolution_timeout_s": 600}),
-    "fast_resolution_2min": (frozenset(ALL_FEATURES - {"fine_destination_key", "relative_baseline"}), {"resolution_timeout_s": 120}),
-    "relative_baseline": (frozenset(ALL_FEATURES - {"fine_destination_key"}), {"resolution_timeout_s": 600}),
-    "all_three": (ALL_FEATURES, {"resolution_timeout_s": 120}),
+    # name -> (features, cfg overrides). Runs use a 2-hour legitimate warm-up so the relative baseline has history.
+    "v1": (V1_FEATURES, {"resolution_timeout_s": 600}),
+    "baseline_24h_cumulative_10min": (_NO_FINE, {"resolution_timeout_s": 600}),
+    "fine_destination_key": (ALL_FEATURES, {"resolution_timeout_s": 600}),
+    "fast_resolution_2min": (_NO_FINE, {"resolution_timeout_s": 120}),
+    "fine_key_plus_fast_resolution (default)": (ALL_FEATURES, {"resolution_timeout_s": 120}),
+    "relative_baseline": (frozenset(_NO_FINE | {"relative_baseline"}), {"resolution_timeout_s": 600}),
+    "all_three": (frozenset(ALL_FEATURES | {"relative_baseline"}), {"resolution_timeout_s": 120}),
 }
+PUMPING_WARMUP_MIN = 130     # crosses an hour boundary with >= 200 resolved legitimate sends in the previous hour bucket
 
 
 def study_pumping(seeds, minutes=20):
@@ -166,8 +170,44 @@ def study_pumping(seeds, minutes=20):
         for vname, (feats, cfg) in PUMPING_VARIANTS.items():
             for s in seeds:
                 specs.append(SimSpec(attacker=randomised(a, s), minutes=minutes, features=feats, cfg_overrides=dict(cfg),
-                                     caps_lifted=True, seed=s))
+                                     caps_lifted=True, warmup_minutes=PUMPING_WARMUP_MIN, seed=s))
                 index.append((aname, vname, s))
+    return specs, index
+
+
+SPREAD_BLOCKS = [3, 30, 300]
+SPREAD_RANGE_DIGITS = {9: "1 000", 8: "10 000", 7: "100 000"}     # numbers per range; the key is 8 digits
+
+
+def study_spread(seeds, minutes=20):
+    """How widely the pumper spreads its destinations, with ranges that do and do not align with the
+    8-digit key. At the far end the pumper is the diluting flooder."""
+    specs, index = [], []
+    for verify in (0.0, 1.0):
+        for nb in SPREAD_BLOCKS:
+            for digits in SPREAD_RANGE_DIGITS:
+                a = AttackerSpec(f"spread_{nb}x{digits}", numbers="concentrated", n_blocks=nb, block_range_digits=digits,
+                                 fp_mode="aged", captcha_beta=(9, 1.5), verify_fraction=verify, verify_delay_s=1.0, earns_revenue=True)
+                for s in seeds:
+                    specs.append(SimSpec(attacker=randomised(a, s), minutes=minutes, caps_lifted=True, seed=s))
+                    index.append((verify, nb, digits, s))
+    return specs, index
+
+
+DILUTION_MULTIPLES = [0.5, 1, 2, 5, 10]
+
+
+def study_dilution(seeds, minutes=60):
+    """The captcha-farm attacker at multiples of the legitimate rate for an hour: where does the
+    conversion signal start to fire, how much still leaks, and what does it cost real users."""
+    specs, index = [], []
+    for m in DILUTION_MULTIPLES:
+        a = replace(ATTACKERS["residential_captcha_farm"], rate_multiple_of_legit=m)
+        for s in seeds:
+            spec = SimSpec(attacker=randomised(a, s), minutes=minutes, caps_lifted=True, seed=s)
+            spec.attacker.rate_multiple_of_legit = m          # randomised() set a rate; the multiple overrides it
+            specs.append(spec)
+            index.append((m, s))
     return specs, index
 
 
@@ -232,8 +272,9 @@ def study_adaptive(seeds, minutes=20, modes=MODES):
     return specs, index
 
 
-def economics(summary_v1, summary_v2, attacker_name):
-    """Attacker profit over the 20-minute window under v1 and v2, per revenue-share assumption."""
+def economics(summary_v1, summary_v2, attacker_name, earns_revenue):
+    """Attacker profit over the 20-minute window under v1 and v2, per revenue-share assumption.
+    Only pumping attackers (earns_revenue) are paid; a flooder's revenue is zero whatever leaks."""
     share = cal("pumping_revenue_share")
     sms = cal("sms_unit_cost_usd")
     proxy_per_req = cal("request_bytes") / 1e9 * cal("residential_proxy_cost_per_gb_usd")
@@ -245,8 +286,9 @@ def economics(summary_v1, summary_v2, attacker_name):
         solved = summ["attacker_challenges_solved"][0] or 0
         cost = reqs * (proxy_per_req + solve) + solved * solve
         for k in ("low", "high"):
-            revenue = leaked * sms * share[k]
-            rows.append({"design": label, "share": share[k], "leaked_sms": leaked, "requests": reqs,
+            revenue = leaked * sms * share[k] if earns_revenue else 0.0
+            rows.append({"design": label, "share": share[k] if earns_revenue else 0.0, "leaked_sms": leaked, "requests": reqs,
                          "attacker_revenue_usd": revenue, "attacker_cost_usd": cost,
-                         "attacker_profit_usd": revenue - cost, "defender_cost_usd": summ["attacker_cost_usd"][0]})
+                         "attacker_profit_usd": revenue - cost, "defender_cost_usd": summ["attacker_cost_usd"][0],
+                         "verified_fake_accounts": summ["attacker_verifications"][0]})
     return rows

@@ -515,7 +515,7 @@ class Pipeline:
             base = sl.get(f"{period}_{platform}")
         if base is None:
             return None
-        m = self.adaptive.multiplier(source, platform, cc)
+        m = self.adaptive.multiplier(source, platform, cc) if self.on("adaptive_caps") else 1.0
         if known_good and self.cfg.adaptive_reduction_spares_known_good:
             m = max(m, 1.0)                      # a tightened cap rations unknown clients, not returning ones
         return max(1, int(-(-base * m // 1)))   # ceil

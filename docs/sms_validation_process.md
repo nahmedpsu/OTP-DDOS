@@ -108,10 +108,21 @@ verified. Sends still inside the window are excluded, so a burst of fresh legiti
 traffic, such as a campaign launch, is neutral until the codes have had time to be
 entered.
 
-Two readings of each key are kept from the same 24 hourly buckets: the cumulative
-24-hour ratio, and the **recent hour versus the key's own baseline** (the other 23
-hours). The cumulative ratio is propped up by earlier legitimate traffic; the relative
-reading reacts when a key that normally converts at 80 % drops to 35 %.
+A second reading, the **recent hour versus the key's own baseline** (the other 23
+hours), is implemented behind the `relative_baseline` flag. It needs at least 200
+resolved sends of history on the key and so cannot act in the first hours of a key's
+life; in the evaluation it adds nothing on top of the destination-block key, and it is not
+a default (`results/evaluation.md`, section F).
+
+**Destination blocks are judged by sequential probability-ratio tests**, not by the
+shared-key thresholds above. A 10 000-number block is touched by legitimate traffic a
+fraction of a time per day, so a block with several sends is almost certainly one
+party's. Two tests, each denying the block when the likelihood ratio attacker:legitimate
+exceeds 1 000: conversion (real users verify 80 %, a flooder at most 10 %: five
+unverified sends in a row give a ratio of 1 845 and a false-positive probability of
+0.2⁵ = 0.03 %), and verification speed (real users enter a code within 5 s about 0.5 %
+of the time, a machine about 90 %: three instant verifications give a ratio above
+1 000). A block denylist expires after 24 hours.
 
 ```
 function conversionRatio(repKey, minSample = 20):
@@ -457,9 +468,9 @@ attacker cannot cheaply fake, and choose a graded response (**Gap H**).
 | Fingerprint age < 1 hour                 | +10 (< 5 minutes: +20)                     |
 | Session OTP request count                | +5 per previous request in this session    |
 | Conversion ratio of IP / subnet / ASN / fingerprint / country / prefix | `max over keys of (0.3 - ratio) / 0.3 * 25`, only when ratio < 0.3 |
-| Relative drop: a key's recent-hour ratio below 0.6 × its own baseline (≥ 20 recent and ≥ 200 baseline resolved) | `(1 - recent/baseline) * 25`, taking the larger of this and the absolute penalty (`conversion_drop`) |
+| Relative drop (opt-in `relative_baseline`): recent-hour ratio below 0.6 × the key's own 23-hour baseline (≥ 20 recent and ≥ 200 baseline resolved) | `(1 - recent/baseline) * 25`, taking the larger of this and the absolute penalty (`conversion_drop`) |
 | Sustained flood on any of those keys: ≥ 100 resolved sends and ratio < 0.1 | +15 (`sustained_flood`) |
-| Instant verification on a key: ≥ 20 verified and > 80 % of them within 5 s of the send | +15 (`instant_verification`): codes entered by a machine, the tell of a colluding carrier verifying its own pumped traffic |
+| Instant verification on a shared key: ≥ 20 verified and > 80 % of them within 5 s of the send | +15 (`instant_verification`): codes entered by a machine, the tell of a colluding carrier verifying its own pumped traffic |
 | Geo mismatch: IP country != number country | +10                                      |
 | `sequential_number`, `narrow_range_burst` | +15 each                                  |
 | `elevated_prefix`, `unknown_prefix`, `voip_number` | +10 each                         |
@@ -601,7 +612,8 @@ function validateRateLimitPerMobile(mobile):
 Limits are keyed on **source** (e.g. `App/RegisterOTP`), **trusted platform**, and
 **recipient country**, for per-minute and per-hour windows. Configured base limits are
 multiplied by an **adaptive multiplier** in the range 0.25 to 1.5 produced by the
-baseline job:
+baseline job (the multiplier and the known-good exemption below are v2 behaviour behind
+the `adaptive_caps` flag; v1 had static caps, and the evaluation runs v1 that way):
 
 - Every hour, compute the expected volume for each (source, platform, country,
   hour-of-day, day-of-week) from the last 4 weeks (median and MAD).
@@ -859,8 +871,8 @@ should be changed only with evidence from the dashboards.
 | Sustained-flood bonus            | +15 at ≥ 100 resolved and ratio < 0.1 | Lets a residential attack that rotates IPs and pre-aged fingerprints reach the `challenge` tier (25 + 15 + 2.5 = 42.5) without denylisting anything shared. Real users on the attacked key see one interactive challenge, not a refusal. |
 | Resolution timeout               | 120 s (code validity stays 600 s) | The reputation signal fires five times sooner; late verifications are reclassified, so nothing is lost. |
 | Destination block key            | first 8 digits | 10 000 numbers: small enough that legitimate traffic rarely shares a block with a pumper, large enough that a pumper's carrier range fills it. |
-| Relative baseline                | recent hour < 0.6 × own 23-hour baseline | Reacts to a drop on a key whose cumulative ratio is still propped up by history. |
-| Instant-verification block denylist | ≥ 50 verified, > 80 % within 5 s | People do not enter codes in under five seconds fifty times in a row on one number block. |
+| Relative baseline (opt-in)       | recent hour < 0.6 × own 23-hour baseline, ≥ 200 resolved history | Reacts to a drop on a key whose cumulative ratio is propped up by history; needs hours of history and added nothing in the evaluation, so it is not a default. |
+| Block SPRT thresholds            | likelihood ratio 1 000; legitimate conversion 0.8 vs attacker 0.1; legitimate instant-verify 0.005 vs machine 0.9; at least 3 events | A block is a key only one party uses, so a sequential test decides in a handful of events: five unverified sends (false-positive 0.03 %) or three instant verifications. Fixed sample sizes of 50 or 100 were set for shared keys and let a pumper leak 50 SMS per block. |
 | Per-IP cap on CGNAT carriers     | 30 / minute for listed ASNs | Mobile carriers put hundreds of subscribers behind one address; at 5 / minute half of a normal sign-up flow would be refused (see `results/analysis.md`). |
 | Circuit breaker soft / hard      | 80 % / 100 % of hourly budget | 80 % leaves room for the elevated mode to take effect before the hard cap. The hourly budget itself should be set to 2x the p99 legitimate hourly volume from the last quarter. |
 | reCAPTCHA minimum score          | 0.5 normal, 0.7 elevated | Google's documented midpoint; 0.7 in elevated mode trades some friction for protection only while under attack. |

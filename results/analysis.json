@@ -238,9 +238,8 @@
       "last_minute_with_sms": 2,
       "sustained_rate_last_10_min": 0.0,
       "stopped_by": {
-        "step5": 510,
-        "sent:sms:delay": 60,
-        "no_channel": 30
+        "step5": 540,
+        "sent:sms:delay": 60
       }
     },
     "premium_prefix_pumping": {
