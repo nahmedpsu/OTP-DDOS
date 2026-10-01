@@ -5,8 +5,10 @@
 Implementation and evaluation fixes from the Reviewer 2 report (`docs/evaluation.md`, "What
 changed after the Reviewer 2 report"): the code travels in the message; the challenge proof
 goes through the CAPTCHA adapter; the hourly budget is an atomic hard ceiling; per-number
-claims are atomic with release on later refusal; callbacks are idempotent; CUSUM block
-tests; the default worker runs a real baseline job from the pipeline's counters. Simulation:
+claims are atomic with release on later refusal; callbacks are idempotent; block tests of
+the CUSUM form with bounded credit (`block_credit_thresholds`, the dial between trust-building
+resistance and false positives, with the no-credit and plain-SPRT variants evaluated
+alongside); the default worker runs a real baseline job from the pipeline's counters. Simulation:
 same destination on challenge retry, delivered means a receipt, first-time versus returning
 friction, split random streams, events at their timestamps, session acquisition through the
 CAPTCHA gate, spread ranges without replacement with observed block counts, a corrected

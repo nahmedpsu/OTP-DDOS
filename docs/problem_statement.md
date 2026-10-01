@@ -100,8 +100,9 @@ the attacker cannot cheaply fake.
    before spending on SMS.
 4. **Verification feedback loop.** Track the verify-to-send ratio for every IP, subnet,
    ASN, fingerprint, session, country and prefix. Flooders request codes but never verify
-   them. Low conversion lowers trust automatically. This is the one signal an attacker
-   cannot fake without owning the phones.
+   them. Low conversion lowers trust automatically. An attacker can only supply this
+   signal by controlling the destination numbers, which a colluding carrier does; the
+   evaluation measures what that costs it.
 5. **Risk score engine with tiered responses.** Combine all signals into one score and
    respond with allow, delay, challenge, channel downgrade or block, instead of a binary
    pass/fail.
