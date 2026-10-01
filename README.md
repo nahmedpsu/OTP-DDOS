@@ -18,31 +18,38 @@ destination: it is paid only on the number blocks its partner carrier terminates
 
 1. **Positive.** Attacks that can be recognised per request are stopped completely with
    99 % of real users still delivered: a spoofed platform header, datacenter IP rotation,
-   a premium-rate range, a single client, and now a sequential-number walk (a walk stays
-   inside one destination block, which the feedback loop denylists).
+   a premium-rate range, a single client, and a sequential-number walk (a walk stays
+   inside one destination block, which a sequential test denies within a few sends).
 2. **Negative, and general.** A residential flooder that looks like a real user (farmed
-   CAPTCHA scores, fresh or pre-aged fingerprints, valid numbers) at a rate comparable to
-   legitimate traffic leaves nothing but rationing. Its leakage and the friction for real
-   users trade off along the measured frontier; the volume cap that holds it to 40 % of
-   the requests refuses half of the real sign-ups.
-3. **Open, and now partly measured.** Pumping is separable on the destination block.
-   With the block key, the 2-minute resolution timeout and the relative baseline, a
-   concentrated pumper whose carrier does not verify is contained in every seed
-   (leak 220 of 600, median containment at minute 10); one whose carrier
-   submits every code within a second is denylisted as machine-verified by minute
-   8. A carrier that verifies 60 % of codes with a 30-second delay defeats both and
-   leaves 324 verified fake accounts per run: the cost moves downstream to whatever the
-   account is for, and measuring it there is the next experiment.
+   CAPTCHA scores, fresh or pre-aged fingerprints, valid numbers) leaves nothing but
+   rationing. Against it v1 with static caps leaks 564 of 600 at 4 % refusal of
+   real users; v2's adaptive cap leaks 244 at 51 % refusal. All of v2's gain against this
+   attacker is rationing, along the measured frontier. Raising the attack to 10 times the
+   legitimate volume for an hour does not change the picture: the conversion penalty
+   starts firing but 71 % of the attack still leaks while 21 % of real users are challenged.
+3. **Open, and now measured in part.** Pumping is separable on the destination block, as
+   far as the carrier's ranges concentrate. With the block key and a 2-minute resolution
+   timeout (now the default), a pumper on three 10 000-number blocks whose carrier does
+   not verify is contained in every seed by minute 3 (91 leaked of 600); one whose carrier
+   submits every code within a second is denied as machine-verified by minute 1
+   (8 leaked). Spreading the same traffic over 300 ranges, or over ranges of 100 000 numbers
+   that span ten keys each, turns the pumper back into the diluting flooder
+   (`results/pumper_spread.png`). A carrier that verifies 60 % of codes with a 30-second
+   delay defeats every variant and leaves 355 verified fake accounts per run: the cost moves
+   downstream to whatever the account is for, and measuring it there is the next experiment.
 
 ## Known weak spots
 
 Each is quantified in [`results/evaluation.md`](results/evaluation.md) and discussed in
 [`docs/evaluation.md`](docs/evaluation.md).
 
-- **Dilution.** A residential attacker with human-like CAPTCHA scores whose volume stays
-  below about 1.8 times the legitimate traffic on the shared country and prefix keys is
-  not separated by any behavioural signal, including the relative baseline; it leaks
-  582 of 600 with caps lifted and 244 with adaptive caps at 49 % delivery for real users.
+- **Dilution.** A residential attacker with human-like CAPTCHA scores is not separated by
+  any behavioural signal at any volume tested. Below about 1.8 times the legitimate
+  traffic on the shared country and prefix keys the conversion penalty does not fire; above
+  it, it fires on everyone sharing the key. It leaks 582 of 600 with caps lifted and
+  244 with adaptive caps at 49 % delivery for real users.
+- **Pumper spread.** Block-level containment holds while the carrier's ranges fit inside
+  10 000-number blocks; 100 000-number ranges or hundreds of ranges leak like the flooder.
 - **Human-like verifying carrier.** Indistinguishable from real traffic on any key; only
   per-prefix caps and the spend breaker bound it.
 - **Bought challenge solutions.** A datacenter attacker that pays for interactive-challenge
@@ -138,19 +145,20 @@ Full detail, pseudocode and the reasoning behind every default: `docs/sms_valida
 From `results/evaluation.md`: 30 seeds per attacker with randomised pool size, attack rate and
 CAPTCHA class; 20 requests/min of legitimate traffic in the background; means with 95 %
 confidence intervals in the full tables. v1 is the original design run through the same code
-with the v2 layers switched off. "Behavioural only" lifts the source caps; "with adaptive
-caps" runs them at 3x the legitimate rate.
+with the v2 layers switched off. "Behavioural only" lifts the source caps; "with source caps"
+runs them at 3x the legitimate rate, adaptive for v2 and static for v1 (the adaptive cap is
+v2's Step 9).
 
-| Attacker (600 requests over 20 min) | v1 leaked | v2 leaked, behavioural only | v2 leaked, with caps | v2 legit delivered, with caps |
+| Attacker (600 requests over 20 min) | v1 leaked, caps lifted | v2 leaked, caps lifted | v1 with static caps: leaked / real users refused | v2 with adaptive caps: leaked / real users refused |
 |---|---:|---:|---:|---:|
-| One client, random numbers | 31 | 2 | 2 | 99.2 % |
-| Datacenter rotation, fresh fingerprints | 412 | 0 | 0 | 99.3 % |
-| Premium-prefix pumping | 593 | 0 | 0 | 99.1 % |
-| Spoofed platform header | 597 | 0 | 0 | 99.2 % |
-| Sequential numbers | 593 | 75 | 67 | 90.7 % |
-| Residential pool, reused browser profile | 597 | 122 | 94 | 93.6 % |
-| Residential pool, bot CAPTCHA scores | 221 | 219 | 153 | 82.9 % |
-| Residential pool, farmed CAPTCHA, fresh or pre-aged fingerprints | 597 | **582** | 244 | **48.8 %** |
+| One client, random numbers | 31 | 2 | 31 / 1 % | 2 / 1 % |
+| Datacenter rotation, fresh fingerprints | 412 | 0 | 394 / 2 % | 0 / 1 % |
+| Premium-prefix pumping | 593 | 0 | 563 / 4 % | 0 / 1 % |
+| Spoofed platform header | 597 | 0 | 100 / 1 % | 0 / 1 % |
+| Sequential numbers | 593 | 68 | 563 / 4 % | 61 / 2 % |
+| Residential pool, reused browser profile | 597 | 122 | 564 / 4 % | 94 / 6 % |
+| Residential pool, bot CAPTCHA scores | 221 | 219 | 221 / 0 % | 153 / 17 % |
+| Residential pool, farmed CAPTCHA, fresh or pre-aged fingerprints | 597 | 582 | 564 / 4 % | 244 / 51 % |
 
 ![leakage vs friction](results/tradeoff.png)
 
@@ -160,8 +168,9 @@ Other things the evaluation established:
   stops the naive client; the risk engine stops datacenter rotation; number intelligence
   stops premium pumping; the feedback loop stops the reused-profile attacker
   (92 leaked with it, 245 without) and, with the destination-block key, the sequential walk
-  (66 with both, 217 without the loop, 185 without the block key). No layer changes the diluted
-  residential attackers.
+  (56 with both, 217 without the loop, 185 without the block key). Against the diluted
+  residential attackers only the adaptive cap changes anything (245 with it, 531 without),
+  and it does so by refusing real users.
 - **Weights**: raising the fresh-fingerprint weight to 40 stops the farm attacker outright
   but challenges 60 % of legitimate new users; tier boundaries scaled to 0.6 cut its
   leakage by a third for a 21 % challenge rate. The OTP timeout does not move this
@@ -169,8 +178,10 @@ Other things the evaluation established:
 - **Graded response**: about 2 % of legitimate requests (corporate, roaming and
   cloud-abroad egress) are challenged and 90 % of those complete it; the tier is exercised.
 - **Low-and-slow**: attacks under the dilution bound leak in full at their own rate.
-- **Economics**: premium pumping is profitable under v1 (14 to 38 USD per 20 minutes at 20
-  to 50 % revenue share) and loses money under v2.
+- **Economics** (revenue credited only to pumping attackers): premium pumping is profitable
+  under v1 and loses money under v2; a concentrated pumper whose carrier verifies with
+  human-like delay stays profitable under both and additionally hands the defender
+  355 verified fake accounts per 20 minutes.
 - **Performance**: see the section in `results/performance.md` and the note below.
 
 - **Performance** (`results/performance.md`, real Redis, 4 uvicorn workers on 4 vCPUs, vendors
