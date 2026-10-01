@@ -1,7 +1,8 @@
-........................................................................ [ 26%]
-........................................................................ [ 52%]
-........................................................................ [ 79%]
-.........................................................                [100%]
+........................................................................ [ 20%]
+........................................................................ [ 40%]
+........................................................................ [ 61%]
+........................................................................ [ 81%]
+................................................................         [100%]
 =============================== warnings summary ===============================
 ../../../usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1
   /usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
@@ -11,13 +12,13 @@
 ==================================== PASSES ====================================
 ____________________ test_synthetic_logs_replay_round_trip _____________________
 ----------------------------- Captured stdout call -----------------------------
-wrote 319 rows to /tmp/pytest-of-root/pytest-46/test_synthetic_logs_replay_rou0/logs.csv
+wrote 319 rows to /tmp/pytest-of-root/pytest-49/test_synthetic_logs_replay_rou0/logs.csv
 _______ test_recaptcha_rejects_wrong_action_or_hostname_and_fails_closed _______
 ------------------------------ Captured log call -------------------------------
 WARNING  otp_guard.providers:recaptcha.py:26 recaptcha unavailable: down
 _____________ test_play_integrity_fails_closed_when_google_is_down _____________
 ------------------------------ Captured log call -------------------------------
-WARNING  otp_guard.providers:attestation.py:55 play integrity unavailable:
+WARNING  otp_guard.providers:attestation.py:57 play integrity unavailable:
 ______________________ test_ipinfo_basic_plan_and_outage _______________________
 ------------------------------ Captured log call -------------------------------
 WARNING  otp_guard.providers:ip_intel.py:27 ipinfo unavailable for 5.6.7.8:
@@ -53,6 +54,9 @@ PASSED tests/integration/test_real_redis.py::test_budget_ceiling_holds_across_in
 PASSED tests/integration/test_real_redis.py::test_one_number_cannot_be_claimed_twice_across_instances
 PASSED tests/integration/test_real_redis.py::test_concurrent_verification_callbacks_count_once_across_instances
 PASSED tests/integration/test_real_redis.py::test_concurrent_block_events_across_instances_count_exactly
+PASSED tests/integration/test_real_redis.py::test_graded_escalation_across_instances
+PASSED tests/integration/test_real_redis.py::test_crash_recovery_across_instances
+PASSED tests/integration/test_real_redis.py::test_concurrent_mixed_receipts_leave_a_consistent_entry
 PASSED tests/integration/test_real_redis.py::test_store_update_serialises_conflicting_writers
 PASSED tests/integration/test_replay.py::test_synthetic_logs_replay_round_trip
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[memory]
@@ -73,10 +77,22 @@ PASSED tests/integration/test_scenarios.py::test_verify_endpoint_session_rate_li
 PASSED tests/integration/test_scenarios.py::test_verify_endpoint_session_rate_limit[redis]
 PASSED tests/integration/test_scenarios.py::test_marketing_campaign_override_lifts_cap[memory]
 PASSED tests/integration/test_scenarios.py::test_marketing_campaign_override_lifts_cap[redis]
+PASSED tests/unit/test_app_attest_enrollment.py::test_valid_attestation_enrols_the_key_and_assertions_then_verify
+PASSED tests/unit/test_app_attest_enrollment.py::test_invalid_attestations_are_rejected[case0-nonce]
+PASSED tests/unit/test_app_attest_enrollment.py::test_invalid_attestations_are_rejected[case1-nonce]
+PASSED tests/unit/test_app_attest_enrollment.py::test_invalid_attestations_are_rejected[case2-rp_id]
+PASSED tests/unit/test_app_attest_enrollment.py::test_invalid_attestations_are_rejected[case3-counter]
+PASSED tests/unit/test_app_attest_enrollment.py::test_invalid_attestations_are_rejected[case4-aaguid]
+PASSED tests/unit/test_app_attest_enrollment.py::test_invalid_attestations_are_rejected[case5-credential_id]
+PASSED tests/unit/test_app_attest_enrollment.py::test_invalid_attestations_are_rejected[case6-validity]
+PASSED tests/unit/test_app_attest_enrollment.py::test_development_aaguid_only_when_allowed
+PASSED tests/unit/test_app_attest_enrollment.py::test_a_chain_to_another_root_is_rejected
+PASSED tests/unit/test_app_attest_enrollment.py::test_wrong_key_id_and_garbage_are_rejected
 PASSED tests/unit/test_evaluation.py::test_containment_definition
 PASSED tests/unit/test_evaluation.py::test_mean_ci_and_ks
 PASSED tests/unit/test_evaluation.py::test_simulation_runs_and_is_deterministic
 PASSED tests/unit/test_evaluation.py::test_v1_leaks_more_than_v2_for_datacenter_attacker
+PASSED tests/unit/test_evaluation.py::test_every_enforcing_poisoner_variant_has_a_matched_observe_reference
 PASSED tests/unit/test_factory.py::test_empty_env_builds_all_fakes_and_reports_them
 PASSED tests/unit/test_factory.py::test_full_env_wires_real_adapters
 PASSED tests/unit/test_factory.py::test_kill_switch_and_grace_parsing
@@ -168,6 +184,13 @@ PASSED tests/unit/test_simulator_invariants.py::test_legitimate_blocks_are_disti
 PASSED tests/unit/test_simulator_invariants.py::test_trust_builder_phases_add_up_and_pairs_are_one_to_one
 PASSED tests/unit/test_simulator_invariants.py::test_verdicts_are_counted_as_events_with_stages
 PASSED tests/unit/test_simulator_invariants.py::test_attack_can_stop_early_for_recovery_studies
+PASSED tests/unit/test_simulator_invariants.py::test_fallback_availability_reaches_the_channel_selector
+PASSED tests/unit/test_simulator_invariants.py::test_verdict_estimands_are_bounded_by_the_window
+PASSED tests/unit/test_simulator_invariants.py::test_request_records_pair_across_designs
+PASSED tests/unit/test_simulator_invariants.py::test_returning_population_is_stable_and_known_good
+PASSED tests/unit/test_simulator_invariants.py::test_heterogeneous_population_options_run_and_conserve
+PASSED tests/unit/test_simulator_invariants.py::test_threshold_aware_carrier_evades_by_verifying_near_the_zero_drift_share
+PASSED tests/unit/test_simulator_invariants.py::test_containment_needs_a_sustained_quiet_period
 PASSED tests/unit/test_steps.py::test_web_happy_path_sends_sms_and_logs[memory]
 PASSED tests/unit/test_steps.py::test_web_happy_path_sends_sms_and_logs[redis]
 PASSED tests/unit/test_steps.py::test_attested_ios_from_any_host_is_allowed[memory]
@@ -313,4 +336,61 @@ PASSED tests/unit/test_steps.py::test_relative_baseline_fires_when_a_healthy_key
 PASSED tests/unit/test_steps.py::test_relative_baseline_fires_when_a_healthy_key_drops[redis]
 PASSED tests/unit/test_steps.py::test_session_layer_off_keeps_client_identity[memory]
 PASSED tests/unit/test_steps.py::test_session_layer_off_keeps_client_identity[redis]
-273 passed, 1 warning in 140.64s (0:02:20)
+PASSED tests/unit/test_third_round.py::test_concurrent_crossings_escalate_to_stage_two[memory]
+PASSED tests/unit/test_third_round.py::test_concurrent_crossings_escalate_to_stage_two[redis]
+PASSED tests/unit/test_third_round.py::test_two_crossings_at_the_same_instant_are_two_events[memory]
+PASSED tests/unit/test_third_round.py::test_two_crossings_at_the_same_instant_are_two_events[redis]
+PASSED tests/unit/test_third_round.py::test_a_verdict_after_expiry_starts_again_at_stage_one[memory]
+PASSED tests/unit/test_third_round.py::test_a_verdict_after_expiry_starts_again_at_stage_one[redis]
+PASSED tests/unit/test_third_round.py::test_observe_action_records_verdicts_without_enforcing[memory]
+PASSED tests/unit/test_third_round.py::test_observe_action_records_verdicts_without_enforcing[redis]
+PASSED tests/unit/test_third_round.py::test_negative_receipt_marks_failed_and_undelivered_in_one_transition[memory]
+PASSED tests/unit/test_third_round.py::test_negative_receipt_marks_failed_and_undelivered_in_one_transition[redis]
+PASSED tests/unit/test_third_round.py::test_correcting_receipt_inside_the_negative_path_leaves_a_consistent_entry[memory]
+PASSED tests/unit/test_third_round.py::test_correcting_receipt_inside_the_negative_path_leaves_a_consistent_entry[redis]
+PASSED tests/unit/test_third_round.py::test_timeout_and_correcting_receipt_in_either_order[memory]
+PASSED tests/unit/test_third_round.py::test_timeout_and_correcting_receipt_in_either_order[redis]
+PASSED tests/unit/test_third_round.py::test_exhausting_attempts_after_a_timeout_does_not_count_the_failure_twice[memory]
+PASSED tests/unit/test_third_round.py::test_exhausting_attempts_after_a_timeout_does_not_count_the_failure_twice[redis]
+PASSED tests/unit/test_third_round.py::test_concurrent_right_code_submissions_verify_once_and_one_caller_wins[memory]
+PASSED tests/unit/test_third_round.py::test_concurrent_right_code_submissions_verify_once_and_one_caller_wins[redis]
+PASSED tests/unit/test_third_round.py::test_verification_effects_survive_a_crash_and_apply_once[memory-0]
+PASSED tests/unit/test_third_round.py::test_verification_effects_survive_a_crash_and_apply_once[memory-1]
+PASSED tests/unit/test_third_round.py::test_verification_effects_survive_a_crash_and_apply_once[memory-2]
+PASSED tests/unit/test_third_round.py::test_verification_effects_survive_a_crash_and_apply_once[memory-4]
+PASSED tests/unit/test_third_round.py::test_verification_effects_survive_a_crash_and_apply_once[redis-0]
+PASSED tests/unit/test_third_round.py::test_verification_effects_survive_a_crash_and_apply_once[redis-1]
+PASSED tests/unit/test_third_round.py::test_verification_effects_survive_a_crash_and_apply_once[redis-2]
+PASSED tests/unit/test_third_round.py::test_verification_effects_survive_a_crash_and_apply_once[redis-4]
+PASSED tests/unit/test_third_round.py::test_failure_effects_survive_a_crash_and_feed_the_block_test_once[memory-0]
+PASSED tests/unit/test_third_round.py::test_failure_effects_survive_a_crash_and_feed_the_block_test_once[memory-2]
+PASSED tests/unit/test_third_round.py::test_failure_effects_survive_a_crash_and_feed_the_block_test_once[memory-3]
+PASSED tests/unit/test_third_round.py::test_failure_effects_survive_a_crash_and_feed_the_block_test_once[redis-0]
+PASSED tests/unit/test_third_round.py::test_failure_effects_survive_a_crash_and_feed_the_block_test_once[redis-2]
+PASSED tests/unit/test_third_round.py::test_failure_effects_survive_a_crash_and_feed_the_block_test_once[redis-3]
+PASSED tests/unit/test_third_round.py::test_replaying_a_batch_changes_nothing[memory]
+PASSED tests/unit/test_third_round.py::test_replaying_a_batch_changes_nothing[redis]
+PASSED tests/unit/test_third_round.py::test_crash_between_audit_and_enqueue_resolves_as_undelivered[memory]
+PASSED tests/unit/test_third_round.py::test_crash_between_audit_and_enqueue_resolves_as_undelivered[redis]
+PASSED tests/unit/test_third_round.py::test_robust_receipt_policy_counts_failed_receipts_as_block_failures[memory]
+PASSED tests/unit/test_third_round.py::test_robust_receipt_policy_counts_failed_receipts_as_block_failures[redis]
+PASSED tests/unit/test_third_round.py::test_robust_policy_reverses_the_block_failure_when_the_receipt_is_corrected[memory]
+PASSED tests/unit/test_third_round.py::test_robust_policy_reverses_the_block_failure_when_the_receipt_is_corrected[redis]
+PASSED tests/unit/test_third_round.py::test_graded_counter_charges_sends_not_attempts[memory]
+PASSED tests/unit/test_third_round.py::test_graded_counter_charges_sends_not_attempts[redis]
+PASSED tests/unit/test_third_round.py::test_refusing_counter_refuses_after_limit_sends_and_signals_it[memory]
+PASSED tests/unit/test_third_round.py::test_refusing_counter_refuses_after_limit_sends_and_signals_it[redis]
+PASSED tests/unit/test_third_round.py::test_counter_slot_is_returned_when_no_sms_is_sent[memory]
+PASSED tests/unit/test_third_round.py::test_counter_slot_is_returned_when_no_sms_is_sent[redis]
+PASSED tests/unit/test_third_round.py::test_counter_short_window_refills[memory]
+PASSED tests/unit/test_third_round.py::test_counter_short_window_refills[redis]
+PASSED tests/unit/test_third_round.py::test_concurrent_requests_cannot_overshoot_the_counter[memory]
+PASSED tests/unit/test_third_round.py::test_concurrent_requests_cannot_overshoot_the_counter[redis]
+PASSED tests/unit/test_third_round.py::test_known_good_budget_bounds_exempt_requests_per_minute[memory]
+PASSED tests/unit/test_third_round.py::test_known_good_budget_bounds_exempt_requests_per_minute[redis]
+PASSED tests/unit/test_third_round.py::test_two_baseline_workers_neither_double_sample_nor_double_tighten[memory]
+PASSED tests/unit/test_third_round.py::test_two_baseline_workers_neither_double_sample_nor_double_tighten[redis]
+PASSED tests/unit/test_third_round.py::test_partial_first_hour_is_not_a_sample_and_restart_keeps_the_last_hour[memory]
+PASSED tests/unit/test_third_round.py::test_partial_first_hour_is_not_a_sample_and_restart_keeps_the_last_hour[redis]
+PASSED tests/unit/test_third_round.py::test_weekly_profile_is_learned_in_the_simulation
+352 passed, 1 warning in 160.61s (0:02:40)
