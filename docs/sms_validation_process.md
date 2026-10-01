@@ -25,7 +25,7 @@ same uniform response (Step 11).
 |------|--------------------------------------------------|------------------------------------------|
 | 0    | Connection and client integrity (proxy, attestation, host) | VPN/proxy blocking, **Gap A** header spoofing |
 | 1    | Client session token and fingerprint             | **Gap B** IP rotation, replay            |
-| 2    | IP, subnet and ASN throttling (atomic)           | IP throttling, **Gap B**, **Gap F**      |
+| 2    | IP, subnet and ASN throttling (each counter atomic) | IP throttling, **Gap B**, **Gap F**      |
 | 3    | Google reCAPTCHA (score-based)                   | Bot protection                           |
 | 4    | HTTP Origin validation                           | Domain whitelisting                      |
 | 5    | Number intelligence (country, prefix cost, pattern, HLR) | Country whitelisting, **Gap C**, **Gap D** |
@@ -677,14 +677,20 @@ Both windows are checked before either counter is consumed. The per-number contr
 Step 8 are atomic too: the request claims the number's window with `SETNX` (TTL = the
 window that applies after this send) and a slot in the capped daily counter; a later step
 that refuses the request releases both. Two concurrent requests for one number cannot both
-pass. What is *not* one operation is the sequence of steps itself: the atomic parts are
-each counter's check-and-consume, and the delivery and verification callbacks are
-idempotent (a duplicate receipt or verification is ignored), which is what concurrent
-requests and repeated provider callbacks require.
+pass. What is *not* one operation is the sequence of steps itself. The guarantees are
+exactly these: each rate-limit counter's check-and-consume, the per-number claim, the
+destination counter's send reservation and the hourly budget reservation are each one
+atomic Redis operation; the steps between them are not a transaction, and a refusal
+releases the claims made before it. The feedback transitions are covered separately
+(Step 11, "State before the send").
 
-**Rationing spares known-good clients only.** When the multiplier is below 1 the reduced
-cap applies to every client except those with verified history (a fingerprint that has
-verified a code before, or a trusted number); those keep the base cap. A low risk score
+**The adaptive reduction spares known-good clients only.** When the multiplier is below 1
+the reduced cap applies to every client except those with verified history (a fingerprint
+that has verified a code before, or a trusted number); those keep the base cap. They are
+not exempt from the static caps or the global budget, which still bind, and with
+`known_good_budget_per_min` set only that many such requests per minute per (source,
+country) are granted the exemption, so a pool of identities with earned trust cannot push
+unlimited volume through it. A low risk score
 is deliberately not enough to be spared: an attacker with pre-aged fingerprints and farmed
 CAPTCHA scores has a low score too, and an earlier version that spared the `allow` tier
 let exactly that attacker through while rationing real new users (`results/evaluation.md`).
@@ -786,18 +792,33 @@ write the audit record, and answer the client without revealing what happened.
 | `delay`     | push, SMS after a delay of `min(5 * 2^k, 60)` s where k = previous requests in session |
 | `downgrade` | push, WhatsApp OTP, silent network authentication; **never SMS**; block if none available |
 
-**State before the send.** Step 11 writes the audit record, the reputation `sent` counters
-and the OTP entry (code, expiry, delivery state) *before* it hands the message to the
-sender, because the default scheduler sends a zero-delay message synchronously and a
-provider can report its result, or post a receipt, before `enqueue()` returns. Every later
-transition of that entry (receipt, code entry, resolution) is an atomic read-modify-write
-on the store (a lock in memory, WATCH/MULTI/EXEC on Redis): a repeated positive receipt
-never moves the delivery time, a negative receipt after a positive one is a counted
-conflict and ignored, a positive receipt after a negative one or after the grace period
-reopens the send while the code is valid, and two workers verifying the same code count it
-once. The rules are spelled out at the top of `src/otp_guard/feedback.py` and exercised in
-`tests/unit/test_second_round.py` and, across two instances on a real Redis, in
-`tests/integration/test_real_redis.py`.
+**State before the send, and what is atomic.** Step 11 writes the audit record, the
+reputation `sent` counters and the OTP entry (code, expiry, delivery state) *before* it
+hands the message to the sender, because the default scheduler sends a zero-delay message
+synchronously and a provider can report its result, or post a receipt, before `enqueue()`
+returns. Step 11 itself is not one transaction: a crash before the OTP entry is written
+leaves a reserved budget unit and possibly `sent` counts without a send (both
+conservative); a crash after it and before the sender is called leaves an entry that
+resolves as undelivered at the grace period and feeds no test.
+
+Every later transition of the entry (receipt, code entry, resolution) is decided in one
+compare-and-set on the entry (a lock in memory, WATCH/MULTI/EXEC on Redis), and so is
+every compound transition: a negative receipt marks the send failed and resolves it as
+undelivered in the same write; a timeout decides between undelivered, not yet due and
+failed against the entry as it is at that moment; a code entry counts the attempt and
+closes the send in the same write. The transition records the effects it implies
+(reputation increments, block-test events, the trusted-number set, outage records, the
+next timeout) in the entry in that same write; they are then applied idempotently (the
+reputation increments of a transition are one exactly-once script, block-test events carry
+an id the block remembers) and the record is removed. A process that dies in between
+leaves a write-ahead intent that the worker's recovery sweep completes, once. The verdict
+of a destination block (stage, reason, until) lives in the block's own document and is
+decided in the compare-and-set that crosses the threshold, so a second crossing while a
+verdict is active is stage 2 whichever worker processed it. Rules: the top of
+`src/otp_guard/feedback.py`. Tests: `tests/unit/test_third_round.py` (interleavings and
+crash injection) and, across two instances on a real Redis, `tests/integration/test_real_redis.py`.
+Not covered: an entry that expires (20 minutes) before the sweep reaches it, network
+partitions, Redis failover and Redis Cluster.
 
 **The code travels in the message.** Step 11 generates the code before the send, fills the
 message template (`{code}`), hands the filled message to the sender and stores the code

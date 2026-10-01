@@ -1,6 +1,7 @@
 """HTTP API around the pipeline (FastAPI).
 
     GET  /attest/challenge      -> {"challenge": ...}         one-time nonce for app attestation
+    POST /attest/enroll         -> {"status": "enrolled"}     App Attest key enrolment (attestation object)
     POST /session               -> {"session_token": ...}    web: reCAPTCHA; apps: attestation
     POST /otp/request           -> uniform body               the pipeline
     POST /otp/verify            -> {"status": "verified" | "invalid"}
@@ -20,6 +21,12 @@ from pydantic import BaseModel
 from .pipeline import Request
 
 CHALLENGE_TTL = 300
+
+
+class EnrollBody(BaseModel):
+    key_id: str
+    attestation_object: str
+    challenge: str
 
 
 class SessionBody(BaseModel):
@@ -110,6 +117,19 @@ def create_app(pipeline, report=None, trusted_proxies=(), debug_outcome_header=F
         c = secrets.token_urlsafe(24)
         p.store.set("attest:challenge:" + c, 1, CHALLENGE_TTL)
         return {"challenge": c}
+
+    @app.post("/attest/enroll")
+    def attest_enroll(body: EnrollBody):
+        """App Attest enrolment: the one-time attestation object, against a challenge from
+        /attest/challenge. 501 when App Attest is not configured."""
+        enrollment = getattr(p.svc, "app_attest_enrollment", None)
+        if enrollment is None:
+            return JSONResponse({"status": "unavailable"}, status_code=501)
+        if not body.challenge or not p.store.exists("attest:challenge:" + body.challenge):
+            return JSONResponse({"status": "forbidden"}, status_code=403)
+        p.store.delete("attest:challenge:" + body.challenge)
+        ok, reason = enrollment.enroll(body.key_id, body.attestation_object, body.challenge)
+        return {"status": "enrolled"} if ok else JSONResponse({"status": "forbidden"}, status_code=403)
 
     @app.post("/session")
     def session(body: SessionBody, http: HttpRequest):

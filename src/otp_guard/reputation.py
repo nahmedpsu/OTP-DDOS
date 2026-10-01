@@ -24,6 +24,11 @@ class ReputationStore:
     def incr(self, key, field, by=1):
         self.store.hincrby(f"rep:{key}:{self._hour()}", field, by, ttl=self.BUCKET_TTL)
 
+    def incr_batch_once(self, marker, ops, marker_ttl):
+        """ops: [(key, field, by)]: applied together, exactly once per marker (feedback effects)."""
+        h = self._hour()
+        return self.store.hincrby_batch_once(marker, [(f"rep:{k}:{h}", f, by, self.BUCKET_TTL) for k, f, by in ops], marker_ttl)
+
     def get(self, key):
         return self.get_many([key])[key]
 

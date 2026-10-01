@@ -1,6 +1,5 @@
 """State backends. Everything the pipeline remembers goes through one small interface so
 the same code runs on the in-memory store (tests) and on Redis (production)."""
-import copy
 import json
 import threading
 
@@ -26,6 +25,18 @@ end
 return 1
 """
 
+# KEYS[1] = marker; KEYS[2..] = hashes. ARGV[1] = marker TTL, then (field, by, ttl) per hash.
+# The whole batch is applied once: a replay after a crash or a duplicate callback finds the marker.
+LUA_HINCRBY_BATCH_ONCE = """
+if not redis.call('SET', KEYS[1], '1', 'NX', 'EX', ARGV[1]) then return 0 end
+for i = 2, #KEYS do
+    local j = 2 + (i - 2) * 3
+    redis.call('HINCRBY', KEYS[i], ARGV[j], ARGV[j + 1])
+    if redis.call('TTL', KEYS[i]) < 0 then redis.call('EXPIRE', KEYS[i], ARGV[j + 2]) end
+end
+return 1
+"""
+
 LUA_TRY_ACQUIRE_ALL = """
 for i = 1, #KEYS do
     local cur = tonumber(redis.call('GET', KEYS[i]) or '0')
@@ -37,6 +48,21 @@ for i = 1, #KEYS do
 end
 return 1
 """
+
+
+def _copy(v):
+    """Copy of a stored value. Values are JSON-like (dict, list, tuple, set, str, number, bool, None);
+    a specialised walk is several times faster than copy.deepcopy, which dominated simulation time."""
+    t = type(v)
+    if t is dict:
+        return {k: _copy(x) for k, x in v.items()}
+    if t is list:
+        return [_copy(x) for x in v]
+    if t is set:
+        return set(v)
+    if t is tuple:
+        return tuple(_copy(x) for x in v)
+    return v
 
 
 class Clock:
@@ -89,7 +115,7 @@ class MemoryStore:
         """Returns a copy, as a Redis read does: mutating the result never changes the store."""
         with self.lock:
             v = self._live(key)
-            return None if v is None else copy.deepcopy(v[0])
+            return None if v is None else _copy(v[0])
 
     def update(self, key, fn, ttl=None):
         """Atomic read-modify-write: fn(current) -> new value, or None to leave the key as it is.
@@ -97,12 +123,12 @@ class MemoryStore:
         update; this is the only safe way to make a state transition that depends on the state."""
         with self.lock:
             v = self._live(key)
-            cur = None if v is None else copy.deepcopy(v[0])
+            cur = None if v is None else _copy(v[0])
             new = fn(cur)
             if new is None:
                 return cur, False
             self._put(key, new, ttl=ttl)
-            return copy.deepcopy(new), True
+            return _copy(new), True
 
     def set(self, key, val, ttl=None):
         with self.lock:
@@ -140,21 +166,38 @@ class MemoryStore:
             self._d.pop(key, None)
 
     # ---- hashes ----
+    # Collections are mutated in place under the lock; every read returns a copy, so no caller can
+    # hold a reference into the store.
     def hincrby(self, key, field, by=1, ttl=None):
         with self.lock:
             v = self._live(key)
-            h = dict(v[0]) if v is not None else {}
-            h[field] = h.get(field, 0) + by
             if v is None:
-                self._put(key, h, ttl=ttl)
-            else:
-                self._put(key, h, keep_ttl_from=v)
+                self._put(key, {field: by}, ttl=ttl)
+                return by
+            h = v[0]
+            h[field] = h.get(field, 0) + by
             return h[field]
 
     def hgetall(self, key):
         with self.lock:
             v = self._live(key)
             return dict(v[0]) if v is not None else {}
+
+    def hincrby_batch_once(self, marker, ops, marker_ttl):
+        """ops: [(hash key, field, by, ttl)]. Applied together and only if `marker` was not set;
+        returns True when this call applied them."""
+        with self.lock:
+            if self._live(marker) is not None:
+                return False
+            self._put(marker, 1, ttl=marker_ttl)
+            for key, field, by, ttl in ops:
+                self.hincrby(key, field, by, ttl=ttl)
+            return True
+
+    def scan(self, prefix):
+        """Live keys starting with `prefix` (SCAN MATCH on Redis)."""
+        with self.lock:
+            return [k for k in list(self._d) if k.startswith(prefix) and self._live(k) is not None]
 
     def hgetall_many(self, keys):
         return [self.hgetall(k) for k in keys]
@@ -163,12 +206,10 @@ class MemoryStore:
     def zadd(self, key, score, member, ttl=None):
         with self.lock:
             v = self._live(key)
-            z = dict(v[0]) if v is not None else {}
-            z[member] = score
             if v is None:
-                self._put(key, z, ttl=ttl)
+                self._put(key, {member: score}, ttl=ttl)
             else:
-                self._put(key, z, keep_ttl_from=v)
+                v[0][member] = score
 
     def zrangebyscore(self, key, lo, hi):
         with self.lock:
@@ -181,15 +222,14 @@ class MemoryStore:
         with self.lock:
             v = self._live(key)
             if v is not None:
-                z = dict(v[0]); z.pop(member, None)
-                self._put(key, z, keep_ttl_from=v)
+                v[0].pop(member, None)
 
     def zremrangebyscore(self, key, lo, hi):
         with self.lock:
             v = self._live(key)
             if v is not None:
-                z = {m: s for m, s in v[0].items() if not (lo <= s <= hi)}
-                self._put(key, z, keep_ttl_from=v)
+                for m in [m for m, sc in v[0].items() if lo <= sc <= hi]:
+                    del v[0][m]
 
     def zcount_many(self, keys, lo, hi):
         """Members with lo <= score <= hi, for several keys; one round trip on Redis."""
@@ -199,9 +239,10 @@ class MemoryStore:
     def sadd(self, key, member):
         with self.lock:
             v = self._live(key)
-            s = set(v[0]) if v is not None else set()
-            s.add(member)
-            self._put(key, s, keep_ttl_from=v)
+            if v is None:
+                self._put(key, {member})
+            else:
+                v[0].add(member)
 
     def sismember(self, key, member):
         with self.lock:
@@ -262,6 +303,7 @@ class RedisStore:
         self._acquire = self.r.register_script(LUA_TRY_ACQUIRE)
         self._acquire_all = self.r.register_script(LUA_TRY_ACQUIRE_ALL)
         self._reserve = self.r.register_script(LUA_TRY_RESERVE)
+        self._batch_once = self.r.register_script(LUA_HINCRBY_BATCH_ONCE)
         self.round_trips = 0        # one per method call below; a pipeline counts once
 
     @staticmethod
@@ -344,6 +386,18 @@ class RedisStore:
     def hgetall(self, key):
         self.round_trips += 1
         return {(k.decode() if isinstance(k, bytes) else k): int(v) for k, v in self.r.hgetall(key).items()}
+
+    def hincrby_batch_once(self, marker, ops, marker_ttl):
+        """One Lua script: atomic, so a crash cannot leave the batch half applied."""
+        self.round_trips += 1
+        args = [int(marker_ttl)]
+        for _, field, by, ttl in ops:
+            args += [field, int(by), int(ttl)]
+        return int(self._batch_once(keys=[marker] + [k for k, _, _, _ in ops], args=args)) == 1
+
+    def scan(self, prefix):
+        self.round_trips += 1
+        return [k.decode() if isinstance(k, bytes) else k for k in self.r.scan_iter(match=prefix + "*", count=1000)]
 
     def hgetall_many(self, keys):
         self.round_trips += 1

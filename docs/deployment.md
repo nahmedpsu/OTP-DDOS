@@ -31,6 +31,8 @@ refuses to start while any component is still a fake.
 | `GOOGLE_APPLICATION_CREDENTIALS` | Service-account JSON for Play Integrity and FCM. |
 | `PLAY_INTEGRITY_PACKAGE` | Android package name. |
 | `APP_ATTEST_APP_ID` | `<TEAMID>.<bundle id>`. |
+| `APP_ATTEST_ROOT_CA_PATH` | Apple App Attestation Root CA (PEM); enables `POST /attest/enroll`. |
+| `APP_ATTEST_ALLOW_DEVELOPMENT` | `1` to accept development-environment attestations. |
 | `IPINFO_TOKEN`, `ABUSEIPDB_KEY` | IP intelligence and proxy detection. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | Twilio Lookup (number liveness) and Messaging. |
 | `TWILIO_FROM` or `TWILIO_MESSAGING_SERVICE_SID`, `TWILIO_WHATSAPP_FROM`, `TWILIO_STATUS_CALLBACK` | SMS and WhatsApp sending. With a status callback, delivery receipts are expected at `POST /internal/delivery`; without one, a send the provider accepts counts as delivered and a send it refuses as undelivered. |
@@ -64,10 +66,29 @@ included; the default assumes 20 %.
 
 ## App Attest enrolment
 
-Per-request assertion verification is implemented. Enrolling a key (validating the
-one-time attestation object and its certificate chain against Apple's App Attest root CA,
-then storing the public key) is the app's first-launch flow and sits outside the OTP
-pipeline. Once validated, call `AppAttestKeyStore.register_key(key_id, public_key_pem)`.
+`POST /attest/enroll` validates the one-time attestation object an app produces at first
+launch (`DCAppAttestService.attestKey`) against a challenge from `GET /attest/challenge`,
+following Apple's published steps: the certificate chain to the App Attestation root CA, the
+nonce extension, the key identifier, the relying-party hash, a zero counter, the AAGUID and
+the credential id (`providers/attestation.py`, `AppAttestEnrollment`). On success the key is
+registered for per-request assertions. Set `APP_ATTEST_ROOT_CA_PATH` to Apple's root
+certificate, downloaded from
+https://www.apple.com/certificateauthority/Apple_App_Attestation_Root_CA.pem (it is not
+embedded here), and `APP_ATTEST_ALLOW_DEVELOPMENT=1` only for development builds. Without
+the root path the endpoint answers 501 and keys must be registered out of band
+(`AppAttestKeyStore.register_key`). The verifier is tested against a synthetic chain; no
+Apple-issued attestation from a real device has been run through it.
+
+## Feedback recovery, trust budget and receipt policy
+
+The worker's minute tick also runs the feedback recovery sweep: an effect batch whose
+process died is completed after 30 s, exactly once. Run at least one worker.
+`known_good_budget_per_min` (default off) bounds how many requests per minute per (source,
+country) are granted the verified-history exemption; set it to about twice the measured
+returning-user rate. `receipt_policy = "robust"` (default `standard`) counts a failed
+delivery receipt as a block-test failure unless the carrier is in an outage: it resists a
+carrier that fakes failed receipts and costs false verdicts on persistently poor routes
+(`results/evaluation.md`, section D3).
 
 ## Delayed sends
 

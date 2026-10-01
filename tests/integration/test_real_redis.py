@@ -5,8 +5,15 @@ What is established here, and only here (the unit suite runs on the memory store
   * the hourly SMS budget is a hard ceiling under concurrent sends from two instances;
   * one number cannot be claimed twice under concurrent requests from two instances;
   * concurrent verification callbacks for one message count once;
-  * concurrent block-test events from two instances are all counted and cross the threshold once;
+  * concurrent block-test events from two instances are all counted and cross the threshold once,
+    under the denylist action and under the default graded action, where the second crossing
+    while a verdict is active is stage 2 whichever instance processed it;
+  * a feedback transition whose process dies before its effects are applied is completed by the
+    other instance's recovery sweep, exactly once;
+  * concurrent mixed receipts for one send leave a consistent entry;
   * store.update (WATCH/MULTI/EXEC) serialises conflicting writers.
+Not established: behaviour under network partitions or a Redis failover, Redis Cluster (the Lua
+scripts assume one shard), and process crashes at points other than the injected ones.
 Not established anywhere in this repository: behaviour against live vendors (attestation, CAPTCHA,
 HLR, SMS), which needs credentials and a real device."""
 import shutil
@@ -120,6 +127,54 @@ def test_concurrent_block_events_across_instances_count_exactly(redis_url):
     st = pipes[0].store.get("blocktest:block:96650444")
     events = pipes[1].feedback.verdict_events()
     assert st["verdicts"] == 4 and st["f"] == 3 and len(events) == 4      # 23 = 4 x 5 + 3
+
+
+def test_graded_escalation_across_instances(redis_url):
+    """The default action: ten concurrent failures from two instances give two crossings, and the
+    second, inside the first verdict's hour, is stage 2."""
+    h, pipes = two_instances(redis_url)
+    assert h.cfg.block_action == "graded"
+    _run([(lambda p: (lambda: p.feedback._block_event("block:96650446", verified=False)))(pipes[k % 2]) for k in range(10)])
+    events = pipes[1].feedback.verdict_events()
+    assert [e["stage"] for e in events] == [1, 2] and len({e["id"] for e in events}) == 2
+    assert pipes[0].feedback.block_verdict("block:96650446")["stage"] == 2
+
+
+def test_crash_recovery_across_instances(redis_url):
+    """Instance 0 claims a verification and dies before applying its effects; instance 1's sweep
+    applies them once, and a second sweep changes nothing."""
+    h, pipes = two_instances(redis_url)
+    r = pipes[0].process(_req(h, 7))
+    pipes[0].feedback.on_delivery(r.log_id, True)
+    sid = pipes[0].sms_history[r.log_id]["session_id"]
+    code = pipes[0].feedback.code_for(r.log_id)
+
+    class Crash(Exception):
+        pass
+
+    def die(*a, **k):
+        raise Crash()
+    pipes[0].feedback._apply = die
+    with pytest.raises(Crash):
+        pipes[0].feedback.verify(sid, r.log_id, code)
+    mobile = pipes[0].sms_history[r.log_id]["phone_number"]
+    assert pipes[1].rep.get("num:" + mobile).verified == 0
+    h.clock.advance(pipes[1].feedback.RECOVER_AFTER_S + 1)
+    assert pipes[1].feedback.recover() == 1
+    pipes[1].feedback.recover(older_than=0)
+    assert pipes[1].rep.get("num:" + mobile).verified == 1
+
+
+def test_concurrent_mixed_receipts_leave_a_consistent_entry(redis_url):
+    h, pipes = two_instances(redis_url)
+    rs = [pipes[0].process(_req(h, 100 + i)) for i in range(20)]
+    _run([(lambda p, lid, ok: (lambda: p.feedback.on_delivery(lid, ok)))(pipes[k % 2], r.log_id, k % 2 == 0)
+          for r in rs for k in range(4)])
+    for r in rs:
+        e = pipes[0].store.get(f"otp:code:{r.log_id}")
+        assert not (e["delivery"] == "delivered" and e["resolution"] == "undelivered"), e
+        mobile = pipes[0].sms_history[r.log_id]["phone_number"]
+        assert pipes[0].rep.get("num:" + mobile).undelivered == (1 if e["resolution"] == "undelivered" else 0)
 
 
 def test_store_update_serialises_conflicting_writers(redis_url):

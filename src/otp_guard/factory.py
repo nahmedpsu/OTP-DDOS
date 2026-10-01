@@ -111,6 +111,9 @@ def build_pipeline(env=None):
         if env.get("FAKE_VENDOR_LATENCY_MS"):           # load tests only: the fakes block like vendors would
             for fake in (svc.recaptcha, svc.hlr, svc.sender):
                 fake.latency_ms = float(env["FAKE_VENDOR_LATENCY_MS"])
+                fake.latency_sigma = float(env.get("FAKE_VENDOR_LATENCY_SIGMA", "0.5"))
+                fake.timeout_prob = float(env.get("FAKE_VENDOR_TIMEOUT_PROB", "0"))
+                fake.timeout_ms = float(env.get("FAKE_VENDOR_TIMEOUT_MS", "2000"))
         if env.get("FAKE_RECAPTCHA_SCORES"):            # load tests only: "token:score,token:score"
             for item in env["FAKE_RECAPTCHA_SCORES"].split(","):
                 tok, score = item.split(":")
@@ -128,7 +131,16 @@ def build_pipeline(env=None):
     if env.get("PLAY_INTEGRITY_PACKAGE") and google_token:
         verifiers["android"] = PlayIntegrityVerifier(env["PLAY_INTEGRITY_PACKAGE"], google_token)
     if env.get("APP_ATTEST_APP_ID"):
-        verifiers["ios"] = AppAttestVerifier(env["APP_ATTEST_APP_ID"], AppAttestKeyStore(store))
+        keys = AppAttestKeyStore(store)
+        verifiers["ios"] = AppAttestVerifier(env["APP_ATTEST_APP_ID"], keys)
+        if env.get("APP_ATTEST_ROOT_CA_PATH"):
+            from .providers.attestation import AppAttestEnrollment
+            with open(env["APP_ATTEST_ROOT_CA_PATH"], "rb") as f:
+                svc.app_attest_enrollment = AppAttestEnrollment(env["APP_ATTEST_APP_ID"], keys, f.read(),
+                                                                allow_development=env.get("APP_ATTEST_ALLOW_DEVELOPMENT", "").lower() in ("1", "true"))
+            report.real["app_attest_enrollment"] = "AppAttestEnrollment"
+        else:
+            report.notes.append("APP_ATTEST_ROOT_CA_PATH not set: POST /attest/enroll answers 501 and keys must be registered out of band.")
     if verifiers:
         svc.attestation = CompositeAttestationVerifier(verifiers)
         report.real["attestation"] = "CompositeAttestationVerifier(" + ",".join(sorted(verifiers)) + ")"

@@ -642,7 +642,7 @@ def test_deny_mode_denylists_the_block_at_step5(h):
     for i in range(5):
         _pump(h, "96650124", i)
     h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
-    assert h.p.store.exists("deny:block:96650124")
+    assert h.p.feedback.block_denied("block:96650124")
     assert _pump(h, "96650124", 99).rejected_at == "step5"
 
 

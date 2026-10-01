@@ -126,11 +126,11 @@ def test_late_verification_after_failed_is_reclassified_but_a_verdict_stands(h):
     for r in rs:
         h.p.feedback.on_delivery(r.log_id, True)
     h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
-    assert h.p.store.exists("deny:block:96650777")
+    assert h.p.feedback.block_denied("block:96650777")
     assert h.p.feedback.verify("s", rs[0].log_id, h.p.feedback.code_for(rs[0].log_id))
     rep = h.p.rep.get("block:96650777")
     assert rep.verified == 1 and rep.failed == 4
-    assert h.p.store.exists("deny:block:96650777")                      # not revoked
+    assert h.p.feedback.block_denied("block:96650777")                      # not revoked
     assert len(h.p.feedback.verdict_events()) == 1
 
 
@@ -239,11 +239,20 @@ def test_baseline_job_cold_start_uses_only_recorded_hours(h):
 
 
 def test_graded_block_counter_challenges_then_downgrades_first_time_clients(h):
+    """Sends are counted, not attempts: past the limit a first-time client is challenged and its
+    solved retry sends (and is counted); past twice the limit it is moved off SMS."""
     _open(h)
     h.cfg.features = frozenset({"attestation", "session", "block_count_limit"})
     h.cfg.block_count_limit, h.cfg.block_count_action = (3, 86400), "graded"
-    outcomes = [_send(h, (i * 7919) % 10000, block="96650808") for i in range(8)]
-    tiers = [(r.channel, r.tier, r.rejected_at) for r in outcomes]
-    assert all(c == "sms" for c, _, _ in tiers[:3])
-    assert all(rj == "step7" and t == "challenge" for _, t, rj in tiers[3:6])       # requests 4..6: challenge
-    assert all(t == "downgrade" and c != "sms" for c, t, _ in tiers[6:])             # beyond twice the limit: off SMS
+    out = []
+    for i in range(8):
+        tok = h.session(age_hours=3)[0]
+        req = dict(session=tok, ip=f"198.70.{i // 250}.{i % 250 + 1}", mobile=f"96650808{(i * 7919) % 10000:04d}")
+        r = h.send(h.web_request(**req))
+        if r.tier == "challenge":
+            r = h.send(h.web_request(challenge_proof="challenge-ok", **req))
+        out.append(r)
+    assert [r.channel for r in out[:6]] == ["sms"] * 6
+    assert all("block_count_stage1" in r.signals for r in out[3:6])
+    assert all(r.channel != "sms" and "block_count_stage2" in r.signals for r in out[6:])
+    assert h.p.block_count("966508080000") == 6

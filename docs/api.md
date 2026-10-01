@@ -7,6 +7,13 @@ All bodies are JSON. The service is `src/otp_guard/api.py`; run it with `make ru
 Returns `{"challenge": "<random>"}`, valid for 5 minutes, single use. Apps include it in
 the attestation they send to `POST /session`.
 
+## `POST /attest/enroll`
+
+Body `{"key_id": "<base64 key identifier>", "attestation_object": "<base64 CBOR>", "challenge": "<from GET /attest/challenge>"}`.
+Validates an App Attest attestation object and registers the key for assertions:
+`200 {"status": "enrolled"}`, `403 {"status": "forbidden"}` for any failure (fail closed), or
+`501` when `APP_ATTEST_ROOT_CA_PATH` is not configured.
+
 ## `POST /session`
 
 | Field | Web | iOS / Android |

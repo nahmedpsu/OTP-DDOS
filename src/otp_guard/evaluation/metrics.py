@@ -17,9 +17,13 @@ class CostModel:
         return sms * self.sms + hlr * self.hlr + recaptcha * self.recaptcha
 
 
-def containment(leaked_per_min, attack_per_min, tail_fraction=0.05):
+def containment(leaked_per_min, attack_per_min, tail_fraction=0.05, min_sustain=1):
+    """Earliest minute m such that every minute from m to the end of the run leaks at most
+    tail_fraction of that minute's attack requests, and at least `min_sustain` minutes remain
+    (a single quiet final minute is not containment). A finite-window, retrospective property:
+    it says nothing about the attack after the run ends."""
     n = len(leaked_per_min)
-    for m in range(n):
+    for m in range(max(0, n - min_sustain + 1)):
         if all(leaked_per_min[i] <= tail_fraction * max(attack_per_min[i], 1) for i in range(m, n)):
             return m
     return None
@@ -40,12 +44,12 @@ class AttackMetrics:
     stopped_by: dict = field(default_factory=dict)
 
     @staticmethod
-    def build(leaked_per_min, attack_per_min, hlr_calls, recaptcha_calls, cost_model, stopped_by, tail_fraction=0.05):
+    def build(leaked_per_min, attack_per_min, hlr_calls, recaptcha_calls, cost_model, stopped_by, tail_fraction=0.05, min_sustain=1):
         """time_to_containment_min is None for an uncontained run (a censored observation: the run
         ended first). steady_state_leak_per_min is the mean leakage per minute after containment, or
         over the final five minutes of an uncontained run; it is a late-window rate, not evidence of
         stationarity."""
-        m = containment(leaked_per_min, attack_per_min, tail_fraction)
+        m = containment(leaked_per_min, attack_per_min, tail_fraction, min_sustain)
         total = sum(leaked_per_min)
         if m is None:
             tail = leaked_per_min[-5:] or [0]
@@ -65,8 +69,8 @@ class AttackMetrics:
 
 @dataclass
 class FrictionGroup:
-    """Outcomes for one legitimate population. users: requests offered (counted before the session
-    gate). dispatched: a channel was chosen and the message handed to the sender. delivered: the
+    """Outcomes for one legitimate population, aggregated per user (a user's challenge retry and
+    resend attach to the same record). users: users offered (counted before the session gate). dispatched: a channel was chosen and the message handed to the sender. delivered: the
     provider's receipt said delivered. completed: the person entered the code. refused: lost at the
     gate, rejected by a hard step, downgraded with no channel, or undelivered (refused_by names the
     stage). Subgroup counters add up to the whole and completed <= delivered <= dispatched <= users."""
@@ -77,6 +81,7 @@ class FrictionGroup:
     challenged: int = 0
     refused: int = 0
     refused_by: dict = field(default_factory=dict)     # gate | step | no_channel | undelivered -> count
+    known_good: int = 0                                # users whose request was treated as known-good (verified history)
     delayed: int = 0
     added_delay_s_total: float = 0.0
     by_channel: dict = field(default_factory=dict)

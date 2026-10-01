@@ -2,6 +2,7 @@
 confidence intervals, leave-one-layer-out ablation, weight and boundary sweeps, adaptive
 attackers, and attacker economics."""
 import copy
+import math
 import multiprocessing as mp
 import random
 from dataclasses import replace
@@ -9,7 +10,7 @@ from dataclasses import replace
 from ..config import ALL_FEATURES, V1_FEATURES, OPTIONAL_FEATURES, BASELINE_DESIGNS, BASELINE_CFG
 from .calibration import value as cal
 from .sim import AttackerSpec, LegitSpec, SimSpec, run_sim
-from .stats import mean_ci, fraction_ci
+from .stats import mean_ci, boot_ci, tail, fraction_ci
 
 BOT_CAPTCHA = cal("recaptcha_bot_scores")
 
@@ -62,6 +63,15 @@ ADAPTIVE_ATTACKERS = {
         "blocks the carrier terminates, so the block memory is what the flood phase must get past",
         numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), trust_building_minutes=10, trust_pool=500,
         trust_concentrated=True, verify_fraction=0.0, earns_revenue=True),
+    "trust_building_long": AttackerSpec("trust_building_long",
+        "Trust building for 30 minutes (500 identity/number pairs verify everything), then 30 minutes of flood with the same pairs",
+        fp_mode="aged", captcha_beta=(9, 1.5), trust_building_minutes=30, trust_pool=500, verify_fraction=0.0, earns_revenue=True),
+    "threshold_aware_carrier": AttackerSpec("threshold_aware_carrier",
+        "Concentrated pumper on 3 blocks whose carrier knows the deployed test parameters and the worker's timing, replays its "
+        "own pending outcomes in the order the deployment applies them, and enters a code (100 s after delivery) only when not "
+        "doing so would bring its block within 1 log unit of the threshold",
+        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), verify_policy="threshold_aware",
+        verify_delay_s=100.0, threshold_margin=1.0, earns_revenue=True),
     "receipt_faking_carrier": AttackerSpec("receipt_faking_carrier",
         "Concentrated pumper whose carrier reports every delivery as failed: the sends are billed but feed no block test",
         numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), fake_failed_receipts=True, earns_revenue=True),
@@ -95,48 +105,87 @@ def run_all(specs, processes=None):
         return pool.map(_job, specs, chunksize=2)
 
 
+CI = boot_ci        # every summary interval: percentile bootstrap over runs (stays inside the data range)
+
+
 def _verdict_fields(results):
-    """Verdict accounting shared by every summary: events (not blocks), unique blocks, stages, the
-    requests hit (by stage) and those that never completed, and the block-minutes under a verdict."""
+    """Verdict accounting shared by every summary. Incidence: verdict events issued inside the
+    observation window; exposure: block-minutes under a verdict inside the window (including
+    verdicts issued before it); eventual: events at or after the attack start including the drain.
+    Hits are requests that met any destination-policy intervention (verdict or counter); 'lost' is
+    descriptive (hit and never completed), not attributable harm (see attributable_loss)."""
     def col(f):
         return [f(r) for r in results]
+    out = {
+        "block_verdicts": CI(col(lambda r: r["block_verdicts"])),
+        "blocks_with_verdict": CI(col(lambda r: r["blocks_with_verdict"])),
+        "verdicts_stage1": CI(col(lambda r: r["verdicts_stage1"])),
+        "verdicts_stage2": CI(col(lambda r: r["verdicts_stage2"])),
+        "verdict_exposure_block_min": CI(col(lambda r: r["verdict_exposure_block_min"])),
+        "block_verdicts_incl_drain": CI(col(lambda r: r["block_verdicts_incl_drain"])),
+        "first_verdict_min": CI([r["first_verdict_min"] for r in results if r["first_verdict_min"] is not None]),
+        "legit_hit_by_verdict": CI(col(lambda r: r["legit_hit_by_verdict"])),
+        "legit_hit_stage1": CI(col(lambda r: r["legit_hit_stage1"])),
+        "legit_hit_stage2": CI(col(lambda r: r["legit_hit_stage2"])),
+        "legit_hit_refused": CI(col(lambda r: r.get("legit_hit_refused", 0))),
+        "legit_hit_lost": CI(col(lambda r: r["legit_hit_lost"])),
+        "legit_hit_by_verdict_pct": CI([100.0 * r["legit_hit_by_verdict"] / max(r["friction"]["users"], 1) for r in results]),
+        "pending_at_end": sum(sum(r["pending_at_end"].values()) for r in results),
+    }
+    out["tails"] = {k: tail(col(f)) for k, f in (
+        ("block_verdicts", lambda r: r["block_verdicts"]), ("verdict_exposure_block_min", lambda r: r["verdict_exposure_block_min"]),
+        ("legit_hit_by_verdict", lambda r: r["legit_hit_by_verdict"]), ("legit_hit_lost", lambda r: r["legit_hit_lost"]))}
+    return out
+
+
+def _friction_fields(results):
+    def col(*path):
+        out = []
+        for r in results:
+            v = r
+            for p in path:
+                v = v[p]
+            out.append(v)
+        return out
     return {
-        "block_verdicts": mean_ci(col(lambda r: r["block_verdicts"])),                 # verdict events
-        "blocks_with_verdict": mean_ci(col(lambda r: r["blocks_with_verdict"])),       # distinct blocks
-        "verdicts_stage1": mean_ci(col(lambda r: r["verdicts_stage1"])),
-        "verdicts_stage2": mean_ci(col(lambda r: r["verdicts_stage2"])),
-        "verdict_exposure_block_min": mean_ci(col(lambda r: r["verdict_exposure_block_min"])),
-        "legit_hit_by_verdict": mean_ci(col(lambda r: r["legit_hit_by_verdict"])),
-        "legit_hit_stage1": mean_ci(col(lambda r: r["legit_hit_stage1"])),
-        "legit_hit_stage2": mean_ci(col(lambda r: r["legit_hit_stage2"])),
-        "legit_hit_lost": mean_ci(col(lambda r: r["legit_hit_lost"])),
-        "legit_hit_by_verdict_pct": mean_ci([100.0 * r["legit_hit_by_verdict"] / max(r["friction"]["users"], 1) for r in results]),
-        "pending_at_end": sum(r["pending_at_end"]["events"] + r["pending_at_end"]["timeouts"] for r in results),
+        "legit_users": CI(col("friction", "users")),
+        "legit_dispatched_pct": CI(col("friction", "dispatched_pct")),
+        "legit_delivered_pct": CI(col("friction", "delivered_pct")),
+        "legit_completed_pct": CI(col("friction", "completed_pct")),
+        "legit_challenge_rate_pct": CI(col("friction", "challenge_rate_pct")),
+        "legit_refusal_rate_pct": CI(col("friction", "refusal_rate_pct")),
+        "legit_mean_added_delay_s": CI(col("friction", "mean_added_delay_s")),
+        "legit_whatsapp_pct": CI([100.0 * r["friction"]["by_channel"].get("whatsapp", 0) / max(r["friction"]["users"], 1) for r in results]),
+        "legit_no_channel_pct": CI([100.0 * r["friction"]["refused_by"].get("no_channel", 0) / max(r["friction"]["users"], 1) for r in results]),
+        "legit_gate_loss_pct": CI([100.0 * r["friction"]["refused_by"].get("gate", 0) / max(r["friction"]["users"], 1) for r in results]),
+        "legit_undelivered_pct": CI([100.0 * r["friction"]["refused_by"].get("undelivered", 0) / max(r["friction"]["users"], 1) for r in results]),
+        "first_time_refusal_rate_pct": CI(col("friction", "first_time", "refusal_rate_pct")),
+        "first_time_delivered_pct": CI(col("friction", "first_time", "delivered_pct")),
+        "first_time_completed_pct": CI(col("friction", "first_time", "completed_pct")),
+        "first_time_challenge_rate_pct": CI(col("friction", "first_time", "challenge_rate_pct")),
+        "returning_refusal_rate_pct": CI(col("friction", "returning", "refusal_rate_pct")),
+        "returning_delivered_pct": CI(col("friction", "returning", "delivered_pct")),
+        "returning_completed_pct": CI(col("friction", "returning", "completed_pct")),
+        "returning_users": CI(col("friction", "returning", "users")),
+        "returning_known_good_pct": CI([100.0 * r["friction"]["returning"]["known_good"] / max(r["friction"]["returning"]["dispatched"], 1) for r in results]),
+        "resends": CI([r.get("reactions", {}).get("resend", 0) for r in results]),
     }
 
 
 def summarise_legit_only(results):
-    """Aggregate false-positive runs: verdict events and the real users they touched."""
-    def col(f):
-        return [f(r) for r in results]
-    out = {
-        "n": len(results),
-        "legit_users": mean_ci(col(lambda r: r["friction"]["users"])),
-        "legit_delivered_pct": mean_ci(col(lambda r: r["friction"]["delivered_pct"])),
-        "legit_completed_pct": mean_ci(col(lambda r: r["friction"]["completed_pct"])),
-        "legit_challenge_rate_pct": mean_ci(col(lambda r: r["friction"]["challenge_rate_pct"])),
-        "legit_refusal_rate_pct": mean_ci(col(lambda r: r["friction"]["refusal_rate_pct"])),
-        "outage_alerts": mean_ci(col(lambda r: r["outage_alerts"])),
-        "occupancy_median": mean_ci(col(lambda r: r["legit_block_occupancy"]["median"])),
-        "occupancy_max": mean_ci(col(lambda r: r["legit_block_occupancy"]["max"])),
-        "blocks_touched": mean_ci(col(lambda r: r["legit_block_occupancy"]["touched"])),
-    }
+    """Aggregate legitimate-only runs: service, verdict events and the requests they touched."""
+    out = {"n": len(results),
+           "outage_alerts": CI([r["outage_alerts"] for r in results]),
+           "occupancy_median": CI([r["legit_block_occupancy"]["median"] for r in results]),
+           "occupancy_max": CI([r["legit_block_occupancy"]["max"] for r in results]),
+           "blocks_touched": CI([r["legit_block_occupancy"]["touched"] for r in results])}
+    out.update(_friction_fields(results))
     out.update(_verdict_fields(results))
     return out
 
 
 def summarise(results):
-    """Aggregate a list of run results into means with 95 % CIs."""
+    """Aggregate a list of run results: means with 95 % bootstrap intervals, tails, containment."""
     def col(path):
         out = []
         for r in results:
@@ -153,43 +202,34 @@ def summarise(results):
         "n": len(results),
         "n_contained": n_contained,
         "contained_fraction": n_contained / len(results),
+        "containment_survival": [sum(1 for t in ttc if t is None or t > m) / len(ttc) for m in range(minutes + 1)],
         # horizon-filled mean (uncontained runs counted as `minutes`); the tables report the conditional one below
-        "time_to_containment_horizon_filled_min": mean_ci([t if t is not None else minutes for t in ttc]),
-        "leaked_before_containment": mean_ci(col(("attack", "leaked_before_containment"))),
-        "leaked_total": mean_ci(col(("attack", "leaked_total"))),
-        "steady_state_leak_per_min": mean_ci(col(("attack", "steady_state_leak_per_min"))),
-        "attacker_cost_usd": mean_ci(col(("attack", "cost_usd"))),
-        "requests": mean_ci(col(("attack", "requests"))),
-        "time_to_containment_if_contained_min": mean_ci([t for t in ttc if t is not None]),
-        "legit_dispatched_pct": mean_ci(col(("friction", "dispatched_pct"))),
-        "legit_delivered_pct": mean_ci(col(("friction", "delivered_pct"))),
-        "legit_completed_pct": mean_ci(col(("friction", "completed_pct"))),
-        "legit_challenge_rate_pct": mean_ci(col(("friction", "challenge_rate_pct"))),
-        "legit_refusal_rate_pct": mean_ci(col(("friction", "refusal_rate_pct"))),
-        "legit_mean_added_delay_s": mean_ci(col(("friction", "mean_added_delay_s"))),
-        "first_time_refusal_rate_pct": mean_ci(col(("friction", "first_time", "refusal_rate_pct"))),
-        "first_time_delivered_pct": mean_ci(col(("friction", "first_time", "delivered_pct"))),
-        "first_time_challenge_rate_pct": mean_ci(col(("friction", "first_time", "challenge_rate_pct"))),
-        "returning_refusal_rate_pct": mean_ci(col(("friction", "returning", "refusal_rate_pct"))),
-        "returning_delivered_pct": mean_ci(col(("friction", "returning", "delivered_pct"))),
-        "returning_users": mean_ci(col(("friction", "returning", "users"))),
-        "attacker_session_attempts": mean_ci(col(("attacker_session_attempts",))),
-        "attacker_sessions_refused": mean_ci(col(("attacker_sessions_refused",))),
-        "attacker_blocks_requested": mean_ci(col(("attacker_blocks_requested",))),
-        "attacker_blocks_leaked": mean_ci(col(("attacker_blocks_leaked",))),
-        "attacker_verifications": mean_ci(col(("attacker_verifications",))),
-        "attacker_challenges_solved": mean_ci(col(("attacker_challenges_solved",))),
-        "legit_gate_loss_pct": mean_ci([100.0 * r["friction"]["refused_by"].get("gate", 0) / max(r["friction"]["users"], 1) for r in results]),
-        "legit_undelivered_pct": mean_ci([100.0 * r["friction"]["refused_by"].get("undelivered", 0) / max(r["friction"]["users"], 1) for r in results]),
-        "prep_requests": mean_ci([r["attack_phase"]["prep"].get("requests", 0) for r in results]),
-        "prep_leaked": mean_ci([r["attack_phase"]["prep"].get("leaked", 0) for r in results]),
-        "prep_verified": mean_ci([r["attack_phase"]["prep"].get("verified", 0) for r in results]),
-        "flood_requests": mean_ci([r["attack_phase"]["flood"].get("requests", 0) for r in results]),
-        "flood_leaked": mean_ci([r["attack_phase"]["flood"].get("leaked", 0) for r in results]),
-        "flood_verified": mean_ci([r["attack_phase"]["flood"].get("verified", 0) for r in results]),
-        "legit_hit_after_stop": mean_ci([sum(r["legit_hit_per_min"][active:]) if active else 0 for r in results]),
+        "time_to_containment_horizon_filled_min": CI([t if t is not None else minutes for t in ttc]),
+        "time_to_containment_if_contained_min": CI([t for t in ttc if t is not None]),
+        "leaked_before_containment": CI(col(("attack", "leaked_before_containment"))),
+        "leaked_total": CI(col(("attack", "leaked_total"))),
+        "leak_fraction_pct": CI([100.0 * r["attack"]["leaked_total"] / max(r["attack"]["requests"], 1) for r in results]),
+        "steady_state_leak_per_min": CI(col(("attack", "steady_state_leak_per_min"))),
+        "attacker_cost_usd": CI(col(("attack", "cost_usd"))),
+        "requests": CI(col(("attack", "requests"))),
+        "attacker_session_attempts": CI(col(("attacker_session_attempts",))),
+        "attacker_sessions_refused": CI(col(("attacker_sessions_refused",))),
+        "attacker_blocks_requested": CI(col(("attacker_blocks_requested",))),
+        "attacker_blocks_leaked": CI(col(("attacker_blocks_leaked",))),
+        "attacker_verifications": CI(col(("attacker_verifications",))),
+        "attacker_challenges_solved": CI(col(("attacker_challenges_solved",))),
+        "prep_requests": CI([r["attack_phase"]["prep"].get("requests", 0) for r in results]),
+        "prep_leaked": CI([r["attack_phase"]["prep"].get("leaked", 0) for r in results]),
+        "prep_verified": CI([r["attack_phase"]["prep"].get("verified", 0) for r in results]),
+        "flood_requests": CI([r["attack_phase"]["flood"].get("requests", 0) for r in results]),
+        "flood_leaked": CI([r["attack_phase"]["flood"].get("leaked", 0) for r in results]),
+        "flood_verified": CI([r["attack_phase"]["flood"].get("verified", 0) for r in results]),
+        "legit_hit_after_stop": CI([sum(r["legit_hit_per_min"][active:]) if active else 0 for r in results]),
     }
+    out.update(_friction_fields(results))
     out.update(_verdict_fields(results))
+    out["tails"].update({"leaked_total": tail(col(("attack", "leaked_total"))),
+                         "first_time_refusal_rate_pct": tail(col(("friction", "first_time", "refusal_rate_pct")))})
     return out
 
 
@@ -219,7 +259,31 @@ def paired_difference(results_a, results_b, path):
         return v
     by_seed_b = {r["spec"]["seed"]: get(r) for r in results_b}
     diffs = [get(r) - by_seed_b[r["spec"]["seed"]] for r in results_a if r["spec"]["seed"] in by_seed_b]
-    return mean_ci(diffs)
+    return boot_ci(diffs)
+
+
+def attributable_loss(results_policy, results_none):
+    """Completion lost *because of* a policy, per request, against the same seed's run without it
+    (identical offered trace, request ids aligned): requests completed without the policy and not
+    with it, minus the reverse (a policy can also help, e.g. through feedback). Also how many of the
+    requests lost because of it had met an intervention, and the descriptive 'hit and not completed'."""
+    from .sim import unbits
+    by_seed = {r["spec"]["seed"]: r for r in results_none}
+    net, pct, hit_lost, desc = [], [], [], []
+    for r in results_policy:
+        ref = by_seed.get(r["spec"]["seed"])
+        if ref is None or "requests" not in r or "requests" not in ref:
+            continue
+        assert r["workload_digest"] == ref["workload_digest"], "paired runs must offer the same trace"
+        c_pol, c_ref = unbits(r["requests"]["completed"]), unbits(ref["requests"]["completed"])
+        hit = unbits(r["requests"]["hit"])
+        lost, gained = c_ref - c_pol, c_pol - c_ref
+        net.append(len(lost) - len(gained))
+        pct.append(100.0 * (len(lost) - len(gained)) / max(r["requests"]["n"], 1))
+        hit_lost.append(len(lost & hit))
+        desc.append(r["legit_hit_lost"])
+    return {"net_lost": boot_ci(net), "net_lost_pct": boot_ci(pct), "lost_among_hit": boot_ci(hit_lost),
+            "descriptive_hit_and_not_completed": boot_ci(desc), "n_pairs": len(net)}
 
 
 def study_ablation(seeds, attackers=None, minutes=20, caps_lifted=False):
@@ -277,104 +341,396 @@ def study_pumping(seeds, minutes=20):
     return specs, index
 
 
-_COUNTER = frozenset({"attestation", "session", "block_count_limit"})
-DETECTOR_SETTINGS = {
-    # name -> (features, cfg overrides). The sequential tests at several thresholds and credit floors (a
-    # floor of -c x log(threshold) is a zero-floor CUSUM with threshold (1 + c) x log(threshold) and head
-    # start c x log(threshold)), the flat per-block counter at several limits with a refusing and a graded
-    # action, all run on the same seeds against the concentrated pumpers and against legitimate traffic.
-    "sequential, threshold 1000, credit 1 (default)": (ALL_FEATURES, {}),
-    "sequential, threshold 1000, credit 0 (Page's CUSUM)": (ALL_FEATURES, {"block_credit_thresholds": 0.0}),
-    "sequential, threshold 1000, credit 0.5": (ALL_FEATURES, {"block_credit_thresholds": 0.5}),
-    "sequential, threshold 1000, credit 2": (ALL_FEATURES, {"block_credit_thresholds": 2.0}),
-    "sequential, threshold 1000, unbounded credit (SPRT)": (ALL_FEATURES, {"block_test": "sprt"}),
-    "sequential, threshold 100, credit 0": (ALL_FEATURES, {"sprt_threshold": 100.0, "block_credit_thresholds": 0.0}),
-    "sequential, threshold 100, credit 1": (ALL_FEATURES, {"sprt_threshold": 100.0}),
-    "sequential, threshold 10000, credit 0": (ALL_FEATURES, {"sprt_threshold": 10000.0, "block_credit_thresholds": 0.0}),
-    "sequential, threshold 10000, credit 1": (ALL_FEATURES, {"sprt_threshold": 10000.0}),
-    "counter, 5 per block per day, refuse": (_COUNTER, {"block_count_limit": (5, 86400)}),
-    "counter, 20 per block per day, refuse": (_COUNTER, {"block_count_limit": (20, 86400)}),
-    "counter, 5 per block per day, graded": (_COUNTER, {"block_count_limit": (5, 86400), "block_count_action": "graded"}),
-    "counter, 10 per block per day, graded": (_COUNTER, {"block_count_limit": (10, 86400), "block_count_action": "graded"}),
-    "counter, 20 per block per day, graded": (_COUNTER, {"block_count_limit": (20, 86400), "block_count_action": "graded"}),
-}
-DETECTOR_ATTACKERS = ["concentrated_pumper_no_verify", "concentrated_pumper_verifies_instantly",
-                      "concentrated_pumper_verifies_humanlike", "concentrated_pumper_solves_challenges"]
+import json as _json
+import pathlib as _pathlib
+
+PROTOCOL_PATH = _pathlib.Path(__file__).resolve().parents[3] / "config" / "evaluation_protocol.json"
+PROTOCOL = _json.loads(PROTOCOL_PATH.read_text())
+MC = PROTOCOL["matched_comparison"]
+TUNING_SEEDS, EVAL_SEEDS = PROTOCOL["seeds"]["tuning"], PROTOCOL["seeds"]["evaluation"]
+DENSITIES = {"200": 200, "1000": 1000, "uniform": None}
+_COUNTER_FEATS = frozenset(ALL_FEATURES | {"block_count_limit"})
+_NO_TESTS = {"block_tests": ()}
 
 
-def study_detectors(seeds, minutes=20):
-    """Every detector setting against the four concentrated pumpers, on the same seeds and warm-up as the
-    pumping study: the attack side of the matched comparison."""
+def _credit_label(c):
+    return "inf" if c == "unbounded" else (str(int(c)) if float(c).is_integer() else str(c))
+
+
+def _setting_name(kind, *args):
+    if kind == "sequential":
+        t, c = args
+        return f"sequential T{t} c{_credit_label(c)}"
+    if kind == "counter_graded_daily":
+        return f"counter graded {args[0]}/day"
+    if kind == "counter_graded_short":
+        n, w = args
+        return f"counter graded {n}/{w // 60} min"
+    if kind == "counter_refuse_daily":
+        return f"counter refuse {args[0]}/day"
+    return "none"
+
+
+DEFAULT_SETTING = _setting_name("sequential", 1000, 1.0)
+
+
+def matched_settings():
+    """name -> (family, features, cfg overrides): the protocol's grids on one common pipeline."""
+    g = MC["grids"]
+    out = {"none": ("none", ALL_FEATURES, dict(_NO_TESTS))}
+    for t in g["sequential_thresholds"]:
+        for c in g["sequential_credits"]:
+            cfg = {"sprt_threshold": float(t)}
+            cfg.update({"block_test": "sprt"} if c == "unbounded" else {"block_credit_thresholds": float(c)})
+            out[_setting_name("sequential", t, c)] = ("sequential", ALL_FEATURES, cfg)
+    for n in g["counter_graded_daily_limits"]:
+        out[_setting_name("counter_graded_daily", n)] = ("counter_graded_daily", _COUNTER_FEATS,
+                                                          dict(_NO_TESTS, block_count_limit=(n, 86400), block_count_action="graded"))
+    for n, w in g["counter_graded_short"]:
+        out[_setting_name("counter_graded_short", n, w)] = ("counter_graded_short", _COUNTER_FEATS,
+                                                             dict(_NO_TESTS, block_count_limit=(n, w), block_count_action="graded"))
+    for n in g["counter_refuse_daily_limits"]:
+        out[_setting_name("counter_refuse_daily", n)] = ("counter_refuse_daily", _COUNTER_FEATS,
+                                                          dict(_NO_TESTS, block_count_limit=(n, 86400), block_count_action="refuse"))
+    return out
+
+
+MATCHED = matched_settings()
+MATCHED_FAMILIES = ["sequential", "counter_graded_daily", "counter_graded_short", "counter_refuse_daily"]
+MATCHED_ATTACKERS = MC["attack_runs"]["attackers"]
+
+
+def _settings_at(density):
+    if density == MC["full_grid_density"]:
+        return list(MATCHED)
+    return [n for n, (fam, _, _) in MATCHED.items() if fam != "sequential"] + [DEFAULT_SETTING]
+
+
+def _legit_spec(setting, density, conversion, seed, minutes=None):
+    _, feats, cfg = MATCHED[setting]
+    lr = MC["legitimate_runs"]
+    legit = LegitSpec(conversion=conversion, autofill_fraction=lr["autofill"], blocks=DENSITIES[density],
+                      whatsapp_fraction=lr["whatsapp_fraction"])
+    return SimSpec(attacker=ATTACKERS["naive_single_client"], legit=legit, legit_only=True, features=feats, cfg_overrides=dict(cfg),
+                   minutes=minutes or lr["minutes"], warmup_minutes=0, caps_lifted=True, seed=seed, record_requests=True)
+
+
+def _attack_spec(setting, aname, seed, minutes=None):
+    _, feats, cfg = MATCHED[setting]
+    ar = MC["attack_runs"]
+    return SimSpec(attacker=randomised(PUMPING_ATTACKERS[aname], seed), minutes=minutes or ar["minutes"], features=feats,
+                   cfg_overrides=dict(cfg), caps_lifted=ar["caps_lifted"], warmup_minutes=ar["warmup_minutes"], seed=seed)
+
+
+def study_matched_tuning(seeds=None, legit_minutes=None):
+    """Stage 1 of the protocol: every setting on the tuning seeds, legitimate side at 65 % per density
+    and attack side against the four pumpers."""
+    seeds = seeds or TUNING_SEEDS
     specs, index = [], []
-    for aname in DETECTOR_ATTACKERS:
-        a = PUMPING_ATTACKERS[aname]
-        for dname, (feats, cfg) in DETECTOR_SETTINGS.items():
+    conv = MC["legitimate_runs"]["conversion_tuning"]
+    for density in DENSITIES:
+        for name in _settings_at(density):
             for s in seeds:
-                specs.append(SimSpec(attacker=randomised(a, s), minutes=minutes, features=feats, cfg_overrides=dict(cfg),
-                                     caps_lifted=True, warmup_minutes=PUMPING_WARMUP_MIN, seed=s))
-                index.append((aname, dname, s))
+                specs.append(_legit_spec(name, density, conv, s, legit_minutes))
+                index.append(("legit", density, name, conv, s))
+    for name in MATCHED:
+        for aname in MATCHED_ATTACKERS:
+            for s in seeds:
+                specs.append(_attack_spec(name, aname, s))
+                index.append(("attack", None, name, aname, s))
     return specs, index
 
 
-DETECTOR_FP_CONVERSIONS = [0.8, 0.65]
+def select_matched(tuning):
+    """Apply the protocol's selection rules to the tuning results. tuning: {("legit", density, name): [runs],
+    ("attack", name, attacker): [runs]}. Returns (selection record, settings to evaluate per density)."""
+    import statistics as st
+    completion = {(d, n): st.mean(r["friction"]["completed_pct"] for r in rs) for (kind, d, n), rs in tuning.items() if kind == "legit"}
+    events = {(d, n): st.mean(r["block_verdicts"] for r in rs) for (kind, d, n), rs in tuning.items() if kind == "legit"}
+    leak = {}
+    for (kind, n, aname), rs in tuning.items():
+        if kind == "attack":
+            leak[n] = leak.get(n, 0.0) + st.mean(r["attack"]["leaked_total"] for r in rs)
+    sel, evaluate = {}, {}
+    for density in DENSITIES:
+        target = completion[(density, DEFAULT_SETTING)] - 0.5
+        chosen = {"default": DEFAULT_SETTING, "none": "none"}
+        for fam in MATCHED_FAMILIES:
+            cands = [n for n in _settings_at(density) if MATCHED[n][0] == fam and completion.get((density, n), -1) >= target]
+            if cands:
+                # lowest leakage; ties to the more permissive (higher completion) setting
+                chosen[f"best {fam} at the service target"] = min(cands, key=lambda n: (round(leak[n], 6), -completion[(density, n)]))
+        if density == MC["full_grid_density"]:
+            fa = events[(density, DEFAULT_SETTING)]
+            for c in MC["grids"]["sequential_credits"]:
+                row = [n for n in MATCHED if MATCHED[n][0] == "sequential" and n.endswith(f" c{_credit_label(c)}")]
+                ok = [n for n in row if events[(density, n)] <= fa]
+                if ok:
+                    chosen[f"matched false alarms, credit {_credit_label(c)}"] = min(ok, key=lambda n: float(n.split()[1][1:]))
+        sel[density] = {"service_target_completion_pct": target, "default_completion_pct": completion[(density, DEFAULT_SETTING)],
+                        "default_verdict_events": events[(density, DEFAULT_SETTING)], "chosen": chosen,
+                        "tuning_completion_pct": {n: completion[(density, n)] for n in _settings_at(density)},
+                        "tuning_verdict_events": {n: events[(density, n)] for n in _settings_at(density)},
+                        "tuning_leak_sum": {n: leak[n] for n in _settings_at(density)}}
+        evaluate[density] = sorted(set(chosen.values()))
+    return sel, evaluate
 
 
-def study_detector_fp(seeds, minutes=24 * 60):
-    """The legitimate-traffic side of the matched comparison: every detector setting for 24 hours at
-    144 sends per block per day (200 distinct blocks), 20 % autofill, deployed calibration, at the
-    calibrated conversion and at Twilio's global 65 %."""
+def study_matched_eval(evaluate, seeds=None, legit_minutes=None):
+    """Stage 2: the selected settings on the evaluation seeds, legitimate side at 65 % and 80 %, attack side."""
+    seeds = seeds or EVAL_SEEDS
     specs, index = [], []
-    for dname, (feats, cfg) in DETECTOR_SETTINGS.items():
-        for conv in DETECTOR_FP_CONVERSIONS:
+    for density, names in evaluate.items():
+        for name in names:
+            for conv in MC["legitimate_runs"]["conversion_evaluation"]:
+                for s in seeds:
+                    specs.append(_legit_spec(name, density, conv, s, legit_minutes))
+                    index.append(("legit", density, name, conv, s))
+    for name in sorted({n for names in evaluate.values() for n in names}):
+        for aname in MATCHED_ATTACKERS:
             for s in seeds:
-                legit = LegitSpec(conversion=conv, autofill_fraction=0.2, blocks=200)
-                specs.append(SimSpec(attacker=ATTACKERS["naive_single_client"], legit=legit, legit_only=True, features=feats,
-                                     cfg_overrides=dict(cfg), minutes=minutes, warmup_minutes=0, caps_lifted=True, seed=s))
-                index.append((dname, conv, s))
+                specs.append(_attack_spec(name, aname, s))
+                index.append(("attack", None, name, aname, s))
+    return specs, index
+
+
+FALLBACK_LEVELS = [0.0, 0.7, 1.0]
+FALLBACK_SETTINGS = [DEFAULT_SETTING, "counter graded 20/day", "none"]
+
+
+def study_fallback(seeds, minutes=24 * 60):
+    """R1: the same policies with no, the modelled, and universal WhatsApp reachability (200 blocks, 65 %)."""
+    specs, index = [], []
+    for name in FALLBACK_SETTINGS:
+        for w in FALLBACK_LEVELS:
+            for s in seeds:
+                spec = _legit_spec(name, "200", 0.65, s, minutes)
+                spec.legit.whatsapp_fraction = w
+                specs.append(spec)
+                index.append((name, w, s))
     return specs, index
 
 
 POISONER_VARIANTS = {
-    # name -> (cfg overrides, active minutes, run minutes)
-    "graded verdicts (default)": ({}, None, 20),
-    "hard deny (24 h denylist)": ({"block_action": "deny"}, None, 20),
-    "graded, attacker stops after 10 min (recovery)": ({}, 10, 30),
+    # name -> (cfg overrides, active minutes, run minutes, whatsapp fraction)
+    "graded verdicts (default)": ({}, None, 20, 0.7),
+    "graded, no fallback channel": ({}, None, 20, 0.0),
+    "graded, every user reachable on WhatsApp": ({}, None, 20, 1.0),
+    "hard deny (24 h denylist)": ({"block_action": "deny"}, None, 20, 0.7),
+    "observe only (counterfactual: verdicts recorded, nothing enforced)": ({"block_action": "observe"}, None, 20, 0.7),
+    "graded, attacker stops after 10 min (recovery, 70-minute run)": ({}, 10, 70, 0.7),
 }
+POISONER_REFERENCE = "observe only (counterfactual: verdicts recorded, nothing enforced)"
 
 
 def study_poisoner(seeds):
     specs, index = [], []
     base = ADAPTIVE_ATTACKERS["block_poisoner"]
-    for vname, (cfg, active, minutes) in POISONER_VARIANTS.items():
+    for vname, (cfg, active, minutes, wa) in POISONER_VARIANTS.items():
         for s in seeds:
             a = replace(randomised(base, s), active_minutes=active)
-            specs.append(SimSpec(attacker=a, legit=LegitSpec(blocks=20), minutes=minutes, caps_lifted=True,
-                                 cfg_overrides=dict(cfg), seed=s))
+            specs.append(SimSpec(attacker=a, legit=LegitSpec(blocks=20, whatsapp_fraction=wa), minutes=minutes, caps_lifted=True,
+                                 cfg_overrides=dict(cfg), seed=s, record_requests=True))
+            index.append((vname, s))
+    return specs, index
+
+
+ALTERNATIVES = {
+    "default": {},
+    "trust budget (8 exempt requests/min)": {"known_good_budget_per_min": 8},
+    "receipt-robust block tests": {"receipt_policy": "robust"},
+    "both": {"known_good_budget_per_min": 8, "receipt_policy": "robust"},
+}
+ALTERNATIVE_ATTACKERS = ["trust_building_pumper", "trust_building_concentrated", "receipt_faking_carrier", "threshold_aware_carrier"]
+
+
+def study_alternatives(seeds, minutes=20):
+    """R16: the two design alternatives against the attackers that defeat the default, with and without caps."""
+    specs, index = [], []
+    for mode, lifted in MODES.items():
+        for aname in ALTERNATIVE_ATTACKERS:
+            a = ADAPTIVE_ATTACKERS[aname]
+            for vname, cfg in ALTERNATIVES.items():
+                for s in seeds:
+                    specs.append(SimSpec(attacker=randomised(a, s), minutes=minutes, caps_lifted=lifted, cfg_overrides=dict(cfg), seed=s,
+                                         warmup_minutes=30 if a.trust_building_minutes else 10))
+                    index.append((mode, aname, vname, s))
+    return specs, index
+
+
+def study_alternatives_fp(seeds, minutes=24 * 60):
+    """What the alternatives cost real users: 24 hours on 200 blocks, 80 % conversion, caps on, with 5 %
+    of blocks on a poor route that loses half its messages (the case receipt-robust tests can misread)."""
+    specs, index = [], []
+    for vname, cfg in ALTERNATIVES.items():
+        for s in seeds:
+            legit = LegitSpec(blocks=200, bad_route_fraction=0.05, bad_route_failure=0.5)
+            specs.append(SimSpec(attacker=ATTACKERS["naive_single_client"], legit=legit, legit_only=True, minutes=minutes,
+                                 warmup_minutes=0, caps_lifted=False, cfg_overrides=dict(cfg), seed=s))
             index.append((vname, s))
     return specs, index
 
 
 BASELINE_VARIANTS = {
-    # name -> (baseline, warm-up minutes, attacker requests/min during the warm-up)
-    "oracle: told the modelled legitimate rate (main study)": ("oracle", 10, 0.0),
-    "learned, cold start: no closed hour of history": ("learned", 10, 0.0),
-    "learned, one closed hour": ("learned", 70, 0.0),
-    "learned, three closed hours": ("learned", 190, 0.0),
-    "learned, three hours poisoned at the legitimate rate": ("learned", 190, cal("legit_traffic_rate_per_min")),
+    # name -> SimSpec overrides
+    "oracle: told the modelled legitimate rate (main study)": dict(baseline="oracle"),
+    "learned, cold start: no closed hour of history": dict(baseline="learned"),
+    "learned, three closed hours": dict(baseline="learned", warmup_minutes=190),
+    "learned, weekly profile (3 previous weeks)": dict(baseline="learned", profile_weeks=3),
+    "learned, weekly profile, stale (legitimate rate halved since)": dict(baseline="learned", profile_weeks=3, profile_rate_multiple=2.0),
+    "learned, weekly profile, stale (legitimate rate doubled since)": dict(baseline="learned", profile_weeks=3, profile_rate_multiple=0.5),
+    "learned, weekly profile poisoned at that hour each week (schedule-aware)": dict(baseline="learned", profile_weeks=3,
+                                                                                    warmup_attack_rate=cal("legit_traffic_rate_per_min")),
+    "learned, weekly profile, two workers": dict(baseline="learned", profile_weeks=3, baseline_workers=2),
+    "learned, weekly profile, worker restarts at minute 10": dict(baseline="learned", profile_weeks=3, baseline_restart_min=10),
 }
+BASELINE_REFERENCE = "learned, weekly profile (3 previous weeks)"
 
 
 def study_baseline(seeds, attacker_names=("residential_captcha_farm", "residential_bot"), minutes=20):
-    """The deployed baseline job against the oracle the main study uses: cold start, little history,
-    and a profile poisoned by a sustained low-rate attack during the learning period."""
+    """R14: the deployed baseline job against the oracle, over the weekly profile it is designed for:
+    cold start, short history, three previous weeks, stale profiles, schedule-aware poisoning of the
+    profile, two concurrent workers and a restart. Paired effects against the clean weekly profile."""
     specs, index = [], []
     for name in attacker_names:
-        for vname, (baseline, warm, poison) in BASELINE_VARIANTS.items():
+        for vname, ov in BASELINE_VARIANTS.items():
             for s in seeds:
-                specs.append(SimSpec(attacker=randomised(ATTACKERS[name], s), minutes=minutes, caps_lifted=False, seed=s,
-                                     baseline=baseline, warmup_minutes=warm, warmup_attack_rate=poison))
+                kw = dict(attacker=randomised(ATTACKERS[name], s), minutes=minutes, caps_lifted=False, seed=s)
+                kw.update(ov)
+                specs.append(SimSpec(**kw))
                 index.append((name, vname, s))
     return specs, index
+
+
+LONG_ATTACK_MIN = 60
+
+
+def study_long_attack(seeds):
+    """R13: the default against the concentrated pumpers over a 60-minute attack (survival of containment)."""
+    specs, index = [], []
+    for aname in MATCHED_ATTACKERS:
+        for s in seeds:
+            specs.append(_attack_spec(DEFAULT_SETTING, aname, s, minutes=LONG_ATTACK_MIN))
+            index.append((aname, s))
+    return specs, index
+
+
+VARIANCE_ATTACKERS = ["residential_captcha_farm", "sequential_numbers", "datacenter_rotation", "residential_bot"]
+
+
+def study_variance(seeds):
+    """R12: per-seed variation in attack volume, pool and CAPTCHA class versus simulation noise alone:
+    the same attackers with the randomisation on and with it fixed at the profile's own parameters."""
+    specs, index = [], []
+    for name in VARIANCE_ATTACKERS:
+        for randomise in (True, False):
+            for s in seeds:
+                a = randomised(ATTACKERS[name], s) if randomise else replace(ATTACKERS[name])
+                specs.append(SimSpec(attacker=a, caps_lifted=False, seed=s))
+                index.append((name, "randomised" if randomise else "fixed parameters", s))
+    return specs, index
+
+
+# ---------------------------------------------------------------- robustness (predeclared)
+ROB = PROTOCOL["robustness"]
+
+
+def robustness_points():
+    """The protocol's Latin hypercube over its ranges, generator seed 2026."""
+    rng = random.Random(2026)
+    names = list(ROB["ranges"])
+    k = ROB["points"]
+    cols = {}
+    for n in names:
+        lo, hi = ROB["ranges"][n]
+        strata = list(range(k))
+        rng.shuffle(strata)
+        cols[n] = [lo + (hi - lo) * (i + rng.random()) / k for i in strata]
+    return [{n: cols[n][i] for n in names} for i in range(k)]
+
+
+def _human_beta(mean, concentration=10.5):
+    return (mean * concentration, (1 - mean) * concentration)
+
+
+def _rob_legit(pt, blocks=None):
+    het = ROB["held_out_family"]["legitimate_heterogeneity"]
+    return LegitSpec(conversion=pt["conversion"], autofill_fraction=pt["autofill_fraction"], captcha_beta=_human_beta(pt["human_captcha_mean"]),
+                     whatsapp_fraction=pt["whatsapp_fraction"], returning_fraction=pt["returning_fraction"], rate_per_min=pt["legit_rate_per_min"],
+                     blocks=blocks, block_conversion_sd=het["block_conversion_sd"], bad_route_fraction=het["bad_route_fraction"],
+                     bad_route_failure=het["bad_route_failure"], resend_prob=het["resend_prob"], bursts=tuple(tuple(b) for b in het["bursts"]))
+
+
+def _held_out_attacker(a, seed):
+    """Attack rate and pool drawn from the held-out ranges (outside the tuned ones)."""
+    r = random.Random(seed * 104729 + 7)
+    lo, hi = ROB["held_out_family"]["attacker_rates_per_min"]
+    plo, phi = ROB["held_out_family"]["attacker_pool_sizes"]
+    s = replace(a)
+    s.rate_per_min = r.uniform(lo, hi)
+    if a.network != "single_ip":
+        s.pool_size = int(10 ** r.uniform(math.log10(plo), math.log10(phi)))
+    return s
+
+
+ROB_SCENARIOS = ["no_attack", "datacenter_rotation", "premium_pumping", "naive_single_client", "farm_caps_lifted",
+                 "farm_caps_v1", "farm_caps_v2", "pumper_no_verify", "legit_6h_200_blocks"]
+
+
+def study_robustness():
+    specs, index = [], []
+    for i, pt in enumerate(robustness_points()):
+        for s in range(ROB["seeds_per_point"]):
+            seed = 5000 + 100 * i + s
+            legit = _rob_legit(pt)
+            for sc in ROB_SCENARIOS:
+                if sc == "no_attack":
+                    spec = SimSpec(attacker=ATTACKERS["naive_single_client"], legit=legit, legit_only=True, caps_lifted=False, seed=seed)
+                elif sc in ("datacenter_rotation", "premium_pumping", "naive_single_client"):
+                    spec = SimSpec(attacker=_held_out_attacker(ATTACKERS[sc], seed), legit=legit, caps_lifted=False, seed=seed)
+                elif sc == "farm_caps_lifted":
+                    spec = SimSpec(attacker=_held_out_attacker(ATTACKERS["residential_captcha_farm"], seed), legit=legit, caps_lifted=True, seed=seed)
+                elif sc in ("farm_caps_v1", "farm_caps_v2"):
+                    spec = SimSpec(attacker=_held_out_attacker(ATTACKERS["residential_captcha_farm"], seed), legit=legit, caps_lifted=False,
+                                   features=V1_FEATURES if sc.endswith("v1") else ALL_FEATURES, seed=seed)
+                elif sc == "pumper_no_verify":
+                    spec = SimSpec(attacker=_held_out_attacker(PUMPING_ATTACKERS["concentrated_pumper_no_verify"], seed), legit=legit,
+                                   caps_lifted=True, warmup_minutes=PUMPING_WARMUP_MIN, seed=seed)
+                else:
+                    spec = SimSpec(attacker=ATTACKERS["naive_single_client"], legit=_rob_legit(pt, blocks=200), legit_only=True,
+                                   minutes=360, warmup_minutes=0, caps_lifted=True, seed=seed)
+                specs.append(spec)
+                index.append((i, sc, s))
+    return specs, index
+
+
+def judge_robustness(by_cell):
+    """Apply the protocol's claims. by_cell: {(point, scenario, seed): result}."""
+    pts = robustness_points()
+
+    def verdict(cells):
+        ok = sum(1 for c in cells if c)
+        return {"cells": len(cells), "true": ok, "share": ok / max(len(cells), 1), "holds": len(cells) > 0 and ok >= 0.9 * len(cells)}
+    c1, c2, c3, c4, c4_low, c5 = [], [], [], [], [], []
+    for (i, sc, s), r in by_cell.items():
+        if sc in ("datacenter_rotation", "premium_pumping", "naive_single_client"):
+            base = by_cell[(i, "no_attack", s)]["friction"]["completed_pct"]
+            frac = r["attack"]["leaked_total"] / max(r["attack"]["requests"], 1)
+            c1.append(frac <= 0.05 and r["friction"]["completed_pct"] >= base - 2.0)
+        elif sc == "farm_caps_lifted":
+            c2.append(r["attack"]["leaked_total"] >= 0.9 * max(r["attack"]["requests"], 1))
+        elif sc == "pumper_no_verify":
+            c3.append(r["attack"]["time_to_containment_min"] is not None and r["attack"]["leaked_total"] <= 0.3 * max(r["attack"]["requests"], 1))
+        elif sc == "legit_6h_200_blocks":
+            per_k = 1000.0 * r["block_verdicts"] / max(r["friction"]["users"], 1)
+            (c4 if pts[i]["conversion"] >= 0.75 else c4_low).append(per_k <= 1.0)
+        elif sc == "farm_caps_v2":
+            v1 = by_cell[(i, "farm_caps_v1", s)]
+            c5.append(r["attack"]["leaked_total"] <= 0.7 * v1["attack"]["leaked_total"] and
+                      r["friction"]["first_time"]["refusal_rate_pct"] >= v1["friction"]["first_time"]["refusal_rate_pct"] + 10.0)
+    out = {"C1": verdict(c1), "C2": verdict(c2), "C3": verdict(c3), "C4": verdict(c4), "C5": verdict(c5),
+           "C4_points_below_0.75": dict(verdict(c4_low), judged=False), "points": pts}
+    return out
 
 
 SPREAD_BLOCKS = [3, 30, 300]
@@ -494,32 +850,49 @@ def study_adaptive(seeds, minutes=20, modes=MODES):
         for name, a in ADAPTIVE_ATTACKERS.items():
             for s in seeds:
                 legit = LegitSpec(blocks=20) if a.numbers == "poison" else LegitSpec()   # the poisoner needs shared blocks
+                run_min = a.trust_building_minutes + 30 if a.trust_building_minutes >= 20 else minutes
                 specs.append(SimSpec(attacker=a if a.network == "multi_asn" else randomised(a, s), legit=legit,
-                                     minutes=minutes, caps_lifted=lifted, seed=s,
+                                     minutes=run_min, caps_lifted=lifted, seed=s,
                                      warmup_minutes=30 if a.trust_building_minutes else 10))
                 index.append((mode, name, s))
     return specs, index
 
 
-def economics(summary_v1, summary_v2, attacker_name, earns_revenue):
-    """Attacker profit over the 20-minute window under v1 and v2, per revenue-share assumption.
-    Only pumping attackers (earns_revenue) are paid; a flooder's revenue is zero whatever leaks."""
-    share = cal("pumping_revenue_share")
-    sms = cal("sms_unit_cost_usd")
+ECON_SHARES = [0.05, 0.1, 0.2, 0.3, 0.5]
+ECON_PRICE_MULTIPLES = [0.5, 1.0, 2.0]
+
+
+def attacker_bill(summ):
+    """Event-level attacker cost for one run summary: a CAPTCHA token for every session attempt (refused
+    ones included) and every request that reached the pipeline, a paid solution for every interactive
+    challenge, and proxy traffic for every request. Not included: identity preparation, phone numbers,
+    carrier contracts, fixed costs and the attacker's own verifications."""
     proxy_per_req = cal("request_bytes") / 1e9 * cal("residential_proxy_cost_per_gb_usd")
     solve = cal("captcha_solve_cost_usd")
+    reqs = summ["requests"][0]
+    tokens = (summ["attacker_session_attempts"][0] or 0) + reqs
+    solved = summ["attacker_challenges_solved"][0] or 0
+    return {"tokens": tokens, "requests": reqs, "challenges_solved": solved,
+            "cost_usd": tokens * solve + solved * solve + reqs * proxy_per_req}
+
+
+def economics(summary_v1, summary_v2, attacker_name, earns_revenue):
+    """Scenario accounting, not measured profit. Revenue = leaked SMS x retail termination price x an
+    ASSUMED revenue share, and only for pumping attackers. For each design: the event-level bill, the
+    break-even share (the share at which revenue equals the bill: share* = cost / (leaked x price)) and
+    profit over a grid of shares and price multiples, so no single assumed share decides the sign."""
+    sms = cal("sms_unit_cost_usd")
     rows = []
     for label, summ in (("v1", summary_v1), ("v2", summary_v2)):
         leaked = summ["leaked_total"][0]
-        reqs = summ["requests"][0]
-        solved = summ["attacker_challenges_solved"][0] or 0
-        cost = reqs * (proxy_per_req + solve) + solved * solve
-        for k in ("low", "high"):
-            revenue = leaked * sms * share[k] if earns_revenue else 0.0
-            rows.append({"design": label, "share": share[k] if earns_revenue else 0.0, "leaked_sms": leaked, "requests": reqs,
-                         "attacker_revenue_usd": revenue, "attacker_cost_usd": cost,
-                         "attacker_profit_usd": revenue - cost, "defender_cost_usd": summ["attacker_cost_usd"][0],
-                         "verified_fake_accounts": summ["attacker_verifications"][0]})
+        bill = attacker_bill(summ)
+        breakeven = (bill["cost_usd"] / (leaked * sms)) if (earns_revenue and leaked > 0) else None
+        surface = {f"share={sh},price x{pm}": (leaked * sms * pm * sh - bill["cost_usd"]) if earns_revenue else -bill["cost_usd"]
+                   for sh in ECON_SHARES for pm in ECON_PRICE_MULTIPLES}
+        rows.append({"design": label, "leaked_sms": leaked, "requests": bill["requests"], "tokens": bill["tokens"],
+                     "challenges_solved": bill["challenges_solved"], "attacker_cost_usd": bill["cost_usd"],
+                     "breakeven_share": breakeven, "profit_surface_usd": surface,
+                     "defender_cost_usd": summ["attacker_cost_usd"][0], "verified_codes": summ["attacker_verifications"][0]})
     return rows
 
 

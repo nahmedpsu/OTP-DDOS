@@ -1,41 +1,68 @@
 """Verification feedback loop and the OTP verify endpoint's own protections.
 All state lives in the pipeline's store so any instance can verify any code.
 
-State machine of one send (otp:code:<log_id>), every transition an atomic read-modify-write
-(store.update: a lock on the memory store, WATCH/MULTI/EXEC on Redis), so two workers handling
-callbacks for the same message cannot both apply an effect:
+Transitions of one send (otp:code:<log_id>)
+-------------------------------------------
+Every transition is one compare-and-set on the send's entry (store.update: a lock on the memory
+store, WATCH/MULTI/EXEC on Redis). The function that decides the transition sees the whole entry,
+so a decision and the state it depends on cannot be separated by another worker:
 
-    delivery:   none --(positive receipt)--> delivered      first transition wins; a repeated
-                none --(negative receipt)--> failed         positive receipt changes nothing
-                none --(no receipt for receipt_grace_s)--> resolution 'undelivered'
-    resolution: none -> 'failed' (delivered, resolution_timeout_s passed, no code entered)
-                none -> 'undelivered' (failed receipt or no receipt)
-    done:       the code was entered (verified) or exhausted its attempts
+    receipt +   none -> delivered                    (first positive receipt wins; delivered_at never moves)
+                undelivered -> delivered ("reopened") (a late or corrected report while the code is valid)
+    receipt -   none -> failed AND resolution 'undelivered' in the same transition
+                delivered -> delivered ("conflict", counted, ignored)
+    timeout     not delivered by receipt_grace_s -> resolution 'undelivered'
+                delivered, resolution_timeout_s passed, no code -> resolution 'failed'
+    verify      attempts + 1, and in the same transition: correct code -> done (verified);
+                attempts exhausted -> done (failed, unless already resolved)
 
-Receipt rules (on_delivery): a duplicate positive receipt is ignored (delivered_at is never
-moved); a negative receipt after a positive one is a *conflict*, counted on the entry and
-ignored (the carrier said it delivered; the person may still enter the code); a positive receipt
-after a negative one, or after the grace period resolved the send as undelivered, *reopens* the
-send if the code is still valid: the undelivered count is reversed and the resolution clock
-starts from this receipt (the carrier corrected itself, or delivered late). A receipt for a
-finished or unknown send is ignored.
+Effects, exactly once
+---------------------
+A transition does not apply its effects directly. It records them in the entry, in the same
+compare-and-set, as a batch with a sequence number; the caller then applies the batch and removes
+it. Applying is idempotent: the reputation increments of a batch are one exactly-once script
+(store.hincrby_batch_once, keyed by log id and batch number), block-test events carry an event id
+the block document remembers, and the remaining effects (outage records, the trusted-number set,
+timeout scheduling, denylist checks) are idempotent by construction. Before a transition the caller
+writes a write-ahead intent (otp:intents); run_due_timeouts() sweeps intents older than
+RECOVER_AFTER_S and applies whatever batches are still recorded. So a process that dies between
+the compare-and-set and the end of its effects leaves work a later sweep completes, and a
+duplicate or replayed callback cannot apply a batch twice. Out of scope: an entry that expires
+(2 x otp_ttl) before the sweep reaches it, and Redis Cluster (the scripts assume one shard).
 
-Only verified and failed feed the conversion ratio and the destination-block tests; an
-undelivered send tells nothing about the person behind the number. A late verification of a
-send already resolved 'failed' is reclassified: the reputation counts move from failed to
-verified and the block statistic gets the failure increment subtracted (then re-floored). That
-subtraction is exact unless the statistic hit its floor in between, and a verdict already
-issued is not revoked by it: it expires with its own TTL. Verification speed is clocked from the
-receipt. A carrier whose blocks all fail at once is an outage, not a pumper, and the block
-tests are suspended for that carrier while it lasts."""
+Step 11 is not one transaction (budget reservation, audit record, `sent` counters, OTP entry,
+enqueue). Its crash semantics: a crash before on_sent leaves a reserved budget unit and possibly
+`sent` counts without a send (both conservative); a crash after on_sent and before enqueue leaves
+an entry that resolves as undelivered at the grace period and feeds no test.
+
+Block tests and verdicts
+------------------------
+A destination block's counts, its two running statistics, its current verdict (stage, reason,
+issued, until) and its verdict history live in one document (blocktest:<block>) updated by one
+compare-and-set. A threshold crossing resets the statistics and decides the stage from the verdict
+already active in the same document: a second crossing while a verdict is active escalates to
+stage 2, whichever worker processed it. Actions: 'graded' (stage 1: first-time clients solve a
+challenge; stage 2: non-SMS channels only), 'deny' (24-hour denylist), 'observe' (tests run and
+verdicts are recorded, nothing is enforced: the counterfactual for attributable-harm studies).
+
+Only verified and failed feed the conversion ratio and the block tests; an undelivered send tells
+nothing about the person behind the number (receipt_policy 'standard'). Under receipt_policy
+'robust' a failed receipt also counts as a failure for the block test unless the carrier is in an
+outage. A late verification of a send resolved 'failed' is reclassified: counts move from failed to
+verified and the block statistic gets the failure increment subtracted (then re-floored); a verdict
+already issued is not revoked. A carrier whose blocks all fail at once is an outage, not a pumper,
+and the block tests are suspended for that carrier while it lasts."""
 import math
 import secrets
+import uuid
 
 
 class FeedbackLoop:
     TIMEOUTS = "otp:timeouts"
-    VERDICT_LOG = "verdict:log"       # every verdict event of the last 24 h: member "<block>|<stage>|<time>"
-    BLOCK = "blocktest:"              # per-block sequential-test state: counts and the two running statistics
+    INTENTS = "otp:intents"           # write-ahead intents: "<log_id>:<token>" scored by time
+    BLOCK = "blocktest:"              # per-block sequential-test state, current verdict and verdict history
+    RECOVER_AFTER_S = 30
+    SEEN_EVENTS = 256                 # block-event ids a block document remembers (idempotent replay)
 
     def __init__(self, pipeline):
         self.p = pipeline
@@ -43,119 +70,274 @@ class FeedbackLoop:
     def _key(self, log_id):
         return f"otp:code:{log_id}"
 
-    # ---- send side ----
+    def _ttl(self):
+        return self.p.cfg.otp_ttl * 2
+
+    # ---------------------------------------------------------------- send side
     @staticmethod
     def new_code():
         return f"{secrets.randbelow(10**4):04d}"
 
     def on_sent(self, log_id, code):
-        """Called after the message carrying `code` was handed to the sender."""
+        """Called after the audit record exists and before the message is handed to the sender."""
         cfg = self.p.cfg
         now = self.p.clock.now()
-        self.p.store.set(self._key(log_id), {"code": code, "attempts": 0,
+        self.p.store.set(self._key(log_id), {"code": code, "attempts": 0, "sent_at": now,
                                              "expires": now + cfg.otp_ttl, "done": False, "timed_out": False,
                                              "resolution": None, "delivery": None, "delivered_at": None,
-                                             "conflicts": 0},
-                         cfg.otp_ttl * 2)
+                                             "conflicts": 0, "tseq": 0, "pending": [], "receipt_block_fail": False},
+                         self._ttl())
         # reputation resolves resolution_timeout_s after delivery (a late verification is reclassified);
         # the code itself stays valid for otp_ttl. Without receipts the clock runs from the send.
         due = now + (cfg.receipt_grace_s if cfg.delivery_receipts else min(cfg.resolution_timeout_s, cfg.otp_ttl))
         self.p.store.zadd(self.TIMEOUTS, due, str(log_id))
 
-    def on_delivery(self, log_id, ok, at=None):
-        """Delivery receipt from the provider (status callback) or the sender adapter. Returns what
-        happened: 'delivered', 'failed', 'duplicate', 'conflict', 'reopened', 'expired' or 'ignored'
-        (see the module docstring for the rules)."""
-        cfg = self.p.cfg
-        if not cfg.delivery_receipts:
-            return "ignored"                                 # send-clocked mode ignores receipts
+    # ---------------------------------------------------------------- transition machinery
+    def _transition(self, log_id, decide):
+        """decide(entry, rec, now) -> (new entry or None, kind, effects or None). Returns (kind, entry)."""
+        rec = self.p.sms_history.get(log_id)
+        if rec is None:
+            return "ignored", None
+        store = self.p.store
         now = self.p.clock.now()
+        token = f"{log_id}:{uuid.uuid4().hex[:12]}"
+        store.zadd(self.INTENTS, now, token)
         out = {}
 
         def fn(entry):
-            if entry is None or entry["done"]:
-                out["t"] = "ignored"
+            out.clear()                                      # may run again after a lost compare-and-set
+            if entry is None:
+                out["kind"] = "ignored"
                 return None
-            if ok:
-                if entry["delivery"] == "delivered":
-                    out["t"] = "duplicate"                   # the first delivery transition stands
-                    return None
-                if entry["expires"] < now:
-                    out["t"] = "expired"
-                    return None
-                e = dict(entry)
-                e["delivery"], e["delivered_at"] = "delivered", (at if at is not None else now)
-                if e.get("resolution") == "undelivered":    # late or corrected report: reopen
-                    e["resolution"], e["timed_out"] = None, False
-                    out["t"] = "reopened"
-                else:
-                    out["t"] = "delivered"
-                return e
-            if entry["delivery"] == "delivered":
-                out["t"] = "conflict"                        # delivered, then "failed": keep the delivery
-                e = dict(entry); e["conflicts"] = e.get("conflicts", 0) + 1
-                return e
-            if entry["delivery"] == "failed" or entry.get("resolution"):
-                out["t"] = "duplicate"
+            new, kind, effects = decide(entry, rec, now)
+            out["kind"] = kind
+            if new is None:
                 return None
-            e = dict(entry); e["delivery"] = "failed"
-            out["t"] = "failed"
-            return e
+            if effects:
+                tseq = new.get("tseq", 0) + 1
+                batch = {"tseq": tseq, "effects": effects}
+                new["tseq"] = tseq
+                new["pending"] = list(new.get("pending") or []) + [batch]
+                out["batch"] = batch
+            out["entry"] = new
+            return new
 
-        entry, _ = self.p.store.update(self._key(log_id), fn, cfg.otp_ttl * 2)
-        t = out["t"]
-        if t in ("delivered", "reopened"):
-            rec = self.p.sms_history[log_id]
-            self._outage_record(rec, "delivered", now)
-            if t == "reopened":
-                for key in rec["reputation_keys"]:
-                    self.p.rep.incr(key, "undelivered", -1)
-            self.p.store.zadd(self.TIMEOUTS, entry["delivered_at"] + min(cfg.resolution_timeout_s, cfg.otp_ttl), str(log_id))
-        elif t == "failed":
-            self._outage_record(self.p.sms_history[log_id], "undelivered", now)
-            self._resolve_undelivered(log_id)
-        return t
+        store.update(self._key(log_id), fn, self._ttl())
+        if "batch" in out:
+            self._apply(log_id, rec, out["batch"])
+        store.zrem(self.INTENTS, token)
+        return out.get("kind", "ignored"), out.get("entry")
+
+    def _apply(self, log_id, rec, batch):
+        """Apply one recorded batch of effects (idempotent), then remove it from the entry."""
+        cfg = self.p.cfg
+        tseq = batch["tseq"]
+        now = self.p.clock.now()
+        suspended = None
+        for eff in batch["effects"]:
+            kind = eff[0]
+            if kind == "outage":
+                self._outage_record(rec, eff[1], now)
+            elif kind == "rep":
+                self.p.rep.incr_batch_once(f"fx:{log_id}:{tseq}", [tuple(op) for op in eff[1]], self._ttl() + 3600)
+            elif kind == "block":
+                if suspended is None:
+                    suspended = self._suspension_decision(log_id, batch, rec)
+                if not suspended:
+                    _, key, verified, fast, undo = eff
+                    self._block_event(key, verified=verified, fast=fast, undo=undo, event_id=f"{log_id}:{tseq}")
+            elif kind == "block_unfail":
+                if suspended is None:
+                    suspended = self._suspension_decision(log_id, batch, rec)
+                if not suspended:
+                    self._block_event(eff[1], verified=False, undo_fail_only=True, event_id=f"{log_id}:{tseq}")
+            elif kind == "trusted":
+                self.p.rep.mark_trusted(eff[1])
+            elif kind == "timeout":
+                self.p.store.zadd(self.TIMEOUTS, eff[1], str(log_id))
+            elif kind == "deny_check":
+                self._deny_check(rec, eff[1])
+
+        def clear(entry):
+            if entry is None or not any(b["tseq"] == tseq for b in entry.get("pending") or []):
+                return None
+            e = dict(entry)
+            e["pending"] = [b for b in e["pending"] if b["tseq"] != tseq]
+            return e
+        self.p.store.update(self._key(log_id), clear, self._ttl())
+
+    def _suspension_decision(self, log_id, batch, rec):
+        """Whether the carrier is in an outage, decided once per batch and remembered in it, so a
+        replay after a crash feeds the block test exactly as the first attempt would have."""
+        if "suspended" in batch:
+            return batch["suspended"]
+        decided = self._outage_active(rec)
+        tseq = batch["tseq"]
+
+        def remember(entry):
+            if entry is None:
+                return None
+            e = dict(entry)
+            e["pending"] = [dict(b, suspended=b.get("suspended", decided)) if b["tseq"] == tseq else b for b in e.get("pending") or []]
+            return e
+        entry, _ = self.p.store.update(self._key(log_id), remember, self._ttl())
+        for b in (entry or {}).get("pending") or []:
+            if b["tseq"] == tseq:
+                batch["suspended"] = b["suspended"]
+                return b["suspended"]
+        batch["suspended"] = decided
+        return decided
+
+    def recover(self, older_than=None):
+        """Apply effect batches left recorded by a transition whose process stopped before finishing
+        them. Called from run_due_timeouts(); safe to run concurrently with live transitions."""
+        now = self.p.clock.now()
+        age = self.RECOVER_AFTER_S if older_than is None else older_than
+        n = 0
+        for token in list(self.p.store.zrangebyscore(self.INTENTS, float("-inf"), now - age)):
+            log_id = int(token.split(":", 1)[0])
+            entry = self.p.store.get(self._key(log_id))
+            rec = self.p.sms_history.get(log_id)
+            if entry is not None and rec is not None:
+                for batch in list(entry.get("pending") or []):
+                    self._apply(log_id, rec, batch)
+                    n += 1
+            self.p.store.zrem(self.INTENTS, token)
+        return n
+
+    # ---------------------------------------------------------------- effect lists
+    def _rep_ops(self, rec, *field_by):
+        return [[k, f, by] for k in rec["reputation_keys"] for f, by in field_by]
+
+    def _failed_effects(self, rec):
+        fx = [["outage", "kg_failed" if rec.get("known_good") else "failed"],
+              ["rep", self._rep_ops(rec, ("failed", 1))]]
+        fx += [["block", k, False, False, False] for k in rec["reputation_keys"] if k.startswith("block:")]
+        fx += [["deny_check", k] for k in rec["reputation_keys"] if not k.startswith("block:")]
+        return fx
+
+    def _deny_check(self, rec, key):
+        cfg = self.p.cfg
+        if "feedback" not in cfg.features:
+            return
+        r = self.p.rep.get(key)
+        resolved = r.verified + r.failed
+        if resolved >= cfg.denylist_min_sample and r.verified / resolved < cfg.denylist_ratio:
+            # Fine-grained keys only. A residential ASN is thousands of real people; denylisting it
+            # would hand the attacker a denial of service. Hosting ASNs carry no such users.
+            if key.startswith(("ip:", "subnet:", "fp:")) or (key.startswith("asn:") and rec.get("asn_is_datacenter")):
+                self.p.store.set("deny:" + key, 1, cfg.denylist_ttl)
+
+    # ---------------------------------------------------------------- receipts
+    def on_delivery(self, log_id, ok, at=None):
+        """Delivery receipt from the provider (status callback) or the sender adapter. Returns what
+        happened: 'delivered', 'failed', 'duplicate', 'conflict', 'reopened', 'expired' or 'ignored'."""
+        cfg = self.p.cfg
+        if not cfg.delivery_receipts:
+            return "ignored"                                 # send-clocked mode ignores receipts
+        res_window = min(cfg.resolution_timeout_s, cfg.otp_ttl)
+
+        def decide(e, rec, now):
+            if e["done"]:
+                return None, "ignored", None
+            if ok:
+                if e["delivery"] == "delivered":
+                    return None, "duplicate", None           # the first delivery transition stands
+                if e["expires"] < now:
+                    return None, "expired", None
+                n = dict(e)
+                n["delivery"], n["delivered_at"] = "delivered", (at if at is not None else now)
+                fx = [["outage", "delivered"], ["timeout", n["delivered_at"] + res_window]]
+                if e.get("resolution") == "undelivered":    # late or corrected report: reopen
+                    n["resolution"], n["timed_out"] = None, False
+                    fx.append(["rep", self._rep_ops(rec, ("undelivered", -1))])
+                    if e.get("receipt_block_fail"):
+                        fx += [["block_unfail", k] for k in rec["reputation_keys"] if k.startswith("block:")]
+                        n["receipt_block_fail"] = False
+                    return n, "reopened", fx
+                return n, "delivered", fx
+            if e["delivery"] == "delivered":
+                n = dict(e)
+                n["conflicts"] = e.get("conflicts", 0) + 1   # delivered, then "failed": keep the delivery
+                return n, "conflict", None
+            if e["delivery"] == "failed" or e.get("resolution"):
+                return None, "duplicate", None
+            n = dict(e)
+            n["delivery"], n["resolution"], n["timed_out"] = "failed", "undelivered", True    # one transition
+            fx = [["outage", "undelivered"], ["rep", self._rep_ops(rec, ("undelivered", 1))]]
+            if cfg.receipt_policy == "robust":
+                fx += [["block", k, False, False, False] for k in rec["reputation_keys"] if k.startswith("block:")]
+                n["receipt_block_fail"] = True
+            return n, "failed", fx
+
+        kind, _ = self._transition(log_id, decide)
+        return kind
+
+    # ---------------------------------------------------------------- timeouts
+    def _timeout_decide(self, force=False):
+        cfg = self.p.cfg
+        res_window = min(cfg.resolution_timeout_s, cfg.otp_ttl)
+
+        def decide(e, rec, now):
+            if e["done"] or e.get("resolution"):
+                return None, "settled", None
+            if cfg.delivery_receipts and e.get("delivery") != "delivered" and not force:
+                n = dict(e)
+                n["resolution"], n["timed_out"] = "undelivered", True      # no receipt inside the grace period
+                return n, "undelivered", [["rep", self._rep_ops(rec, ("undelivered", 1))]]
+            if cfg.delivery_receipts and not force and now < e["delivered_at"] + res_window:
+                return None, "not_due", None
+            n = dict(e)
+            n["resolution"], n["timed_out"] = "failed", True
+            return n, "failed", self._failed_effects(rec)
+        return decide
 
     def run_due_timeouts(self):
-        """Called by a scheduler (cron, worker loop) every minute or so."""
-        cfg = self.p.cfg
+        """Called by a scheduler (cron, worker loop) every minute or so. Also completes any effect
+        batches a stopped process left behind."""
         now = self.p.clock.now()
         for member in list(self.p.store.zrangebyscore(self.TIMEOUTS, float("-inf"), now)):
-            log_id = int(member)
-            entry = self.p.store.get(self._key(log_id))
-            if entry is None or entry["done"] or entry.get("resolution"):
+            kind, _ = self._transition(int(member), self._timeout_decide())
+            if kind != "not_due":
                 self.p.store.zrem(self.TIMEOUTS, member)
-                continue
-            if cfg.delivery_receipts and entry.get("delivery") != "delivered":
-                self._resolve_undelivered(log_id)            # no receipt inside the grace period
-            elif cfg.delivery_receipts and now < entry["delivered_at"] + min(cfg.resolution_timeout_s, cfg.otp_ttl):
-                continue                                     # rescheduled by on_delivery; not due yet
-            else:
-                self.on_failed_or_timeout(log_id, keep_code=True)
-            self.p.store.zrem(self.TIMEOUTS, member)
+        self.recover()
 
-    # ---- verify endpoint ----
+    # ---------------------------------------------------------------- verify endpoint
+    def _verified_effects(self, e, rec, now):
+        cfg = self.p.cfg
+        earlier = e.get("resolution")
+        clock_from = e.get("delivered_at") if (cfg.delivery_receipts and e.get("delivered_at") is not None) \
+            else float(e.get("sent_at", rec.get("sent_at", 0)))
+        fast = (now - clock_from) < cfg.fast_verify_seconds
+        ops = [("verified", 1)] + ([(earlier, -1)] if earlier else []) + ([("fast_verified", 1)] if fast else [])
+        fx = ([["outage", "kg_verified"]] if rec.get("known_good") else []) + [["rep", self._rep_ops(rec, *ops)]]
+        undo = earlier == "failed" or bool(e.get("receipt_block_fail"))
+        fx += [["block", k, True, fast, undo] for k in rec["reputation_keys"] if k.startswith("block:")]
+        fx.append(["trusted", "num:" + rec["phone_number"]])
+        return fx
+
     def verify(self, session_id, log_id, code):
+        """One atomic transition: the attempt is counted and, if the code is right, the send is
+        closed as verified; concurrent submissions of the right code verify it once."""
         cfg = self.p.cfg
         if not self.p.rl("otp:verify:session", session_id, cfg.verify_session_limit).try_acquire():
             return False
-        now = self.p.clock.now()
 
-        def fn(entry):
-            if entry is None or entry["done"] or entry["expires"] < now:
-                return None
-            e = dict(entry); e["attempts"] += 1
-            return e
+        def decide(e, rec, now):
+            if e["done"] or e["expires"] < now:
+                return None, "invalid", None
+            n = dict(e)
+            n["attempts"] = e["attempts"] + 1
+            if secrets.compare_digest(e["code"], str(code)):
+                n["done"] = True
+                return n, "verified", self._verified_effects(e, rec, now)
+            if n["attempts"] >= cfg.otp_max_attempts:
+                n["done"] = True
+                return n, "exhausted", (None if e.get("resolution") else self._failed_effects(rec))
+            return n, "wrong", None
 
-        entry, counted = self.p.store.update(self._key(log_id), fn, cfg.otp_ttl * 2)
-        if not counted:
-            return False
-        if secrets.compare_digest(entry["code"], str(code)):
-            self.on_verified(log_id)
-            return True
-        if entry["attempts"] >= cfg.otp_max_attempts:
-            self.on_failed_or_timeout(log_id)
-        return False
+        kind, _ = self._transition(log_id, decide)
+        return kind == "verified"
 
     def verify_by_session(self, session_id, mobile, code):
         """Verify without a log id: the client only knows its session and the number it used.
@@ -172,84 +354,29 @@ class FeedbackLoop:
         """Test helper: what the user would have received."""
         return self.p.store.get(self._key(log_id))["code"]
 
-    def _finish(self, log_id, resolution=None):
-        """Atomically claims the transition. resolution None closes the code; 'failed' or
-        'undelivered' resolves reputation but keeps the code valid until otp_ttl. Returns the entry
-        as it was *before* the transition when this call made it, else None (already done, already
-        resolved, or unknown): exactly one of several concurrent callers gets a non-None result."""
-        before = {}
-
-        def fn(entry):
-            if entry is None or entry["done"]:
-                return None
-            if resolution and entry.get("resolution"):
-                return None
-            before["entry"] = entry
-            e = dict(entry)
-            if resolution:
-                e["resolution"], e["timed_out"] = resolution, True
-            else:
-                e["done"] = True
-            return e
-
-        _, changed = self.p.store.update(self._key(log_id), fn, self.p.cfg.otp_ttl * 2)
-        return before["entry"] if changed else None
-
-    # ---- reputation effects ----
+    # direct transitions (operator tools and tests)
     def on_verified(self, log_id):
-        rec = self.p.sms_history[log_id]
-        cfg = self.p.cfg
-        before = self._finish(log_id)
-        if before is None:
-            return                                            # already closed: a duplicate or concurrent callback
-        earlier = before.get("resolution")                   # already counted: reclassify
-        clock_from = before.get("delivered_at") if (cfg.delivery_receipts and before.get("delivered_at") is not None) \
-            else float(rec.get("sent_at", 0))
-        fast = (self.p.clock.now() - clock_from) < cfg.fast_verify_seconds
-        if rec.get("known_good"):
-            self._outage_record(rec, "kg_verified", self.p.clock.now())
-        suspended = self._outage_active(rec)
-        for key in rec["reputation_keys"]:
-            self.p.rep.incr(key, "verified")
-            if earlier:
-                self.p.rep.incr(key, earlier, -1)
-            if fast:
-                self.p.rep.incr(key, "fast_verified")
-            if key.startswith("block:") and not suspended:
-                self._block_event(key, verified=True, fast=fast, undo=earlier == "failed")
-        self.p.rep.mark_trusted("num:" + rec["phone_number"])
+        def decide(e, rec, now):
+            if e["done"]:
+                return None, "ignored", None
+            n = dict(e)
+            n["done"] = True
+            return n, "verified", self._verified_effects(e, rec, now)
+        return self._transition(log_id, decide)[0]
 
     def on_failed_or_timeout(self, log_id, keep_code=False):
-        rec = self.p.sms_history[log_id]
-        if self._finish(log_id, resolution="failed" if keep_code else None) is None:
-            return                                            # already resolved or closed: a duplicate
-        cfg = self.p.cfg
-        self._outage_record(rec, "kg_failed" if rec.get("known_good") else "failed", self.p.clock.now())
-        suspended = self._outage_active(rec)
-        for key in rec["reputation_keys"]:
-            self.p.rep.incr(key, "failed")
-            if key.startswith("block:"):
-                if not suspended:
-                    self._block_event(key, verified=False)
-                continue
-            r = self.p.rep.get(key)
-            resolved = r.verified + r.failed
-            if resolved >= cfg.denylist_min_sample and r.verified / resolved < cfg.denylist_ratio \
-                    and "feedback" in cfg.features:
-                # Fine-grained keys only. A residential ASN is thousands of real people; denylisting it
-                # would hand the attacker a denial of service. Hosting ASNs carry no such users.
-                if key.startswith(("ip:", "subnet:", "fp:")) or \
-                        (key.startswith("asn:") and rec.get("asn_is_datacenter")):
-                    self.p.store.set("deny:" + key, 1, cfg.denylist_ttl)
+        if keep_code:
+            return self._transition(log_id, self._timeout_decide(force=True))[0]
 
-    def _resolve_undelivered(self, log_id):
-        rec = self.p.sms_history[log_id]
-        if self._finish(log_id, resolution="undelivered") is None:
-            return
-        for key in rec["reputation_keys"]:
-            self.p.rep.incr(key, "undelivered")
+        def decide(e, rec, now):
+            if e["done"]:
+                return None, "ignored", None
+            n = dict(e)
+            n["done"] = True
+            return n, "exhausted", (None if e.get("resolution") else self._failed_effects(rec))
+        return self._transition(log_id, decide)[0]
 
-    # ---- carrier outage detector ----
+    # ---------------------------------------------------------------- carrier outage detector
     def _carrier(self, rec):
         return rec.get("prefix") or "unknown"
 
@@ -257,7 +384,8 @@ class FeedbackLoop:
         """event: 'delivered' | 'undelivered' (from receipts: the carrier's own report), 'failed' (any
         client's code was not entered) or 'kg_verified' | 'kg_failed' (outcomes of clients with verified
         history, whom an attacker cannot impersonate). The delivery signal uses all sends; the
-        conversion signal uses only known-good clients, so a decoy flood cannot buy a suspension."""
+        conversion signal uses only known-good clients, so a decoy flood cannot buy a suspension.
+        Idempotent per (event, send): the sets are keyed by log id."""
         cfg = self.p.cfg
         c = self._carrier(rec)
         windows = {"delivered": cfg.outage_window_s, "undelivered": cfg.outage_window_s, "failed": cfg.outage_kg_window_s,
@@ -284,14 +412,14 @@ class FeedbackLoop:
         if delivery_collapse or conversion_collapse:
             # many unrelated blocks of one carrier failing together: the carrier, not a pumper
             kind = "delivery" if delivery_collapse else "conversion"
-            self.p.store.set(f"outage:{c}", dict(n, since=now, kind=kind), cfg.outage_ttl)
-            self.p.svc.alerts.alert(f"Carrier outage suspected on prefix {c} ({kind} collapse across {n['blocks']} blocks); "
-                                    f"block tests suspended for {cfg.outage_ttl} s", n)
+            if self.p.store.setnx(f"outage:{c}", dict(n, since=now, kind=kind), cfg.outage_ttl):
+                self.p.svc.alerts.alert(f"Carrier outage suspected on prefix {c} ({kind} collapse across {n['blocks']} blocks); "
+                                        f"block tests suspended for {cfg.outage_ttl} s", n)
 
     def _outage_active(self, rec):
         return self.p.store.exists(f"outage:{self._carrier(rec)}")
 
-    # ---- destination-block tests ----
+    # ---------------------------------------------------------------- destination-block tests
     def _increments(self):
         cfg = self.p.cfg
         return {"verify": math.log(cfg.sprt_attack_conversion / cfg.sprt_legit_conversion),
@@ -301,27 +429,35 @@ class FeedbackLoop:
 
     @staticmethod
     def _empty_block_state(verdicts=0):
-        return {"v": 0, "f": 0, "fv": 0, "conv": 0.0, "speed": 0.0, "verdicts": verdicts}
+        return {"v": 0, "f": 0, "fv": 0, "conv": 0.0, "speed": 0.0, "verdicts": verdicts,
+                "verdict": None, "history": [], "seen": []}
 
-    def _block_event(self, key, verified, fast=False, undo=False):
-        """One resolved send on a destination block, fed to the sequential tests. The block's counts
-        and its two running statistics live in one document updated atomically, so concurrent
-        events from several workers are all counted and the threshold is crossed exactly once; the
-        crossing resets the document and the verdict is issued by the caller that crossed it. The
-        statistics are floored at -block_credit_thresholds x log(threshold) ('cusum'; 0 is Page's
-        CUSUM, which banks nothing) or unbounded ('sprt')."""
+    def _block_event(self, key, verified, fast=False, undo=False, event_id=None, undo_fail_only=False):
+        """One resolved send on a destination block. Counts, statistics, the current verdict and the
+        verdict history are one document updated by one compare-and-set: concurrent events are all
+        counted, a crossing happens once, and its stage is decided from the verdict already active in
+        the same document (a crossing while a verdict is active escalates to stage 2). An event with
+        an id the document has seen is ignored (replay after a crash). The statistics are floored at
+        -block_credit_thresholds x log(threshold) ('cusum'; 0 is Page's CUSUM) or unbounded ('sprt')."""
         cfg = self.p.cfg
         if "feedback" not in cfg.features:
-            return
+            return None
         inc = self._increments()
         thr = math.log(cfg.sprt_threshold)
         floor = -cfg.block_credit_thresholds * thr if cfg.block_test == "cusum" else -math.inf
+        now = self.p.clock.now()
         out = {}
 
         def fn(cur):
-            out.clear()                                      # fn may run again after a lost compare-and-set
+            out.clear()
             st = dict(cur) if cur else self._empty_block_state()
-            if verified:
+            st.setdefault("seen", []); st.setdefault("history", []); st.setdefault("verdict", None)
+            if event_id is not None and event_id in st["seen"]:
+                return None                                  # already applied
+            if undo_fail_only:
+                st["f"] = max(0, st["f"] - 1)
+                st["conv"] -= inc["fail"]
+            elif verified:
                 st["v"] += 1
                 st["conv"] += inc["verify"]
                 if fast:
@@ -336,48 +472,52 @@ class FeedbackLoop:
                 st["f"] += 1
                 st["conv"] += inc["fail"]
             st["conv"], st["speed"] = max(floor, st["conv"]), max(floor, st["speed"])
+            if event_id is not None:
+                st["seen"] = (st["seen"] + [event_id])[-self.SEEN_EVENTS:]
             conv_hit = "conversion" in cfg.block_tests and st["v"] + st["f"] >= cfg.sprt_min_events and st["conv"] > thr
             speed_hit = "speed" in cfg.block_tests and st["v"] >= cfg.sprt_min_events and st["speed"] > thr
-            if conv_hit or speed_hit:
-                out["reason"] = "never_verified" if conv_hit else "machine_verified"
-                return self._empty_block_state(st.get("verdicts", 0) + 1)   # the next test starts from zero
-            return st
+            if not (conv_hit or speed_hit):
+                return st
+            reason = "never_verified" if conv_hit else "machine_verified"
+            active = st["verdict"] is not None and st["verdict"]["until"] > now
+            if cfg.block_action == "deny":
+                stage, until = "deny", now + cfg.denylist_ttl
+            else:
+                stage, until = (2 if active else 1), now + cfg.block_verdict_ttl
+            n = st["verdicts"] + 1
+            event = {"id": f"{key}#{n}@{now:.3f}", "stage": stage, "reason": reason, "at": now, "until": until}
+            new = self._empty_block_state(n)                 # the next test starts from zero
+            new["verdict"] = {"stage": stage, "reason": reason, "at": now, "until": until}
+            new["history"] = [h for h in st["history"] if h["until"] > now - 86400] + [event]
+            new["seen"] = st["seen"]
+            out["event"] = event
+            return new
 
         self.p.store.update(self.BLOCK + key, fn, cfg.denylist_ttl)
-        if "reason" in out:
-            self._issue_verdict(key, out["reason"])
+        return out.get("event")
 
     def block_llr(self, key):
         """(conversion statistic, speed statistic, (verified, failed, fast) counts) for a block."""
         st = self.p.store.get(self.BLOCK + key) or self._empty_block_state()
         return st["conv"], st["speed"], (st["v"], st["f"], st["fv"])
 
-    def _issue_verdict(self, key, reason):
-        """Record one verdict event and apply cfg.block_action: 'deny' is a 24-hour denylist; 'graded'
-        makes the block's first-time clients solve a challenge (stage 1) and, on a second verdict
-        inside block_verdict_ttl, moves them to non-SMS channels (stage 2)."""
-        cfg = self.p.cfg
-        now = self.p.clock.now()
-        if cfg.block_action == "deny":
-            self.p.store.set("deny:" + key, reason, cfg.denylist_ttl)
-            stage = "deny"
-        else:
-            current = self.p.store.get("verdict:" + key)
-            stage = 2 if current else 1                     # a second verdict inside the TTL escalates
-            self.p.store.set("verdict:" + key, {"stage": stage, "reason": reason, "at": now}, cfg.block_verdict_ttl)
-        # one member per event (not per block), so verdict counts, affected blocks and exposure can be told apart;
-        # the sequence number keeps two verdicts at the same instant distinct
-        seq = self.p.store.incr("verdict:seq")
-        self.p.store.zadd(self.VERDICT_LOG, now, f"{key}|{stage}|{now:.3f}|{seq}", ttl=cfg.denylist_ttl)
+    def block_verdict(self, key):
+        """The verdict in force on a block now ({'stage': 1 | 2 | 'deny', 'reason', 'at', 'until'}), or None."""
+        st = self.p.store.get(self.BLOCK + key)
+        v = (st or {}).get("verdict")
+        return v if v is not None and v["until"] > self.p.clock.now() else None
+
+    def block_denied(self, key):
+        v = self.block_verdict(key)
+        return v is not None and v["stage"] == "deny"
 
     def verdict_events(self, since=float("-inf"), until=float("inf")):
-        """Every verdict event in the window: [{'block', 'stage', 'at'}], oldest first."""
+        """Every verdict event recorded in the block documents (last 24 h), oldest first:
+        [{'block', 'stage', 'reason', 'at', 'until', 'id'}]."""
         out = []
-        for m in self.p.store.zrangebyscore(self.VERDICT_LOG, since, until):
-            block, stage, at, _seq = m.rsplit("|", 3)
-            out.append({"block": block, "stage": int(stage) if stage.isdigit() else stage, "at": float(at)})
-        return out
-
-    def block_verdict(self, key):
-        """None, or {'stage': 1|2, 'reason': ...} for a block under a graded verdict."""
-        return self.p.store.get("verdict:" + key)
+        for doc_key in self.p.store.scan(self.BLOCK):
+            st = self.p.store.get(doc_key) or {}
+            for h in st.get("history") or []:
+                if since <= h["at"] <= until:
+                    out.append(dict(h, block=doc_key[len(self.BLOCK):]))
+        return sorted(out, key=lambda e: (e["at"], e["id"]))

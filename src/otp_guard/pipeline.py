@@ -50,6 +50,7 @@ class Request:
     rep_split: dict = field(default_factory=dict)
     number_claims: list = field(default_factory=list)
     count_stage: int = None            # set by the graded per-block counter (block_count_action = 'graded')
+    known_good: bool = None            # decided once per request (is_known_good)
     risk_score: float = None
     tier: str = None
     requires_challenge: bool = False
@@ -345,22 +346,19 @@ class Pipeline:
         prefix = self.svc.prefixes.lookup(mobile)
         req.prefix = prefix
         if self.on("block_count_limit"):
-            # baseline design: a flat per-block daily count, no scoring, no feedback. 'refuse' refuses the
-            # (limit+1)th send; 'graded' applies the same two-stage action as a block verdict (challenge,
-            # then non-SMS channels) to first-time clients once the block is over its limit.
-            limit, window = self.cfg.block_count_limit
-            block = mobile[:self.cfg.destination_block_digits]
+            # the destination counter: SMS sends already dispatched to this block in its window. Read
+            # only here; the send itself is reserved atomically at Step 11, so a refused request, a
+            # challenge and its retry cost nothing unless an SMS goes out.
+            limit, _ = self.cfg.block_count_limit
+            n = self.block_count(mobile)
             if self.cfg.block_count_action == "refuse":
-                if not self.rl("otp:blockcount", block, (limit, window)).try_acquire():
+                if n >= limit:
+                    req.signals.append("block_count_refused")
                     return False
-            else:
-                counter = self.rl("otp:blockcount", block, (10 ** 9, window))
-                counter.try_acquire()
-                n = counter.current_count()
-                if n > limit:
-                    req.count_stage = 1 if n <= 2 * limit else 2
+            elif n >= limit:
+                req.count_stage = 1 if n < 2 * limit else 2
         if self.on("fine_destination_key") and self.on("feedback") and self.cfg.block_action == "deny" \
-                and self.store.exists("deny:" + self.block_key(mobile)):
+                and self.feedback.block_denied(self.block_key(mobile)):
             req.signals.append("block_denied")        # a destination block under a hard-deny verdict
             return False
         if not self.on("number_intelligence"):
@@ -576,11 +574,48 @@ class Pipeline:
                 self.store.release(key, units)
         req.number_claims = []
 
+    def release_block_count(self, req):
+        key = self.block_count_key(req.mobile)
+        for k, units in [c for c in req.number_claims if c[0] == key]:
+            self.store.release(k, units)
+        req.number_claims = [c for c in req.number_claims if c[0] != key]
+
+    def block_count_key(self, mobile):
+        return "otp:blockcount:" + mobile[:self.cfg.destination_block_digits]
+
+    def block_count(self, mobile):
+        return int(self.store.get(self.block_count_key(mobile)) or 0)
+
+    def reserve_block_count(self, req):
+        """Atomic reservation of one send against the destination counter (Step 11). Refusing action:
+        capped at the limit; graded: capped at twice the limit (stage 2 sends nothing); a client with
+        verified history is exempt from the graded cap but still counted."""
+        limit, window = self.cfg.block_count_limit
+        if self.cfg.block_count_action == "refuse":
+            cap = limit
+        else:
+            cap = 10 ** 9 if self.is_known_good(req) else 2 * limit
+        ok = self.store.try_reserve(self.block_count_key(req.mobile), 1, cap, window)
+        if ok:
+            req.number_claims.append((self.block_count_key(req.mobile), 1))   # released if the send is not made
+        return ok
+
     # ---------- Step 9 ----------
     def is_known_good(self, req):
         """A client that has verified a code before: its fingerprint has verified history or the
-        number is trusted. A low risk score alone is not enough; an attacker can buy that."""
-        return self.rep_get(req, "fp:" + req.fingerprint).verified > 0 or self.rep.is_trusted("num:" + req.mobile)
+        number is trusted. A low risk score alone is not enough; an attacker can buy that. With
+        known_good_budget_per_min set, at most that many requests per minute per (source, country)
+        are granted the exemption; the rest are treated as first-time clients. Decided once per request."""
+        if req.known_good is not None:
+            return req.known_good
+        kg = self.rep_get(req, "fp:" + req.fingerprint).verified > 0 or self.rep.is_trusted("num:" + req.mobile)
+        budget = self.cfg.known_good_budget_per_min
+        if kg and budget is not None:
+            kg = self.rl("kg_exempt", f"{req.source}:{req.country_code}", (budget, 60)).try_acquire()
+            if not kg:
+                req.signals.append("known_good_budget_exhausted")
+        req.known_good = kg
+        return kg
 
     def record_volume(self, source, platform, cc):
         """Per-minute count of requests that reached the source cap; the worker's baseline job reads it."""
@@ -588,6 +623,7 @@ class Pipeline:
         k = f"{source}|{platform}|{cc}"
         self.store.incr(f"vol:{k}:{minute}")
         self.store.expire(f"vol:{k}:{minute}", 2 * 86400)
+        self.store.setnx(f"vol:first:{k}", minute, 35 * 86400)     # the baseline job skips partially observed hours
         self.store.sadd("vol:keys", k)
 
     def effective_limit(self, source, sl, period, platform, cc, known_good=False):
@@ -672,9 +708,20 @@ class Pipeline:
 
     def step11_log_and_send(self, req):
         channel = self.select_channel(req)
+        if channel == "sms" and self.on("block_count_limit") and not self.reserve_block_count(req):
+            # a concurrent send took the block's last slot between Step 5 and here
+            if self.cfg.block_count_action == "refuse":
+                req.signals.append("block_count_refused")
+                self.release_number_claims(req)
+                return Response(200, dict(UNIFORM_BODY), rejected_at="step5", tier=req.tier, risk_score=req.risk_score)
+            req.tier = "downgrade"
+            req.signals.append("block_count_stage2")
+            channel = self.select_channel(req)
         if channel == "sms" and not self.reserve_budget(req):
             req.tier = "downgrade"                     # over the hard ceiling: never SMS
             req.signals.append("budget_exhausted")
+            if self.on("block_count_limit"):
+                self.release_block_count(req)          # the block slot is not used either
             channel = self.select_channel(req)
         if channel is None:
             self.release_number_claims(req)

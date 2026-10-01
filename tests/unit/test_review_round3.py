@@ -114,26 +114,26 @@ def test_cusum_block_test_banks_only_bounded_goodwill(h):
     about ten failures instead of five, not the 143 a plain SPRT would need; with no credit, five."""
     h.cfg.block_action = "deny"
     _block_events(h, "block:96650123", ["v"] * 100 + ["f"] * 5)
-    assert not h.p.store.exists("deny:block:96650123")
+    assert not h.p.feedback.block_denied("block:96650123")
     _block_events(h, "block:96650123", ["f"] * 5)
-    assert h.p.store.exists("deny:block:96650123")
+    assert h.p.feedback.block_denied("block:96650123")
     h.cfg.block_credit_thresholds = 0.0
     _block_events(h, "block:96650127", ["v"] * 100 + ["f"] * 5)
-    assert h.p.store.exists("deny:block:96650127")
+    assert h.p.feedback.block_denied("block:96650127")
 
 
 def test_plain_sprt_banks_goodwill_for_comparison(h):
     h.cfg.block_action = "deny"; h.cfg.block_test = "sprt"
     _block_events(h, "block:96650124", ["v"] * 100 + ["f"] * 5)
-    assert not h.p.store.exists("deny:block:96650124")
+    assert not h.p.feedback.block_denied("block:96650124")
 
 
 def test_block_tests_can_be_restricted(h):
     h.cfg.block_action = "deny"; h.cfg.block_tests = ("speed",)
     _block_events(h, "block:96650125", ["f"] * 10)
-    assert not h.p.store.exists("deny:block:96650125")
+    assert not h.p.feedback.block_denied("block:96650125")
     _block_events(h, "block:96650126", ["fast"] * 5)      # ln(0.9/0.2) per event: five cross ln(1000)
-    assert h.p.store.exists("deny:block:96650126")
+    assert h.p.feedback.block_denied("block:96650126")
 
 
 def test_default_worker_runs_the_baseline_job(h):

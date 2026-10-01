@@ -120,9 +120,13 @@ class Config:
     block_credit_thresholds: float = 1.0    # 0 = Page's CUSUM (no credit at all: catches a trust-builder after 5 failures but flags
                                             # busy legitimate blocks); 1 = one threshold of credit (default); large = plain SPRT
     block_tests: tuple = ("conversion", "speed")
-    block_count_limit: tuple = (5, 86400)   # the 'block_limit_only' baseline: sends per destination block per day
-    block_count_action: str = "refuse"      # 'refuse': the (limit+1)th request on a block is refused; 'graded': first-time
-                                            # clients beyond the limit are challenged, beyond twice the limit moved off SMS
+    block_count_limit: tuple = (5, 86400)   # the destination counter: (SMS sends dispatched to an 8-digit block, window in s).
+                                            # Units are sends, not requests: a refused or challenged request and its retry
+                                            # cost nothing unless an SMS goes out. The window opens at the block's first send
+                                            # and the quota refills when it closes (86400: a daily quota; 600: a short window).
+    block_count_action: str = "refuse"      # 'refuse': once `limit` sends were made, further requests are refused;
+                                            # 'graded': beyond `limit`, first-time clients must solve a challenge, beyond
+                                            # 2 x limit they are moved off SMS (the verdicts' actions); verified history exempt
     budget_hard_ceiling: bool = True        # no SMS at all beyond the hourly budget; reserved atomically before sending
     sms_text_template: str = "Your verification code is {code}"
     # Delivery receipts. With receipts on, a send counts as failed for reputation only after the
@@ -145,12 +149,19 @@ class Config:
     # interactive challenge (apps: non-SMS channels); a second verdict inside the TTL moves them to
     # non-SMS channels only. Clients with verified history are never affected. 'deny': the earlier
     # design, a 24-hour denylist at Step 5.
-    block_action: str = "graded"
+    block_action: str = "graded"            # 'graded' | 'deny' | 'observe' (tests run, verdicts recorded, nothing enforced)
+    receipt_policy: str = "standard"        # 'standard': a failed receipt is no evidence; 'robust': it counts as a block-test
+                                            # failure unless the carrier is in an outage (resists receipt-faking carriers)
     block_verdict_ttl: int = 3600
     tier_bounds: tuple = (20, 40, 60, 80)
     elevated_shift: int = 10
 
-    adaptive_reduction_spares_known_good: bool = True   # the reduced cap never rations clients with verified history
+    adaptive_reduction_spares_known_good: bool = True   # the adaptive *reduction* does not apply to clients with verified
+                                                        # history; the static caps and the global budget still do
+    known_good_budget_per_min: int = None   # None: every client with verified history is exempt (from the adaptive reduction,
+                                            # verdicts and the graded counter). An int: at most this many exempt requests per
+                                            # minute per (source, country); beyond it they are treated as first-time clients
+                                            # (bounds what a pool of identities with earned trust can push through)
     per_number_base_window: int = 60
     per_number_max_window: int = 3600
     per_number_daily_cap: int = 5

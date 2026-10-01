@@ -18,6 +18,34 @@ def mean_ci(values, confidence=0.95):
     return (m, m - h, m + h, n)
 
 
+_BOOT = 2000
+
+
+def boot_ci(values, confidence=0.95, seed=12345):
+    """Mean with a percentile-bootstrap interval over the runs (seeds). Returns (mean, lo, hi, n).
+    The interval stays inside the range of the data, so a nonnegative quantity never gets a negative
+    bound; with a handful of seeds it is still only as good as those seeds."""
+    x = np.asarray([v for v in values if v is not None], dtype=float)
+    n = len(x)
+    if n == 0:
+        return (None, None, None, 0)
+    m = float(x.mean())
+    if n == 1 or np.all(x == x[0]):
+        return (m, m, m, n)
+    rng = np.random.default_rng(seed + n)
+    means = x[rng.integers(0, n, size=(_BOOT, n))].mean(axis=1)
+    lo, hi = np.quantile(means, [(1 - confidence) / 2, (1 + confidence) / 2])
+    return (m, float(lo), float(hi), n)
+
+
+def tail(values):
+    """Distribution summary across runs: median, 90th percentile and maximum."""
+    x = np.asarray([v for v in values if v is not None], dtype=float)
+    if len(x) == 0:
+        return {"p50": None, "p90": None, "max": None, "n": 0}
+    return {"p50": float(np.quantile(x, 0.5)), "p90": float(np.quantile(x, 0.9)), "max": float(x.max()), "n": int(len(x))}
+
+
 def fmt_ci(values, digits=1):
     m, lo, hi, n = mean_ci(values)
     if m is None:

@@ -41,6 +41,8 @@ def test_v1_leaks_more_than_v2_for_datacenter_attacker():
     assert r1["attack"]["leaked_total"] > 0 and r2["attack"]["leaked_total"] == 0
     s1, s2 = summarise([r1]), summarise([r2])
     rows = economics(s1, s2, "datacenter_rotation", earns_revenue=False)
-    assert len(rows) == 4 and rows[0]["design"] == "v1" and all(r["attacker_revenue_usd"] == 0 for r in rows)
+    assert [r["design"] for r in rows] == ["v1", "v2"] and all(r["breakeven_share"] is None for r in rows)
+    assert all(v < 0 for v in rows[0]["profit_surface_usd"].values())          # a flooder only pays
     rows = economics(s1, s2, "datacenter_rotation", earns_revenue=True)
-    assert rows[0]["attacker_revenue_usd"] > 0 and rows[2]["attacker_revenue_usd"] == 0
+    assert rows[0]["breakeven_share"] is not None and rows[1]["breakeven_share"] is None   # v2 leaked nothing
+    assert rows[0]["attacker_cost_usd"] > 0 and rows[0]["tokens"] >= rows[0]["requests"]

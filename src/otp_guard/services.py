@@ -27,13 +27,18 @@ class FakeAttestation:
 
 
 def _vendor_sleep(obj):
-    """Load tests only: a fake with `latency_ms` set blocks like a vendor call would (lognormal, sigma 0.5)."""
+    """Load tests only: a fake with `latency_ms` set blocks like a vendor call would: lognormal with
+    median latency_ms and spread latency_sigma (0.5 default; 1.0 or more is heavy-tailed), and with
+    probability timeout_prob it blocks for timeout_ms instead (a vendor timeout)."""
     ms = getattr(obj, "latency_ms", 0.0)
     if ms:
         import math
         import random
         import time
-        time.sleep(ms / 1000.0 * math.exp(random.gauss(0, 0.5)))
+        if random.random() < getattr(obj, "timeout_prob", 0.0):
+            time.sleep(getattr(obj, "timeout_ms", 2000.0) / 1000.0)
+            return
+        time.sleep(ms / 1000.0 * math.exp(random.gauss(0, getattr(obj, "latency_sigma", 0.5))))
 
 
 class FakeRecaptcha:
@@ -183,6 +188,7 @@ class AlertSink:
 class Services:
     proxy: FakeProxyDetector = field(default_factory=FakeProxyDetector)
     attestation: FakeAttestation = field(default_factory=FakeAttestation)
+    app_attest_enrollment: object = None     # providers.attestation.AppAttestEnrollment when App Attest is configured
     recaptcha: FakeRecaptcha = field(default_factory=FakeRecaptcha)
     ip_intel: FakeIpIntel = field(default_factory=FakeIpIntel)
     hlr: FakeHlr = field(default_factory=FakeHlr)
