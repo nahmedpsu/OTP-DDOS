@@ -207,16 +207,17 @@ Other things the evaluation established:
   under v1 and loses money under v2; a concentrated pumper whose carrier verifies with
   human-like delay stays profitable under both and additionally hands the defender
   323 verified fake accounts per 20 minutes; the instant verifier loses money under v2.
-- **Performance** (`results/performance.md`, real Redis, 2 uvicorn workers on 2 vCPUs, vendors
-  faked): a full send costs 9.0 ms p50 / 16.3 ms p99 in process with
+- **Performance** (`results/performance.md`, real Redis, 4 uvicorn workers on 4 vCPUs, vendors
+  faked): a full send costs 16.3 ms p50 / 30.9 ms p99 in process with
   46 Redis round trips (41 before delivery receipts, the block-test counters and the outage
-  windows were added). Over HTTP at concurrency 32 the service serves 210 requests/s
-  without the floor; with it, throughput is concurrency divided by the floor (70 requests/s here)
-  and is not a capacity figure. Timing leak, 6000 requests (3264 sent, 930 no session,
-  925 disallowed country, 881 repeated number): with the 400 ms floor no pair of outcomes is
-  distinguishable by Kolmogorov-Smirnov test (smallest p = 0.33) and every pair is equivalent within
-  2 ms by TOST (largest mean difference 0.62 ms); pipeline time exceeded the floor in
-  0.0 % of requests. Without the floor every pair is distinguishable (p < 10⁻⁶).
+  windows were added). Over HTTP at concurrency 32 the service serves 183 requests/s
+  without the floor; with it, throughput is concurrency divided by the floor (69 requests/s here)
+  and is not a capacity figure. Timing leak, 6000 requests (3263 sent, 930 no session,
+  925 disallowed country, 882 repeated number): with the 400 ms floor no pair of outcomes is
+  distinguishable by Kolmogorov-Smirnov test (smallest p = 0.13); equivalence within 2 ms is shown by TOST
+  for 5 of 6 pairs and is borderline (p 0.05 to 0.07, mean difference about 1 ms) for the pairs
+  involving the no-session path; the largest mean difference is 0.97 ms. Pipeline time exceeded the floor in
+  0.08 % of requests. Without the floor every pair is distinguishable (p < 10⁻⁶).
   A single worker at this concurrency does exceed the floor by wall time; size workers so it does not.
 
 `results/analysis.md` is an earlier single-seed walkthrough without background traffic; it
