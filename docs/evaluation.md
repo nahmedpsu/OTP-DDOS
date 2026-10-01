@@ -262,8 +262,9 @@ table says otherwise, after a legitimate-only warm-up so that history and baseli
 - Legitimate traffic is a Poisson process at 20 requests per minute with 80 % conversion
   and a lognormal verification delay (median 25 s, σ 0.6); 60 % of users present a
   fingerprint never seen before.
-- Tables report the mean and a 95 % t-interval across seeds. The lower bound of a count
-  or rate is clamped at 0. Sweeps and ablation use 10 seeds.
+- Tables report the mean and a 95 % percentile-bootstrap interval across seeds (2 000
+  resamples), which stays inside the range of the data; counts that matter in the tail
+  also report the 90th percentile and the maximum. Sweeps and ablation use 10 seeds.
 - Two modes are reported: **behavioural only** (source caps lifted, so the score, feedback
   and number layers are visible) and **with source caps** (per-minute web cap at 3 times
   the legitimate rate). In the second mode v2 runs the adaptive baseline job and the

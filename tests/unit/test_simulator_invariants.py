@@ -171,3 +171,14 @@ def test_containment_needs_a_sustained_quiet_period():
     assert containment([30] * 9 + [0], rate, min_sustain=1) == 9
     assert containment([30] * 9 + [0], rate, min_sustain=5) is None
     assert containment([30] * 4 + [0] * 6, rate, min_sustain=5) == 4
+
+
+def test_legitimate_traffic_is_the_same_with_and_without_an_attack():
+    """Legitimate requests come from their own stream: at a given seed every scenario, no attack
+    included, offers the same legitimate users, so cross-scenario service comparisons are paired."""
+    legit = LegitSpec(rate_per_min=15)
+    runs = [run_sim(SimSpec(attacker=ATTACKERS[a], legit=legit, minutes=6, warmup_minutes=2, seed=4, legit_only=lo))
+            for a, lo in (("naive_single_client", True), ("datacenter_rotation", False), ("residential_captcha_farm", False))]
+    assert len({r["legit_workload_digest"] for r in runs}) == 1
+    assert len({r["friction"]["users"] for r in runs}) == 1
+    assert len({r["workload_digest"] for r in runs}) == 3

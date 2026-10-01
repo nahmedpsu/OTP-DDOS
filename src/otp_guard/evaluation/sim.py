@@ -4,8 +4,11 @@ pipeline runs inside the simulation on fakes (CAPTCHA scores, IP intelligence, H
 WhatsApp registry) with delivery receipts and code entries arriving as timed events; the feedback
 loop and the adaptive baseline job run as deployed, except where a substitution is named below.
 
-Offered workload. Every exogenous quantity of a request is drawn from `rng_w` when the request is
-created, before the pipeline sees it: arrival time, identity, address, destination number, CAPTCHA
+Offered workload. Every exogenous quantity of a request is drawn when the request is created, before
+the pipeline sees it, from one of two independent streams: `rng_l` for legitimate traffic and
+`rng_w` for the attacker. Legitimate arrivals and attributes therefore do not depend on whether or
+how hard anyone attacks: at a given seed, every scenario (no attack included) offers the same
+legitimate users, so cross-scenario service comparisons are paired. The quantities: arrival time, identity, address, destination number, CAPTCHA
 scores for every session attempt, whether the person would verify and after how long, delivery
 delay, the token a challenge retry would present, whether the number is reachable on WhatsApp,
 whether a poorly performing route loses the message, and whether the person would press "resend".
@@ -210,7 +213,8 @@ class Simulation:
         self.spec = spec
         if spec.attacker.rate_multiple_of_legit is not None:
             spec.attacker.rate_per_min = spec.attacker.rate_multiple_of_legit * spec.legit.rate_per_min
-        self.rng_w = random.Random(spec.seed)                 # workload
+        self.rng_w = random.Random(spec.seed)                 # workload: the attacker's requests
+        self.rng_l = random.Random(f"{spec.seed}:legit")      # workload: legitimate traffic, independent of the attacker
         self.rng_p = random.Random(spec.seed * 1_000_003 + 7)  # policy-dependent decisions
         h = Harness()
         self.h = h
@@ -251,7 +255,7 @@ class Simulation:
         self.legit_blocks = None
         if spec.legit.blocks:
             universe = len(STANDARD_PREFIXES) * 1000
-            picks = self.rng_w.sample(range(universe), min(spec.legit.blocks, universe))
+            picks = self.rng_l.sample(range(universe), min(spec.legit.blocks, universe))
             self.legit_blocks = [f"{STANDARD_PREFIXES[i // 1000]}{i % 1000:03d}" for i in picks]
         self.block_traits = {}              # block -> (conversion, bad route), drawn once per block from its own stream
         self.legit_block_sends = collections.Counter()
@@ -274,6 +278,7 @@ class Simulation:
         self.t_tick0 = self.h.clock.now()                                        # the worker ticks on minute boundaries from here
         self.ctx_by_log = {}
         self.digest = hashlib.sha1()
+        self.legit_digest = hashlib.sha1()  # the legitimate part alone: equal across attackers at a given seed
         self.reactions = collections.Counter()    # policy-dependent requests: resends, challenge retries
         self.pending_at_end = {}
         self.t_attack_start = self.t_end = None
@@ -287,10 +292,7 @@ class Simulation:
         before the run (a fingerprint that verified, a trusted number). Policy-independent."""
         l, h = self.spec.legit, self.h
         for i in range(l.returning_population):
-            if self.legit_blocks:
-                mobile = f"{self.rng_w.choice(self.legit_blocks)}{self.rng_w.randrange(10**4):04d}"
-            else:
-                mobile = f"{self.rng_w.choice(STANDARD_PREFIXES)}{self.rng_w.randrange(10**7):07d}"
+            mobile = self._legit_number()
             fp = f"account-fp-{i}"
             self.population.append((fp, mobile))
             h.p.sessions.set_first_seen(fp, h.clock.now() - 30 * 86400)
@@ -302,8 +304,9 @@ class Simulation:
             self.h.svc.recaptcha.scores[tok] = score
         return tok
 
-    def _scores(self, beta, n):
-        return [self.rng_w.betavariate(*beta) for _ in range(n)]
+    def _scores(self, beta, n, rng=None):
+        rng = rng or self.rng_w
+        return [rng.betavariate(*beta) for _ in range(n)]
 
     def session_through_gate(self, platform, scores, fingerprint=None, age_hours=0, attacker=True):
         """/session issues a token only after a CAPTCHA pass; each attempt costs a token. The scores
@@ -415,47 +418,47 @@ class Simulation:
 
     def _legit_number(self):
         if self.legit_blocks:
-            return f"{self.rng_w.choice(self.legit_blocks)}{self.rng_w.randrange(10**4):04d}"
-        return f"{self.rng_w.choice(STANDARD_PREFIXES)}{self.rng_w.randrange(10**7):07d}"
+            return f"{self.rng_l.choice(self.legit_blocks)}{self.rng_l.randrange(10**4):04d}"
+        return f"{self.rng_l.choice(STANDARD_PREFIXES)}{self.rng_l.randrange(10**7):07d}"
 
     def make_legit_ctx(self, minute, warm):
         l = self.spec.legit
-        returning = self.rng_w.random() < l.returning_fraction
+        returning = self.rng_l.random() < l.returning_fraction
         mobile = None
         if returning and l.returning_mode == "population":
-            fp, mobile = self.rng_w.choice(self.population)
+            fp, mobile = self.rng_l.choice(self.population)
             age = 30 * 24
         elif returning and self.legit_identities:
-            fp, age = self.rng_w.choice(self.legit_identities), 24
+            fp, age = self.rng_l.choice(self.legit_identities), 24
         else:
             returning = False
-            fresh = self.rng_w.random() < l.fresh_fp_fraction
+            fresh = self.rng_l.random() < l.fresh_fp_fraction
             fp, age = f"legit-fp-{len(self.legit_identities)}", (0 if fresh else 24)
             self.legit_identities.append(fp)
-        u = self.rng_w.random()
+        u = self.rng_l.random()
         if u < l.corporate_egress_fraction:
-            ip = f"192.0.2.{self.rng_w.randrange(1, 255)}"
+            ip = f"192.0.2.{self.rng_l.randrange(1, 255)}"
         elif u < l.corporate_egress_fraction + l.roaming_fraction:
-            ip = f"198.51.200.{self.rng_w.randrange(1, 255)}"
+            ip = f"198.51.200.{self.rng_l.randrange(1, 255)}"
         elif u < l.corporate_egress_fraction + l.roaming_fraction + l.cloud_egress_abroad_fraction:
-            ip = f"198.51.201.{self.rng_w.randrange(1, 255)}"
+            ip = f"198.51.201.{self.rng_l.randrange(1, 255)}"
         else:
-            ip = _res_ip(self.rng_w.randrange(1 << 22))
+            ip = _res_ip(self.rng_l.randrange(1 << 22))
         if mobile is None:
             mobile = self._legit_number()
-        u_convert = self.rng_w.random()
-        autofill = self.rng_w.random() < l.autofill_fraction
-        entry = (l.autofill_median_s * math.exp(self.rng_w.gauss(0, l.autofill_sigma)) if autofill
-                 else l.verify_median_s * math.exp(self.rng_w.gauss(0, l.verify_sigma)))
-        whatsapp = self.rng_w.random() < l.whatsapp_fraction
-        u_route = self.rng_w.random()
-        resends = self.rng_w.random() < l.resend_prob
+        u_convert = self.rng_l.random()
+        autofill = self.rng_l.random() < l.autofill_fraction
+        entry = (l.autofill_median_s * math.exp(self.rng_l.gauss(0, l.autofill_sigma)) if autofill
+                 else l.verify_median_s * math.exp(self.rng_l.gauss(0, l.verify_sigma)))
+        whatsapp = self.rng_l.random() < l.whatsapp_fraction
+        u_route = self.rng_l.random()
+        resends = self.rng_l.random() < l.resend_prob
         conv_b, bad_route = self._traits(mobile[:8])
         ctx = dict(attacker=False, minute=minute, fp=fp, age=age, reuse_session=False, ip=ip, mobile=mobile,
-                   gate_scores=self._scores(l.captcha_beta, 1), recaptcha_score=self.rng_w.betavariate(*l.captcha_beta),
+                   gate_scores=self._scores(l.captcha_beta, 1, self.rng_l), recaptcha_score=self.rng_l.betavariate(*l.captcha_beta),
                    verify=u_convert < conv_b, verify_delay=entry,
-                   delivery=l.delivery_median_s * math.exp(self.rng_w.gauss(0, l.delivery_sigma)),
-                   retry_score=self.rng_w.betavariate(9, 1.5), whatsapp=whatsapp, spoof=False, returning=returning,
+                   delivery=l.delivery_median_s * math.exp(self.rng_l.gauss(0, l.delivery_sigma)),
+                   retry_score=self.rng_l.betavariate(9, 1.5), whatsapp=whatsapp, spoof=False, returning=returning,
                    lost_on_route=bad_route and u_route < l.bad_route_failure, resends=resends,
                    solves=self.rng_p.random() < l.solves_challenges)
         self._digest(ctx)
@@ -472,7 +475,10 @@ class Simulation:
         """Hash of the offered request, policy-independent fields only."""
         keys = ("attacker", "minute", "fp", "age", "ip", "mobile", "gate_scores", "recaptcha_score", "verify", "verify_delay",
                 "delivery", "retry_score", "returning", "whatsapp", "lost_on_route", "resends")
-        self.digest.update(repr([ctx.get(k) for k in keys]).encode())
+        row = repr([ctx.get(k) for k in keys]).encode()
+        self.digest.update(row)
+        if not ctx["attacker"]:
+            self.legit_digest.update(row)
 
     def _register_channels(self, ctx):
         """Write the number's WhatsApp reachability, drawn with the request, into the registry the
@@ -707,9 +713,9 @@ class Simulation:
         for w in range(spec.profile_weeks):
             for minute in range(60):
                 t0 = h.clock.now()
-                nl = self._poisson(spec.legit.rate_per_min * spec.profile_rate_multiple)
+                nl = self._poisson(spec.legit.rate_per_min * spec.profile_rate_multiple, self.rng_l)
                 na = self._poisson(spec.warmup_attack_rate) if spec.warmup_attack_rate else 0
-                for offset, is_attacker in sorted([(self.rng_w.random() * 60.0, False) for _ in range(nl)] +
+                for offset, is_attacker in sorted([(self.rng_l.random() * 60.0, False) for _ in range(nl)] +
                                                   [(self.rng_w.random() * 60.0, True) for _ in range(na)]):
                     self.process_due_events(until=t0 + offset)
                     if is_attacker:
@@ -747,10 +753,10 @@ class Simulation:
                 (not warm and (a.active_minutes is None or minute < a.active_minutes)) or (warm and spec.warmup_attack_rate > 0))
             na = self._poisson(spec.warmup_attack_rate if warm else a.rate_per_min) if attacking else 0
             mult = next((b[2] for b in bursts if b[0] <= minute < b[1]), 1.0)
-            nl = self._poisson(spec.legit.rate_per_min * mult)
-            # arrival times inside the minute are part of the offered workload
+            nl = self._poisson(spec.legit.rate_per_min * mult, self.rng_l)
+            # arrival times inside the minute are part of the offered workload (each from its own stream)
             arrivals = sorted([(self.rng_w.random() * 60.0, True) for _ in range(na)] +
-                              [(self.rng_w.random() * 60.0, False) for _ in range(nl)])
+                              [(self.rng_l.random() * 60.0, False) for _ in range(nl)])
             leaked = 0
             for offset, is_attacker in arrivals:
                 t = minute_start + offset
@@ -882,6 +888,7 @@ class Simulation:
                "outage_alerts": sum(1 for al in h.svc.alerts.alerts if "outage" in al[0]),
                "pending_at_end": self.pending_at_end,
                "workload_digest": self.digest.hexdigest(),
+               "legit_workload_digest": self.legit_digest.hexdigest(),
                "spec": {"attacker": asdict(spec.attacker), "legit": asdict(spec.legit), "minutes": spec.minutes,
                         "features": sorted(spec.features), "cfg_overrides": {k: list(v) if isinstance(v, tuple) else v for k, v in spec.cfg_overrides.items()},
                         "weight_overrides": spec.weight_overrides, "seed": spec.seed,
@@ -910,13 +917,14 @@ class Simulation:
             assert g.completed <= g.delivered <= g.dispatched <= g.users, (g.users, g.dispatched, g.delivered, g.completed)
             assert g.refused == g.users - g.delivered == sum(g.refused_by.values())
 
-    def _poisson(self, lam):
+    def _poisson(self, lam, rng=None):
+        rng = rng or self.rng_w
         if lam <= 0:
             return 0
         L, k, p = math.exp(-lam), 0, 1.0
         while True:
             k += 1
-            p *= self.rng_w.random()
+            p *= rng.random()
             if p <= L:
                 return k - 1
 

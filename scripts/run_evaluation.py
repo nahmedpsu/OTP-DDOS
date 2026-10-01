@@ -705,7 +705,8 @@ def write_markdown(R, path):
                      f"{ci(s80['legit_completed_pct'],2)} | {diff(al80['net_lost_pct'],2) if al80 else '–'} |")
         L.append("")
     names = sorted(M["attack"])
-    L += ["Attack side (evaluation seeds): SMS leaked of about 600 requests, and the paired difference to the default.", "",
+    n_req = M["attack"][names[0]][R_.MATCHED_ATTACKERS[0]]["requests"][0]
+    L += [f"Attack side (evaluation seeds): SMS leaked (of about {n_req:.0f} requests per run), and the paired difference to the default.", "",
           "| Setting | " + " | ".join(f"`{x}`" for x in R_.MATCHED_ATTACKERS) + " | Codes entered (human-like carrier) |", "|---|" + "---:|" * (len(R_.MATCHED_ATTACKERS) + 1)]
     for name in names:
         cells = [f"{ci(M['attack'][name][x]['leaked_total'],0)} ({diff(M['attack'][name][x]['paired_leak_vs_default'],0)})" for x in R_.MATCHED_ATTACKERS]
