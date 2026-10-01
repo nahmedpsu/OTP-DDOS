@@ -1,6 +1,6 @@
 # Headline numbers and where they come from
 
-Every figure quoted in the README resolves to one entry here: the file under `results/`, the JSON path, the seed set and the value (mean with 95 % t-interval and n, where the metric is an interval). Regenerate with `python3 scripts/headline_numbers.py` after `make evaluation` and `make load-test`.
+Every figure quoted in the README resolves to one entry here: the file under `results/`, the JSON path, the seed set and the value (mean with 95 % percentile-bootstrap interval and n, where the metric is an interval). Regenerate with `python3 scripts/headline_numbers.py` after `make evaluation` and `make load-test`.
 
 | Headline | File | JSON path | Seeds | Value |
 |---|---|---|---|---:|
