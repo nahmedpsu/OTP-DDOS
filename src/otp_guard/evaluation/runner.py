@@ -80,6 +80,22 @@ def run_all(specs, processes=None):
         return pool.map(_job, specs, chunksize=2)
 
 
+def summarise_legit_only(results):
+    """Aggregate false-positive runs: verdicts and the real users they touched."""
+    def col(f):
+        return [f(r) for r in results]
+    return {
+        "n": len(results),
+        "block_verdicts": mean_ci(col(lambda r: r["block_verdicts"])),
+        "legit_hit_by_verdict": mean_ci(col(lambda r: r["legit_hit_by_verdict"])),
+        "legit_users": mean_ci(col(lambda r: r["friction"]["users"])),
+        "legit_delivered_pct": mean_ci(col(lambda r: r["friction"]["delivered_pct"])),
+        "legit_challenge_rate_pct": mean_ci(col(lambda r: r["friction"]["challenge_rate_pct"])),
+        "legit_refusal_rate_pct": mean_ci(col(lambda r: r["friction"]["refusal_rate_pct"])),
+        "outage_alerts": mean_ci(col(lambda r: r["outage_alerts"])),
+    }
+
+
 def summarise(results):
     """Aggregate a list of run results into means with 95 % CIs."""
     def col(path):
@@ -108,6 +124,8 @@ def summarise(results):
         "legit_mean_added_delay_s": mean_ci(col(("friction", "mean_added_delay_s"))),
         "attacker_verifications": mean_ci(col(("attacker_verifications",))),
         "attacker_challenges_solved": mean_ci(col(("attacker_challenges_solved",))),
+        "block_verdicts": mean_ci(col(("block_verdicts",))),
+        "legit_hit_by_verdict": mean_ci(col(("legit_hit_by_verdict",))),
     }
 
 
@@ -147,6 +165,9 @@ PUMPING_ATTACKERS = {
     "concentrated_pumper_verifies_humanlike": AttackerSpec("concentrated_pumper_verifies_humanlike",
         "Same blocks; the carrier submits 60 % of codes after 30 s",
         numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), verify_fraction=0.6, verify_delay_s=30.0, earns_revenue=True),
+    "concentrated_pumper_solves_challenges": AttackerSpec("concentrated_pumper_solves_challenges",
+        "Same blocks, carrier does not verify; the pumper buys a solution for every interactive challenge",
+        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), solves_challenges=True, earns_revenue=True),
     "residential_captcha_farm": ATTACKERS["residential_captcha_farm"],
 }
 
@@ -160,6 +181,7 @@ PUMPING_VARIANTS = {
     "fine_key_plus_fast_resolution (default)": (ALL_FEATURES, {"resolution_timeout_s": 120}),
     "relative_baseline": (frozenset(_NO_FINE | {"relative_baseline"}), {"resolution_timeout_s": 600}),
     "all_three": (frozenset(ALL_FEATURES | {"relative_baseline"}), {"resolution_timeout_s": 120}),
+    "default_with_hard_deny": (ALL_FEATURES, {"resolution_timeout_s": 120, "block_action": "deny"}),
 }
 PUMPING_WARMUP_MIN = 130     # crosses an hour boundary with >= 200 resolved legitimate sends in the previous hour bucket
 
@@ -292,3 +314,88 @@ def economics(summary_v1, summary_v2, attacker_name, earns_revenue):
                          "attacker_profit_usd": revenue - cost, "defender_cost_usd": summ["attacker_cost_usd"][0],
                          "verified_fake_accounts": summ["attacker_verifications"][0]})
     return rows
+
+
+# ---------------------------------------------------------------- false positives of the block tests
+
+FP_CONVERSIONS = [0.5, 0.65, 0.8, 0.9]
+FP_FAST_SHARES = [0.0, 0.05, 0.1, 0.2, 0.3]
+FP_SENDS_PER_BLOCK = [10, 30, 100]
+
+
+def block_test_false_positives(cfg, trials=20_000, seed=3, conversions=FP_CONVERSIONS, fast_shares=FP_FAST_SHARES,
+                               sends=FP_SENDS_PER_BLOCK):
+    """Monte Carlo of the exact sequential tests on one block that sees only legitimate traffic, for
+    one 24-hour window: the chance that the block reaches a verdict, by true conversion and true
+    share of fast (autofill) verifications, with the tests parameterised as deployed (cfg)."""
+    import math
+    thr = math.log(cfg.sprt_threshold)
+    cv, cf = math.log(cfg.sprt_attack_conversion / cfg.sprt_legit_conversion), \
+        math.log((1 - cfg.sprt_attack_conversion) / (1 - cfg.sprt_legit_conversion))
+    sv, ss = math.log(cfg.sprt_attack_fast / cfg.sprt_legit_fast), math.log((1 - cfg.sprt_attack_fast) / (1 - cfg.sprt_legit_fast))
+    rng = random.Random(seed)
+    out = {}
+    for n in sends:
+        for p in conversions:
+            for f in fast_shares:
+                verdicts = {"never_verified": 0, "machine_verified": 0}
+                for _ in range(trials):
+                    v = fl = fv = 0
+                    for _ in range(n):
+                        if rng.random() < p:
+                            v += 1
+                            fv += rng.random() < f
+                            if v >= cfg.sprt_min_events and fv * sv + (v - fv) * ss > thr:
+                                verdicts["machine_verified"] += 1
+                                break
+                        else:
+                            fl += 1
+                        if v + fl >= cfg.sprt_min_events and v * cv + fl * cf > thr:
+                            verdicts["never_verified"] += 1
+                            break
+                out[(n, p, f)] = {k: val / trials for k, val in verdicts.items()}
+    return out
+
+
+LEGIT_ONLY_BLOCKS = {200: "144 / block / day", 1000: "29 / block / day", None: "4 / block / day (uniform over 7 prefixes)"}
+LEGIT_ONLY_CONVERSIONS = [0.8, 0.65]
+LEGIT_ONLY_AUTOFILL = [0.0, 0.2, 0.3]
+
+
+def study_legit_only_24h(seeds, minutes=24 * 60):
+    """Twenty-four hours of legitimate traffic only, at realistic sends per destination block, over
+    the conversion and autofill shares the tests might meet: how many blocks reach a verdict and how
+    many real users that touches."""
+    specs, index = [], []
+    for blocks in LEGIT_ONLY_BLOCKS:
+        for conv in LEGIT_ONLY_CONVERSIONS:
+            for af in LEGIT_ONLY_AUTOFILL:
+                for s in seeds:
+                    legit = LegitSpec(conversion=conv, autofill_fraction=af, blocks=blocks)
+                    specs.append(SimSpec(attacker=ATTACKERS["naive_single_client"], legit=legit, legit_only=True,
+                                         minutes=minutes, warmup_minutes=0, caps_lifted=True, seed=s))
+                    index.append((blocks, conv, af, s))
+    return specs, index
+
+
+OUTAGE_VARIANTS = {
+    "receipts + outage detector (default)": {},
+    "receipts, detector off": {"outage_min_blocks": 10 ** 9},
+    "no receipts (send-clocked, the earlier design)": {"delivery_receipts": False, "outage_min_blocks": 10 ** 9},
+}
+
+
+def study_outage(seeds, minutes=60):
+    """A 30-minute carrier outage on one prefix during legitimate traffic at 144 sends per block
+    per day: with receipts and the detector, without the detector, and without receipts."""
+    from .sim import OutageSpec
+    specs, index = [], []
+    for kind in ("failed_receipts", "silent"):
+        for vname, cfg in OUTAGE_VARIANTS.items():
+            for s in seeds:
+                legit = LegitSpec(blocks=200)
+                specs.append(SimSpec(attacker=ATTACKERS["naive_single_client"], legit=legit, legit_only=True, minutes=minutes,
+                                     warmup_minutes=30, caps_lifted=True, seed=s, cfg_overrides=dict(cfg),
+                                     outage=OutageSpec(prefix="96650", start_min=10, duration_min=30, kind=kind)))
+                index.append((kind, vname, s))
+    return specs, index

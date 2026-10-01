@@ -33,7 +33,7 @@ refuses to start while any component is still a fake.
 | `APP_ATTEST_APP_ID` | `<TEAMID>.<bundle id>`. |
 | `IPINFO_TOKEN`, `ABUSEIPDB_KEY` | IP intelligence and proxy detection. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | Twilio Lookup (number liveness) and Messaging. |
-| `TWILIO_FROM` or `TWILIO_MESSAGING_SERVICE_SID`, `TWILIO_WHATSAPP_FROM`, `TWILIO_STATUS_CALLBACK` | SMS and WhatsApp sending. |
+| `TWILIO_FROM` or `TWILIO_MESSAGING_SERVICE_SID`, `TWILIO_WHATSAPP_FROM`, `TWILIO_STATUS_CALLBACK` | SMS and WhatsApp sending. With a status callback, delivery receipts are expected at `POST /internal/delivery`; without one, a send the provider accepts counts as delivered and a send it refuses as undelivered. |
 | `FCM_PROJECT_ID` | Push channel. Device tokens are read from `push:token:<mobile>` in the store. |
 | `SLACK_ALERT_WEBHOOK` | Circuit breaker alerts. |
 
@@ -49,6 +49,18 @@ refuses to start while any component is still a fake.
 | SMS, WhatsApp | `TwilioMessaging` or `HttpSmsProvider` | Failure recorded against the audit log |
 | Push | `FcmPush` | Failure recorded |
 | Alerts | `SlackWebhookAlerts` + logging | Logged |
+
+## Delivery receipts and carrier outages
+
+The destination-block tests only count sends the carrier confirmed delivered. Post the
+provider's delivery reports to `POST /internal/delivery` (an adapter maps the provider's
+message id to the pipeline's log id, which the sender records in `smslog:delivery:<id>`).
+Without reports, set `delivery_receipts = false` in the config so that the clock runs
+from the send; the tests then cannot tell an outage from a flood, and the outage
+detector (`outage:<prefix>` in the store, with an alert) is what protects real users
+during one. The speed test's legitimate rate (`sprt_legit_fast`) must be set from the
+deployment's own measured share of verifications within 5 s of delivery, autofill
+included; the default assumes 20 %.
 
 ## App Attest enrolment
 

@@ -14,8 +14,8 @@ function effectiveLimit(sourceLimit, period, platform, countryCode):
 
 function validateSourceRateLimit(request, limits):
     source = request.source; platform = request.trustedPlatform; cc = request.countryCode
-    if source not in limits:
-        return true
+    if source not in limits or request.tier == "downgrade":
+        return true                          // SMS caps; a non-SMS channel spends none of it
     sl = limits[source]
 
     minuteLimit = new RateLimit()

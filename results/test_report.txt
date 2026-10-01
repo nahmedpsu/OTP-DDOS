@@ -1,16 +1,16 @@
-........................................................................ [ 38%]
-........................................................................ [ 76%]
-.............................................                            [100%]
+........................................................................ [ 35%]
+........................................................................ [ 70%]
+.............................................................            [100%]
 =============================== warnings summary ===============================
-../../../usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1
-  /usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+../../../tmp/claude-0/venv-clean/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /tmp/claude-0/venv-clean/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
 ==================================== PASSES ====================================
 ____________________ test_synthetic_logs_replay_round_trip _____________________
 ----------------------------- Captured stdout call -----------------------------
-wrote 319 rows to /tmp/pytest-of-root/pytest-29/test_synthetic_logs_replay_rou0/logs.csv
+wrote 319 rows to /tmp/pytest-of-root/pytest-15/test_synthetic_logs_replay_rou0/logs.csv
 _______ test_recaptcha_rejects_wrong_action_or_hostname_and_fails_closed _______
 ------------------------------ Captured log call -------------------------------
 WARNING  otp_guard.providers:recaptcha.py:24 recaptcha unavailable: down
@@ -208,18 +208,34 @@ PASSED tests/unit/test_steps.py::test_reduced_adaptive_cap_spares_known_good_cli
 PASSED tests/unit/test_steps.py::test_reduced_adaptive_cap_spares_known_good_clients_only[redis]
 PASSED tests/unit/test_steps.py::test_instant_verification_is_a_signal[memory]
 PASSED tests/unit/test_steps.py::test_instant_verification_is_a_signal[redis]
-PASSED tests/unit/test_steps.py::test_destination_block_never_verifying_is_denylisted_by_sprt[memory]
-PASSED tests/unit/test_steps.py::test_destination_block_never_verifying_is_denylisted_by_sprt[redis]
-PASSED tests/unit/test_steps.py::test_destination_block_with_mostly_verified_sends_is_not_denylisted[memory]
-PASSED tests/unit/test_steps.py::test_destination_block_with_mostly_verified_sends_is_not_denylisted[redis]
-PASSED tests/unit/test_steps.py::test_destination_block_machine_verified_is_denylisted_by_sprt[memory]
-PASSED tests/unit/test_steps.py::test_destination_block_machine_verified_is_denylisted_by_sprt[redis]
-PASSED tests/unit/test_steps.py::test_humanlike_verification_is_not_denylisted[memory]
-PASSED tests/unit/test_steps.py::test_humanlike_verification_is_not_denylisted[redis]
+PASSED tests/unit/test_steps.py::test_destination_block_never_verifying_gets_a_graded_verdict[memory]
+PASSED tests/unit/test_steps.py::test_destination_block_never_verifying_gets_a_graded_verdict[redis]
+PASSED tests/unit/test_steps.py::test_graded_verdict_solved_challenge_sends_and_second_verdict_escalates[memory]
+PASSED tests/unit/test_steps.py::test_graded_verdict_solved_challenge_sends_and_second_verdict_escalates[redis]
+PASSED tests/unit/test_steps.py::test_deny_mode_denylists_the_block_at_step5[memory]
+PASSED tests/unit/test_steps.py::test_deny_mode_denylists_the_block_at_step5[redis]
+PASSED tests/unit/test_steps.py::test_destination_block_with_mostly_verified_sends_has_no_verdict[memory]
+PASSED tests/unit/test_steps.py::test_destination_block_with_mostly_verified_sends_has_no_verdict[redis]
+PASSED tests/unit/test_steps.py::test_destination_block_machine_verified_gets_a_verdict[memory]
+PASSED tests/unit/test_steps.py::test_destination_block_machine_verified_gets_a_verdict[redis]
+PASSED tests/unit/test_steps.py::test_humanlike_verification_has_no_verdict[memory]
+PASSED tests/unit/test_steps.py::test_humanlike_verification_has_no_verdict[redis]
+PASSED tests/unit/test_steps.py::test_send_without_receipt_is_undelivered_not_failed[memory]
+PASSED tests/unit/test_steps.py::test_send_without_receipt_is_undelivered_not_failed[redis]
+PASSED tests/unit/test_steps.py::test_failed_receipt_is_undelivered_and_feeds_no_block_test[memory]
+PASSED tests/unit/test_steps.py::test_failed_receipt_is_undelivered_and_feeds_no_block_test[redis]
+PASSED tests/unit/test_steps.py::test_resolution_clock_runs_from_the_receipt[memory]
+PASSED tests/unit/test_steps.py::test_resolution_clock_runs_from_the_receipt[redis]
+PASSED tests/unit/test_steps.py::test_fast_verification_is_clocked_from_the_receipt[memory]
+PASSED tests/unit/test_steps.py::test_fast_verification_is_clocked_from_the_receipt[redis]
+PASSED tests/unit/test_steps.py::test_delivery_collapse_on_a_carrier_suspends_block_tests[memory]
+PASSED tests/unit/test_steps.py::test_delivery_collapse_on_a_carrier_suspends_block_tests[redis]
+PASSED tests/unit/test_steps.py::test_conversion_collapse_of_known_good_clients_is_an_outage_but_a_flood_is_not[memory]
+PASSED tests/unit/test_steps.py::test_conversion_collapse_of_known_good_clients_is_an_outage_but_a_flood_is_not[redis]
 PASSED tests/unit/test_steps.py::test_late_verification_is_reclassified[memory]
 PASSED tests/unit/test_steps.py::test_late_verification_is_reclassified[redis]
 PASSED tests/unit/test_steps.py::test_relative_baseline_fires_when_a_healthy_key_drops[memory]
 PASSED tests/unit/test_steps.py::test_relative_baseline_fires_when_a_healthy_key_drops[redis]
 PASSED tests/unit/test_steps.py::test_session_layer_off_keeps_client_identity[memory]
 PASSED tests/unit/test_steps.py::test_session_layer_off_keeps_client_identity[redis]
-189 passed, 1 warning in 27.32s
+205 passed, 1 warning in 30.61s

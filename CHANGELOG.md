@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.4.0
+
+- Delivery receipts gate the feedback loop: a send counts as failed only after the
+  provider confirmed delivery and the resolution timeout passed; no receipt, or a failed
+  one, resolves as `undelivered` and feeds neither the conversion ratio nor the block
+  tests. `POST /internal/delivery` takes the provider's reports; a provider without them
+  is run with `delivery_receipts = false`. Verification speed is clocked from the receipt.
+- Carrier outage detector: the block tests are suspended on a prefix whose receipts
+  collapse across many blocks, or whose returning clients (verified history) stop
+  verifying across many blocks; an alert names the carrier.
+- Graded block verdicts (default): a first verdict makes the block's first-time clients
+  solve a challenge for an hour, a second moves them to non-SMS channels; clients with
+  verified history are never affected. The 24-hour denylist remains as `block_action = deny`.
+  Sequential-test counters live apart from the reputation hash and restart after a verdict.
+- The speed test's legitimate rate defaults to 20 % (OS autofill) and must be set from
+  measured traffic; the evaluation sets it from the calibrated legitimate model.
+- Design fix found by the evaluation: downgrade-tier requests no longer consume the SMS
+  source cap (Step 9), so an attacker moved off SMS cannot ration real users through it.
+- Evaluation: false-positive study of the block tests (Monte Carlo over conversion and
+  autofill share; 24 hours of legitimate traffic at realistic sends per block; a carrier
+  outage in three variants), a challenge-solving pumper, the hard-deny variant, returning
+  users and autofill in the legitimate model, and the closed-form leakage model
+  (`evaluation/model.py`) checked against the spread sweep.
+
 ## 2.3.0 (unreleased)
 
 - Review round 2: `adaptive_caps` is a feature flag (v1 runs static caps; the adaptive cap

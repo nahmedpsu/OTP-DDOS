@@ -585,42 +585,176 @@ def _pump(h, block, i, verify=None, delay=1):
     return r
 
 
-def test_destination_block_never_verifying_is_denylisted_by_sprt(h):
-    """Five unverified sends on one block: (0.9/0.2)^5 > 1000, so the block is denied. A real
-    user population at 80 % conversion produces that with probability 0.2^5 = 0.03 %."""
+def test_destination_block_never_verifying_gets_a_graded_verdict(h):
+    """Five unverified sends on one block: (0.9/0.2)^5 > 1000. In graded mode the block's new
+    clients must solve a challenge; a client with verified history is untouched; another block is
+    unaffected. A real user population at 80 % conversion produces the verdict with probability 0.2^5."""
     h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
     for i in range(5):
         assert _pump(h, "96650123", i).channel == "sms"
     h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
-    assert h.p.store.exists("deny:block:96650123")
-    assert _pump(h, "96650123", 99).rejected_at == "step5"
+    assert h.p.feedback.block_verdict("block:96650123")["stage"] == 1
+    r = _pump(h, "96650123", 99)
+    assert r.rejected_at == "step7" and r.http_status == 200 and "block_never_verified" in r.signals
     assert _pump(h, "96655000", 1).channel == "sms"            # another block is unaffected
+    # a returning user (verified history on the fingerprint) on the flagged block is still served
+    tok, _ = h.session(fingerprint="old-friend", age_hours=200)
+    good = h.send(h.web_request(session=tok, ip="198.80.250.9", mobile="966559990001"))
+    h.p.feedback.verify("s" + str(h.p.sms_history[good.log_id]["session_id"])[1:], good.log_id, h.p.feedback.code_for(good.log_id))
+    r = h.send(h.web_request(session=tok, ip="198.80.250.9", mobile="966501239999"))
+    assert r.channel == "sms"
 
 
-def test_destination_block_with_mostly_verified_sends_is_not_denylisted(h):
+def test_graded_verdict_solved_challenge_sends_and_second_verdict_escalates(h):
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
+    for i in range(5):
+        _pump(h, "96650321", i)
+    h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    tok, _ = h.session(age_hours=3)
+    r = h.send(h.web_request(session=tok, ip="198.80.1.1", mobile="966503210007"))
+    assert r.rejected_at == "step7"
+    h.svc.recaptcha.scores["proof-1"] = 0.9
+    r = h.send(h.web_request(session=tok, ip="198.80.1.1", mobile="966503210007", challenge_proof="proof-1"))
+    assert r.channel == "sms" and r.tier == "delay"
+    # the solved sends still never verify: a second verdict inside the TTL moves the block to non-SMS channels
+    for i in range(10, 16):
+        tok, _ = h.session(age_hours=3)
+        h.svc.recaptcha.scores[f"proof-{i}"] = 0.9
+        h.send(h.web_request(session=tok, ip=f"198.80.2.{i}", mobile=f"96650321{i:04d}", challenge_proof=f"proof-{i}"))
+    h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    assert h.p.feedback.block_verdict("block:96650321")["stage"] == 2
+    tok, _ = h.session(age_hours=3)
+    h.svc.recaptcha.scores["proof-x"] = 0.9
+    r = h.send(h.web_request(session=tok, ip="198.80.3.1", mobile="966503210099", challenge_proof="proof-x"))
+    assert r.channel != "sms"
+    h.clock.advance(h.cfg.block_verdict_ttl + 1)
+    assert h.p.feedback.block_verdict("block:96650321") is None
+
+
+def test_deny_mode_denylists_the_block_at_step5(h):
+    h.cfg.block_action = "deny"
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
+    for i in range(5):
+        _pump(h, "96650124", i)
+    h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    assert h.p.store.exists("deny:block:96650124")
+    assert _pump(h, "96650124", 99).rejected_at == "step5"
+
+
+def test_destination_block_with_mostly_verified_sends_has_no_verdict(h):
     h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
     for i in range(10):
         _pump(h, "96650456", i, verify=(i % 5 != 0), delay=30)      # 80 % verified, human-like delay
     h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
-    assert not h.p.store.exists("deny:block:96650456")
+    assert h.p.feedback.block_verdict("block:96650456") is None
 
 
-def test_destination_block_machine_verified_is_denylisted_by_sprt(h):
-    """Three codes entered within a second: (0.9/0.005)^3 > 1000."""
+def test_destination_block_machine_verified_gets_a_verdict(h):
+    """Codes entered within a second of delivery, every time. With a fifth of real users on OS
+    autofill (P(fast | user) = 0.2) the speed test needs five in a row: (0.9/0.2)^5 > 1000."""
     h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
     sent = 0
-    for i in range(6):
+    for i in range(8):
         r = _pump(h, "96650777", i, verify=True, delay=1)
         sent += r.channel == "sms"
         h.clock.advance(5)
-    assert h.p.store.exists("deny:block:96650777") and sent <= 4
+    assert h.p.feedback.block_verdict("block:96650777")["reason"] == "machine_verified" and sent <= 6
 
 
-def test_humanlike_verification_is_not_denylisted(h):
+def test_humanlike_verification_has_no_verdict(h):
     h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
     for i in range(30):
         _pump(h, "96650888", i, verify=True, delay=30)
-    assert not h.p.store.exists("deny:block:96650888")
+    assert h.p.feedback.block_verdict("block:96650888") is None
+
+
+# ---------------- Delivery receipts, receipt-clocked speed, carrier outage ----------------
+
+def _no_instant_receipts(h):
+    h.svc.sender.instant_receipts = False
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
+
+
+def test_send_without_receipt_is_undelivered_not_failed(h):
+    _no_instant_receipts(h)
+    r = h.send(h.web_request())
+    h.clock.advance(h.cfg.receipt_grace_s + h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    rep = h.p.rep.get("num:966501234567")
+    assert rep.undelivered == 1 and rep.failed == 0
+    assert h.p.feedback.verify("s1", r.log_id, h.p.feedback.code_for(r.log_id))      # code still valid
+    rep = h.p.rep.get("num:966501234567")
+    assert rep.verified == 1 and rep.undelivered == 0
+
+
+def test_failed_receipt_is_undelivered_and_feeds_no_block_test(h):
+    _no_instant_receipts(h)
+    for i in range(8):
+        r = _pump(h, "96650135", i)
+        h.p.feedback.on_delivery(r.log_id, False)
+    h.clock.advance(h.cfg.resolution_timeout_s + h.cfg.receipt_grace_s + 1); h.p.feedback.run_due_timeouts()
+    assert h.p.feedback.block_verdict("block:96650135") is None
+    assert h.p.rep.get("block:96650135").undelivered == 8
+
+
+def test_resolution_clock_runs_from_the_receipt(h):
+    _no_instant_receipts(h)
+    r = h.send(h.web_request())
+    h.clock.advance(50)
+    h.p.feedback.on_delivery(r.log_id, True)
+    h.clock.advance(h.cfg.resolution_timeout_s - 10); h.p.feedback.run_due_timeouts()
+    assert h.p.rep.get("num:966501234567").failed == 0            # 160 s after the send, 110 s after delivery
+    h.clock.advance(20); h.p.feedback.run_due_timeouts()
+    assert h.p.rep.get("num:966501234567").failed == 1
+
+
+def test_fast_verification_is_clocked_from_the_receipt(h):
+    """A slow route delivers after 40 s; the user enters the code 2 s later. From the send that is
+    42 s (slow); from the receipt it is 2 s (fast). Only the receipt clock is right."""
+    _no_instant_receipts(h)
+    r = h.send(h.web_request())
+    h.clock.advance(40); h.p.feedback.on_delivery(r.log_id, True)
+    h.clock.advance(2)
+    assert h.p.feedback.verify("s1", r.log_id, h.p.feedback.code_for(r.log_id))
+    assert h.p.rep.get("num:966501234567").fast_verified == 1
+
+
+def test_delivery_collapse_on_a_carrier_suspends_block_tests(h):
+    """Receipts fail across 12 blocks of one prefix: an outage. Blocks that would otherwise reach a
+    verdict do not, and an alert names the carrier."""
+    _no_instant_receipts(h)
+    for b in range(12):
+        for i in range(2):
+            r = _pump(h, f"966501{b:02d}", 2 * b + i)
+            h.p.feedback.on_delivery(r.log_id, False)
+    assert h.p.store.exists("outage:96650") and any("outage" in a[0] for a in h.svc.alerts.alerts)
+    for i in range(6):                                         # these do arrive, and are never verified
+        r = _pump(h, "96650199", 50 + i)
+        h.p.feedback.on_delivery(r.log_id, True)
+    h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    assert h.p.feedback.block_verdict("block:96650199") is None
+    assert h.p.feedback.block_verdict("block:96655001") is None
+
+
+def test_conversion_collapse_of_known_good_clients_is_an_outage_but_a_flood_is_not(h):
+    """Delivered-but-not-received: returning users (verified fingerprints) across many blocks stop
+    verifying. That suspends the tests. The same collapse produced by fresh clients does not."""
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9
+    goods = []
+    for b in range(12):
+        tok, _ = h.session(fingerprint=f"regular-{b}", age_hours=300)
+        r = h.send(h.web_request(session=tok, ip=f"198.90.{b}.1", mobile=f"966559{b:02d}0001"))
+        h.p.feedback.verify(h.p.sms_history[r.log_id]["session_id"], r.log_id, h.p.feedback.code_for(r.log_id))
+        goods.append(tok)
+    h.clock.advance(700)
+    for b, tok in enumerate(goods):                              # the carrier 96650 now delivers nothing anyone can read
+        h.send(h.web_request(session=tok, ip=f"198.90.{b}.1", mobile=f"966501{b:02d}0002"))
+    h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    assert h.p.store.exists("outage:96650")
+    # the same pattern from fresh clients on another carrier is a flood, and no outage
+    for b in range(12):
+        _pump(h, f"966531{b:02d}", b)
+    h.clock.advance(h.cfg.resolution_timeout_s + 1); h.p.feedback.run_due_timeouts()
+    assert not h.p.store.exists("outage:96653")
 
 
 def test_late_verification_is_reclassified(h):

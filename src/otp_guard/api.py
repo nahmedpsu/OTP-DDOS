@@ -5,6 +5,7 @@
     POST /otp/request           -> uniform body               the pipeline
     POST /otp/verify            -> {"status": "verified" | "invalid"}
     POST /internal/timeouts/run -> feedback loop tick          needs X-Service-Credential
+    POST /internal/delivery     -> delivery receipt for a send  needs X-Service-Credential
     GET  /healthz               -> mode and wiring report
 """
 import asyncio
@@ -39,6 +40,12 @@ class OtpRequestBody(BaseModel):
     attestation: dict | None = None
     challenge_proof: str | None = None
     is_bulk: bool = False
+
+
+class DeliveryBody(BaseModel):
+    log_id: int
+    delivered: bool
+    at: float | None = None        # provider timestamp (epoch seconds); default: now
 
 
 class VerifyBody(BaseModel):
@@ -167,6 +174,15 @@ def create_app(pipeline, report=None, trusted_proxies=(), debug_outcome_header=F
         if x_service_credential not in p.svc.internal_credentials:
             return JSONResponse({"status": "forbidden"}, status_code=403)
         p.feedback.run_due_timeouts()
+        return {"status": "ok"}
+
+    @app.post("/internal/delivery")
+    def delivery(body: DeliveryBody, x_service_credential: str | None = Header(default=None)):
+        """Delivery receipt. Wire the provider's status callback (e.g. Twilio StatusCallback) to a
+        small adapter that maps the message SID to the log id and posts here."""
+        if x_service_credential not in p.svc.internal_credentials:
+            return JSONResponse({"status": "forbidden"}, status_code=403)
+        p.feedback.on_delivery(body.log_id, body.delivered, at=body.at)
         return {"status": "ok"}
 
     return app

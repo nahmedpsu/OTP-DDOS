@@ -342,8 +342,10 @@ class Pipeline:
         # 5b prefix cost class
         prefix = self.svc.prefixes.lookup(mobile)
         req.prefix = prefix
-        if self.on("fine_destination_key") and self.on("feedback") and self.store.exists("deny:" + self.block_key(mobile)):
-            return False                              # a destination block that never verifies
+        if self.on("fine_destination_key") and self.on("feedback") and self.cfg.block_action == "deny" \
+                and self.store.exists("deny:" + self.block_key(mobile)):
+            req.signals.append("block_denied")        # a destination block under a hard-deny verdict
+            return False
         if not self.on("number_intelligence"):
             return True
         if prefix.cls == "premium":
@@ -477,6 +479,7 @@ class Pipeline:
         req.tier = self.decide_tier(req.risk_score, self.mode)
         if req.trusted_platform == "legacy_app" and req.tier == "allow":
             req.tier = "delay"
+        self.apply_block_verdict(req)
         if req.tier == "block":
             return False
         if req.tier == "challenge":
@@ -485,6 +488,27 @@ class Pipeline:
                 return False
             req.tier = "downgrade"
         return True
+
+    TIER_RANK = {"allow": 0, "delay": 1, "challenge": 2, "downgrade": 3, "block": 4}
+
+    def apply_block_verdict(self, req):
+        """Graded action on a destination block under a sequential-test verdict: stage 1 makes the
+        block's new clients solve an interactive challenge (apps: non-SMS channels), stage 2 moves
+        them to non-SMS channels only. A client with verified history is never affected, so the
+        cost of a wrong verdict falls on first-time sign-ups to that block for block_verdict_ttl,
+        not on 10 000 numbers for a day."""
+        if not (self.on("fine_destination_key") and self.on("feedback")) or self.cfg.block_action != "graded":
+            return
+        verdict = self.feedback.block_verdict(self.block_key(req.mobile))
+        if not verdict or self.is_known_good(req):
+            return
+        req.signals.append(f"block_{verdict['reason']}")
+        if verdict["stage"] == 1:
+            floor = "delay" if "challenge_passed" in req.signals else "challenge"   # solved it: send, with delay
+        else:
+            floor = "downgrade"
+        if self.TIER_RANK[req.tier] < self.TIER_RANK[floor]:
+            req.tier = floor
 
     # ---------- Step 8 ----------
     def step8_per_number(self, req):
@@ -522,8 +546,8 @@ class Pipeline:
 
     def step9_source_limits(self, req):
         sl = self.cfg.source_limits.get(req.source)
-        if sl is None:
-            return True
+        if sl is None or req.tier == "downgrade":
+            return True                      # the source caps are SMS caps; a non-SMS channel spends none of it
         p, cc = req.trusted_platform, req.country_code
         kg = self.is_known_good(req)
         minute_cap = self.effective_limit(req.source, sl, "per_minute", p, cc, kg)
@@ -585,7 +609,8 @@ class Pipeline:
             "risk_score": req.risk_score, "signals": list(req.signals), "tier": req.tier,
             "operating_mode": self.mode, "session_id": req.session_id,
             "fingerprint": req.fingerprint, "ip": req.ip, "asn": req.ip_info.asn,
-            "asn_is_datacenter": bool(req.ip_info.is_datacenter),
+            "asn_is_datacenter": bool(req.ip_info.is_datacenter), "prefix": req.prefix.id,
+            "known_good": self.is_known_good(req),
             "reputation_keys": self.reputation_keys(req), "sent_at": self.clock.now(),
         }
         self.sms_history.put(record)
@@ -606,6 +631,8 @@ class Pipeline:
         self.store.set("num_last_send:" + req.mobile, self.clock.now(), 86400)
         self.store.set(f"otp:latest:{req.session_id}:{req.mobile}", log_id, self.cfg.otp_ttl)
         self.feedback.on_sent(log_id)
+        if self.cfg.delivery_receipts and getattr(self.svc.sender, "instant_receipts", False):
+            self.feedback.on_delivery(log_id, True)   # a fake or receipt-less provider: delivered on send
         return Response(200, dict(UNIFORM_BODY), tier=req.tier, channel=channel, log_id=log_id, risk_score=req.risk_score)
 
     # ---------- Full pipeline ----------

@@ -6,7 +6,8 @@ class Rep:
     sent: int = 0
     verified: int = 0
     failed: int = 0
-    fast_verified: int = 0     # verified within cfg.fast_verify_seconds of the send
+    fast_verified: int = 0     # verified within cfg.fast_verify_seconds of delivery (of the send, without receipts)
+    undelivered: int = 0       # no delivery receipt, or a failed one: resolves as neither verified nor failed
 
 
 class ReputationStore:
@@ -35,6 +36,7 @@ class ReputationStore:
                 total.verified += b.get("verified", 0)
                 total.failed += b.get("failed", 0)
                 total.fast_verified += b.get("fast_verified", 0)
+                total.undelivered += b.get("undelivered", 0)
         return total
 
     def get_many(self, keys):

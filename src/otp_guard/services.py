@@ -138,8 +138,9 @@ class SentMessage:
 
 
 class FakeSender:
-    def __init__(self):
+    def __init__(self, instant_receipts=True):
         self.sent = []
+        self.instant_receipts = instant_receipts   # the pipeline treats every send as delivered at once
 
     def enqueue(self, channel, mobile, text, log_id, delay, provider=None):
         self.sent.append(SentMessage(channel, mobile, text, log_id, delay, provider))

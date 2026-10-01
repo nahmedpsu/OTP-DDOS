@@ -21,29 +21,46 @@ These are measured, not hypothetical. Each one is in `results/evaluation.md` or
 2. **Exposure before the feedback loop has data equals the attack rate times the OTP
    timeout.** With a 10-minute timeout an attacker at 30 requests a minute is paid 300 SMS
    before any conversion signal exists. Only a shorter timeout moves this (section C1).
-3. **A sequential-number walk is now stopped** (66 leaked of 600, every seed contained)
-   because it stays inside one destination block, which the feedback loop denylists. An
-   earlier version of the design leaked 300 of 600 on this attacker; the fix is the block
-   key, not the narrow-range signal, which alone lands in the `delay` tier.
+3. **A sequential-number walk is now stopped** (about 60 leaked of 600, every seed
+   contained) because it stays inside one destination block, which reaches a verdict after
+   five unverified sends. An earlier version of the design leaked 300 of 600 on this
+   attacker; the fix is the block key, not the narrow-range signal, which alone lands in
+   the `delay` tier.
 4. **Carrier-grade NAT delivers only 50 % without configuration** (`CGNAT_ASNS`).
 5. **A campaign burst delivers 12.5 % under the default source caps** unless the cap is
    raised beforehand.
 6. **VPN users are blocked by policy**, as the problem statement asked. That is a product
    decision the design makes visible, not a bug, but it is friction.
-7. **Pumper containment depends on how narrowly the carrier's ranges concentrate.** The
-   block key separates a pumper whose ranges fit inside 8-digit blocks; ranges of 100 000
-   numbers span ten keys each and leak several times more, and at 300 ranges the pumper
-   leaks like the diluting flooder (section G, figure). **A colluding carrier that submits
-   codes with human-like delay is indistinguishable from real traffic on any key**,
-   including the destination block (557 of 600 leaked,
-   324 verified fake accounts per run). A carrier that verifies instantly is denylisted
-   as machine-verified by minute 8; one that does not verify is contained by minute
-   10 (section F). The human-like case moves the cost downstream into fake accounts.
+7. **Pumper containment depends on how many destination blocks the carrier's ranges
+   touch, and the cost has a closed form.** Leakage is about 5 B + rate x 2.5 min for a
+   carrier that never verifies and 5 B for one that verifies within a second, with B the
+   8-digit blocks touched (section G matches the model to within a few SMS at every
+   point of the spread sweep). Three blocks cost 104 and 18 SMS; 300 blocks leak like the
+   flooder. **A colluding carrier that verifies at least 42 % of its codes with human-like
+   delay is indistinguishable from real traffic on any key**, including the destination
+   block (559 of 600 leaked, 323 verified fake accounts per run). The human-like case
+   moves the cost downstream into fake accounts.
+7b. **The block tests are calibrated, and a wrong calibration costs real users.** They
+   assume 80 % legitimate conversion and 20 % of verifications within 5 s of delivery
+   (OS autofill). Section H1: at a true conversion of 65 % about 2 % of blocks with
+   30 or more sends a day reach a verdict; at 50 %, 9 to 25 %. Section H2 (24 hours of
+   legitimate traffic): at 80 % conversion 0 to 2 verdicts a day touching at most a
+   couple of real users; at 65 %, 3 to 18 verdicts touching 1 to 22 of 29 000 users, who
+   meet a challenge rather than a refusal (delivery stays at 99.3 %). The speed test is
+   the lesser risk: even a 30 % autofill share against a 20 % calibration adds under
+   1 % of blocks. `sprt_legit_conversion` and `sprt_legit_fast` must come from measured
+   traffic.
+7c. **A carrier outage looks like a pumper unless receipts and the outage detector say
+   otherwise.** Section H3: with the send-clocked design a 30-minute outage on one prefix
+   flagged 1.4 blocks and touched 1.8 real users; with delivery receipts gating the tests
+   and the carrier-wide suspension, none. The receipt signal is only as honest as the
+   provider's reports, and the conversion signal (returning clients only, so a decoy
+   flood cannot buy a suspension) needs ten of them.
 8. **A challenge solver who buys interactive-challenge solutions receives the -20
-   `challenge_passed` credit** and can move from `challenge` back to `delay`. In the
-   evaluation this attacker never even reaches the challenge tier (dilution keeps its score
-   low), so the credit is not what leaks; the mitigation still is to cap the credit per
-   session.
+   `challenge_passed` credit** and can move from `challenge` back to `delay`; a datacenter
+   attacker that does so turns 0 leaked SMS into about 50 per run (section D). A pumper
+   that solves the challenge of a stage-1 block verdict earns a second verdict and is
+   moved off SMS: 122 leaked against 104 under the hard denylist (section F).
 9. **The feedback loop separates attackers only on keys they dominate.** With the
    ablation baseline on the same seeds, removing it raises leakage for the reused-profile
    attacker (it dominates its fingerprint key) and for the sequential walk (it dominates a
@@ -119,6 +136,59 @@ parameter, its value and its source, and marks assumptions. The important ones:
   revenue share 20 to 50 % of the termination fee (assumed; public reports give no figure).
 - 94 % of mobile data networks use carrier-grade NAT (Richter et al. 2016).
 
+## Delivery receipts, outages and graded verdicts (method)
+
+The destination-block tests are the one part of the design that acts on a key real users
+share by the thousand, so section H of `results/evaluation.md` measures what they do to
+real users under three conditions:
+
+- **A population unlike the calibration.** The tests as deployed assume 80 % conversion and
+  20 % of verifications within 5 s of delivery (OS autofill). H1 is a Monte Carlo of the
+  exact tests on one block seeing only legitimate traffic, over true conversion 50 to 90 %
+  and true autofill share 0 to 30 %, at 10, 30 and 100 sends per block per day: the chance
+  that the block reaches a verdict in a day.
+- **Twenty-four hours of real traffic.** H2 runs the simulation with no attacker at all for
+  24 hours, with legitimate numbers drawn from a fixed set of blocks (200, 1 000, or the
+  whole range) so that a block sees 144, 29 or about 4 sends a day, over the same
+  conversion and autofill shares. It counts blocks that reached a verdict and the real
+  users a verdict touched (a first-time client on a flagged block who was challenged or
+  moved off SMS; returning clients are exempt).
+- **A carrier outage.** H3 stops one prefix for 30 minutes inside an hour of legitimate
+  traffic, in two forms: the provider reports every send failed, or reports delivery while
+  nobody receives anything. Three variants: receipts with the outage detector (the
+  default), receipts without it, and no receipts at all (the design as first written,
+  where a send that is not verified is a failure).
+
+The mechanisms under test (`src/otp_guard/feedback.py`): a send resolves as *failed* only
+after a delivery receipt and the resolution timeout; a send with no receipt inside 60 s,
+or a failed one, is *undelivered* and feeds nothing; verification speed is clocked from
+the receipt; the tests are suspended on a carrier whose receipts collapse across many
+blocks or whose *returning* clients (verified history, which an attacker cannot
+impersonate) stop verifying across many blocks; a verdict makes the block's first-time
+clients solve a challenge for an hour and, on a second verdict, moves them off SMS, while
+clients with verified history are never affected. The simulation delivers receipts after
+a lognormal delivery delay (median 3 s), gives 20 % of legitimate requests a returning
+fingerprint, and gives 20 % of legitimate verifications an autofill entry delay (median
+2 s from delivery); the speed test's legitimate rate is set from that model, as a
+deployment would set it from its own measurements.
+
+## The closed-form leakage model
+
+`src/otp_guard/evaluation/model.py`. Against the block tests a pumper's leakage depends
+on the number of 8-digit blocks it touches, B, not on how many numbers it uses:
+
+    leak ~= min(N, k * B + lambda * tau)
+
+with N its requests, lambda its rate, k the sends one block costs before its verdict
+(5 for a carrier that never verifies: ceil(ln 1000 / ln(0.9 / 0.2)); 5 for one that
+verifies within a second at P(fast | user) = 0.2: ceil(ln 1000 / ln(0.9 / 0.2)); 3 at
+the 0.5 % of an autofill-free population) and tau the time a send stays unresolved
+(resolution timeout + delivery delay + half the worker's period for the non-verifier;
+delivery plus the carrier's own delay for the instant verifier). Section G compares the
+model with the spread sweep. A carrier evades the conversion test by verifying at least
+s* = ln(0.9/0.2) / (ln(0.9/0.2) + ln(0.8/0.1)) = 42 % of its codes, each a verified fake
+account the defender now holds.
+
 ## Limitations
 
 - **No production data.** The whole evaluation is simulated. No anonymised logs from the
@@ -137,16 +207,26 @@ parameter, its value and its source, and marks assumptions. The important ones:
   failure, one request per user, and every user is on the same ISP as the residential
   attacker (the worst case for dilution).
 - **Attackers do not adapt within a run**, apart from the adaptive profiles in section D.
+- **Autofill share and returning-user share are assumed** (20 % each). The false-positive
+  study sweeps the autofill share because the speed test's calibration depends on it; a
+  deployment must measure its own.
+- **The outage detector's conversion signal needs returning users.** On a prefix with
+  little traffic it takes most of half an hour to see ten of them, during which a silent
+  outage can produce verdicts; the delivery-receipt signal is faster and is what a
+  provider with honest reports gives you.
+- **A colluding carrier can fake failed receipts** for other people's sends on its prefix
+  to suspend the tests there; every such window raises an outage alert. The simulation
+  does not model this.
 - **The confidence intervals cover seed-to-seed variation only**, not calibration error.
 
 ## Performance and timing-leak method
 
-`scripts/load_test.py` runs against a real `redis-server` on the same 4-vCPU container.
+`scripts/load_test.py` runs against a real `redis-server` on the same container (the report header states its vCPUs and worker count).
 Phase 1 drives the pipeline in process with 3 000 mixed requests (55 % sent, 15 % no
 session, 15 % disallowed country, 15 % repeated number) and records per-step and
 end-to-end latency percentiles, plus Redis round trips and commands per request from
-`INFO commandstats`. Phase 2 serves the API with uvicorn (one process, sync handlers in
-the default thread pool) and fires 800 requests at concurrency 16, once with the 400 ms
+`INFO commandstats`. Phase 2 serves the API with uvicorn (`LOAD_TEST_WORKERS` processes, sync handlers in
+the default thread pool) and fires 6 000 requests at concurrency 32, once with the 400 ms
 response floor and once with it disabled as the control. The server labels each response
 with its true outcome through an opt-in debug header that exists only for this test.
 Client-observed latencies are compared across outcomes with two-sample
@@ -159,12 +239,15 @@ processing exceeded the floor (those leak timing whatever the floor) and labels 
 with-floor throughput for what it is: concurrency divided by the floor, not capacity.
 Results: `results/performance.md`.
 
-Measured with 4 workers and 6000 requests: with the floor, no pair of outcomes is
-distinguishable by KS test (smallest p = 0.07) and every pair is equivalent within 2 ms by
-TOST (largest p = 0.000, largest mean difference 0.32 ms); no request's pipeline time
-exceeded the floor. Without the floor every pair is distinguishable. With one worker at
-concurrency 32 the sent path reached about 650 ms of wall time through GIL contention while
-its pipeline time stayed under 400 ms, and the floor did not hold: the floor must exceed the
-deployment's wall-time p99 under load, which is a worker-count question. Capacity: 303
-requests/s at concurrency 32 on 4 workers with faked vendors.
+Measured with 2 workers on 2 vCPUs and 6000 requests (an earlier run with 4 workers on 4
+vCPUs gave the same picture): with the floor, no pair of outcomes is distinguishable by KS
+test (smallest p = 0.33) and every pair is equivalent within 2 ms by TOST (largest mean
+difference 0.62 ms); no request's pipeline time exceeded the floor. Without the floor every
+pair is distinguishable. With one worker at concurrency 32 the sent path reached about
+650 ms of wall time through GIL contention while its pipeline time stayed under 400 ms, and
+the floor did not hold: the floor must exceed the deployment's wall-time p99 under load,
+which is a worker-count question. Capacity: 210 requests/s at concurrency 32 on 2 workers
+with faked vendors (303 on 4). A full send costs 46 Redis round trips: 41 before delivery
+receipts, the block-test counters and the outage windows, which add a receipt write, a
+counter hash, a verdict read and two pipelined window counts.
 

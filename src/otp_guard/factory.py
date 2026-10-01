@@ -167,9 +167,25 @@ def build_pipeline(env=None):
         push = FcmPush(env["FCM_PROJECT_ID"], google_token, device_token_lookup=lambda mobile: store.get(f"push:token:{mobile}"))
         channels["push"] = push.send_push
     if providers or channels:
+        receipts_from_callback = bool(env.get("TWILIO_STATUS_CALLBACK"))
+        pipeline_ref = {}
+
         def on_result(log_id, channel, ok, detail):
             store.set(f"smslog:delivery:{log_id}", {"channel": channel, "ok": ok, "detail": str(detail)[:500]}, 30 * 86400)
+            p = pipeline_ref.get("p")
+            if p is None:
+                return
+            if not ok:
+                p.feedback.on_delivery(log_id, False)            # refused by the provider: undelivered now
+            elif not receipts_from_callback:
+                p.feedback.on_delivery(log_id, True)             # no DLR configured: accepted counts as delivered
         svc.sender = RoutingSender(providers, channels, on_result=on_result)
+        svc.sender.instant_receipts = False
+        svc.sender._pipeline_ref = pipeline_ref
+        if receipts_from_callback:
+            report.notes.append("Delivery receipts come from TWILIO_STATUS_CALLBACK: post them to /internal/delivery.")
+        else:
+            report.notes.append("No TWILIO_STATUS_CALLBACK: a send the provider accepts counts as delivered.")
         report.real["sender"] = "RoutingSender(sms=" + ",".join(providers) + "; channels=" + ",".join(channels) + ")"
         if not providers:
             report.notes.append("No SMS provider configured: SMS-tier sends will be logged as failed.")
@@ -197,4 +213,6 @@ def build_pipeline(env=None):
         report.notes.append("No SESSION_HMAC_KEY: generated a random key; sessions will not survive a restart or span instances.")
 
     pipeline = Pipeline(cfg, svc, clock, store=store, session_key=session_key)
+    if hasattr(svc.sender, "_pipeline_ref"):
+        svc.sender._pipeline_ref["p"] = pipeline         # provider results feed delivery receipts
     return pipeline, report

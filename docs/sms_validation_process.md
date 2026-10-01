@@ -117,12 +117,40 @@ a default (`results/evaluation.md`, section F).
 **Destination blocks are judged by sequential probability-ratio tests**, not by the
 shared-key thresholds above. A 10 000-number block is touched by legitimate traffic a
 fraction of a time per day, so a block with several sends is almost certainly one
-party's. Two tests, each denying the block when the likelihood ratio attacker:legitimate
+party's. Two tests, each reaching a verdict when the likelihood ratio attacker:legitimate
 exceeds 1 000: conversion (real users verify 80 %, a flooder at most 10 %: five
 unverified sends in a row give a ratio of 1 845 and a false-positive probability of
-0.2⁵ = 0.03 %), and verification speed (real users enter a code within 5 s about 0.5 %
-of the time, a machine about 90 %: three instant verifications give a ratio above
-1 000). A block denylist expires after 24 hours.
+0.2⁵ = 0.03 % per block), and verification speed (a machine enters a code within 5 s
+of delivery about 90 % of the time; real users do so whenever the OS fills the code in
+for them, which the design assumes for 20 % of verifications and which **must be set
+from the deployment's own measured distribution**: five instant verifications in a row
+give a ratio above 1 000 at that setting). The test counters restart after each verdict.
+
+**What a verdict does is graded**, because a wrong verdict on a block is a wrong verdict
+on 10 000 numbers. The first verdict makes the block's first-time clients solve an
+interactive challenge (apps: non-SMS channels) for one hour; a second verdict inside that
+hour moves them to non-SMS channels only. Clients with verified history (a fingerprint or
+a number that verified before) are never affected, so a returning user on a flagged
+block is served as usual. The earlier 24-hour denylist at Step 5 remains available as
+`block_action = deny`; it stops a challenge-solving pumper a few SMS sooner and locks
+real first-time users out of the block for a day.
+
+**Delivery receipts gate the tests.** A send resolves as *failed* only after the carrier
+confirmed delivery and the resolution timeout then passed; a send with no receipt inside
+the grace period (60 s), or a failed one, is *undelivered* and feeds neither the
+conversion ratio nor the block tests. Verification speed is clocked from the receipt, not
+from the send, so a slow route cannot make a human look like a machine. A provider with
+no delivery reports is configured as `delivery_receipts = false`, in which case the
+clock runs from the send, as in the first version of this design.
+
+**A carrier outage is not a pumper.** The tests are suspended for a carrier (prefix) for
+15 minutes when, across at least 10 of its destination blocks, either its delivery
+receipts collapse (at least half of 20 recent sends undelivered) or its *returning*
+clients stop verifying (fewer than 30 % of 10 resolved sends in half an hour). Only
+clients with verified history count toward the second signal, so an attacker cannot buy a
+suspension with a decoy flood: it would need verified accounts, and burn them. A
+colluding carrier could fake failed receipts for other people's sends to suspend the tests
+on its own prefix, at the cost of an outage alert to the operator on every such window.
 
 ```
 function conversionRatio(repKey, minSample = 20):
@@ -498,9 +526,11 @@ amount: it rations rather than separates, and below about 1.8 times the legitima
 it does not fire at all. It separates only on keys the attacker dominates. Every
 client-side key (IP, fingerprint, session) can be rotated for almost nothing, so the key
 that matters is the **destination block**: a pumper is paid only on the numbers its
-partner carrier terminates. A block that never verifies is denylisted by the feedback
-loop; a block whose codes are almost all entered within seconds is machine-verified and
-is denylisted too. A carrier that verifies with human-like delay defeats both, and turns
+partner carrier terminates. A block that never verifies reaches a verdict after five
+sends; a block whose codes are almost all entered within seconds of delivery is
+machine-verified and reaches one too. A carrier that verifies with human-like delay
+defeats both (it must verify at least 42 % of its codes to do so, each a verified fake
+account, `evaluation/model.py`), and turns
 the pumping into verified fake accounts, whose cost falls on whatever the account is for.
 The `challenge_passed` credit can be bought from a solving service; it reduces friction
 for people, it is not a defence against solvers.
@@ -652,8 +682,8 @@ function effectiveLimit(sourceLimit, period, platform, countryCode):
 
 function validateSourceRateLimit(request, limits):
     source = request.source; platform = request.trustedPlatform; cc = request.countryCode
-    if source not in limits:
-        return true
+    if source not in limits or request.tier == "downgrade":
+        return true                          // SMS caps; a non-SMS channel spends none of it
     sl = limits[source]
 
     minuteLimit = new RateLimit()
@@ -781,7 +811,11 @@ Legitimate users verify the code they asked for; flooders never do.
   reputation key attached to the send (ip, subnet, asn, fingerprint, session, country,
   prefix, number).
 - `otp_failed(logId)`: five wrong attempts. Increment `failed`.
-- `otp_timeout(logId)`: 10 minutes elapsed with no verification. Increment `failed`.
+- `otp_delivered(logId)` / `otp_undelivered(logId)`: the provider's delivery receipt. An
+  undelivered send increments `undelivered` and nothing else.
+- `otp_timeout(logId)`: the resolution timeout (2 minutes) passed after delivery with no
+  verification. Increment `failed`; the code stays valid until its 10-minute expiry and a
+  late verification is reclassified.
 
 **Derived effects:**
 

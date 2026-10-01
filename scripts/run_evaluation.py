@@ -18,13 +18,18 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from otp_guard.config import ALL_FEATURES, V1_FEATURES                                   # noqa: E402
+from otp_guard.config import ALL_FEATURES, V1_FEATURES, Config                           # noqa: E402
 from otp_guard.evaluation.calibration import CALIBRATION                                  # noqa: E402
 from otp_guard.evaluation.runner import (ATTACKERS, ADAPTIVE_ATTACKERS, MODES, SWEEP_AXES, CAP_SWEEP,   # noqa: E402
                                          PUMPING_ATTACKERS, PUMPING_VARIANTS, SPREAD_BLOCKS, SPREAD_RANGE_DIGITS,
                                          DILUTION_MULTIPLES, study_multi_seed, study_ablation, study_sweep,
                                          study_cap_sweep, study_adaptive, study_pumping, study_spread,
-                                         study_dilution, run_all, summarise, economics)
+                                         study_dilution, run_all, summarise, economics,
+                                         FP_CONVERSIONS, FP_FAST_SHARES, FP_SENDS_PER_BLOCK, block_test_false_positives,
+                                         LEGIT_ONLY_BLOCKS, LEGIT_ONLY_CONVERSIONS, LEGIT_ONLY_AUTOFILL, study_legit_only_24h,
+                                         OUTAGE_VARIANTS, study_outage, summarise_legit_only)
+from otp_guard.evaluation.calibration import legit_fast_share                             # noqa: E402
+from otp_guard.evaluation.model import sends_to_verdict, evasion_share, predicted_leak, blocks_touched   # noqa: E402
 from otp_guard.evaluation.stats import mean_ci                                            # noqa: E402
 
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7"]
@@ -69,6 +74,8 @@ def main():
     add("pumping", *study_pumping(sseeds))
     add("spread", *study_spread(sseeds))
     add("dilution", *study_dilution(list(range(3 if a.quick else 5))))
+    add("legit24h", *study_legit_only_24h(list(range(2 if a.quick else 3)), minutes=120 if a.quick else 24 * 60))
+    add("outage", *study_outage(list(range(3 if a.quick else 8))))
     print(f"{len(jobs)} runs on {a.procs or 'all'} processes", flush=True)
     t0 = time.time()
     results = run_all([j[2] for j in jobs], a.procs)
@@ -86,8 +93,13 @@ def main():
         by.setdefault(study, ([], []))
         by[study][0].append(r); by[study][1].append(idx)
 
+    cfg_default = Config()
+    cfg_default.sprt_legit_fast = max(0.005, legit_fast_share(cfg_default.fast_verify_seconds))   # as the sim sets it
+    k_conv, k_fast = sends_to_verdict(cfg_default)
     R = {"meta": {"seeds": len(seeds), "sweep_seeds": len(sseeds), "runs": len(jobs), "wall_s": wall,
-                  "calibration": CALIBRATION}}
+                  "calibration": CALIBRATION, "quick": a.quick,
+                  "model": {"k_conv": k_conv, "k_fast": k_fast, "evasion_share": evasion_share(cfg_default),
+                            "sprt_legit_fast": cfg_default.sprt_legit_fast}}}
 
     # A. multi-seed, v1 vs v2, two modes
     A = {}
@@ -135,12 +147,25 @@ def main():
     g = group(*by["spread"], lambda i: (i[0], i[1], i[2]))
     for (verify, nb, digits), rs in g.items():
         G[f"verify={verify},blocks={nb},digits={digits}"] = summarise(rs)
+        bt = blocks_touched(nb, digits)
+        G[f"verify={verify},blocks={nb},digits={digits}"]["predicted"] = mean_ci(
+            [predicted_leak(cfg_default, bt, r["spec"]["attacker"]["rate_per_min"], r["attack"]["requests"], verify > 0) for r in rs])
+        G[f"verify={verify},blocks={nb},digits={digits}"]["blocks_touched"] = bt
     R["spread"] = G
     Dl = {}
     g = group(*by["dilution"], lambda i: i[0])
     for m, rs in g.items():
         Dl[str(m)] = summarise(rs)
     R["dilution"] = Dl
+
+    # H. false positives of the block tests
+    H = {"monte_carlo": {f"{n},{p},{f}": v for (n, p, f), v in
+                         block_test_false_positives(cfg_default, trials=2_000 if a.quick else 20_000).items()}}
+    g = group(*by["legit24h"], lambda i: (i[0], i[1], i[2]))
+    H["legit_only"] = {f"blocks={b},conv={c},autofill={af}": summarise_legit_only(rs) for (b, c, af), rs in g.items()}
+    g = group(*by["outage"], lambda i: (i[0], i[1]))
+    H["outage"] = {f"{kind}|{v}": summarise_legit_only(rs) for (kind, v), rs in g.items()}
+    R["false_positives"] = H
 
     # E. economics: only pumping attackers earn; v1 vs v2 default
     E = {}
@@ -310,13 +335,13 @@ def write_markdown(R, path):
           "10-minute resolution timeout (the design as first written); the 8-digit destination-block key with sequential "
           "probability-ratio denylists; a 2-minute resolution timeout (late verifications are reclassified); both (the default); "
           "a relative baseline (recent hour versus the key's own history, which needs the long warm-up); all three.", "",
-          "| Attacker | Variant | Contained | Time to containment (min) | Steady-state leak (SMS/min) | Total leaked | Attacker verifications (verified fake accounts) | Legit delivered % | Legit challenged % | Legit refused % |",
-          "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
+          "| Attacker | Variant | Contained | Time to containment (min) | Steady-state leak (SMS/min) | Total leaked | Attacker verifications (verified fake accounts) | Blocks under verdict | Legit delivered % | Legit challenged % | Legit refused % | Legit hit by a verdict |",
+          "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for aname in PUMPING_ATTACKERS:
         for vname in PUMPING_VARIANTS:
             s = R["pumping"][aname][vname]
             L.append(f"| `{aname}` | {vname} | {s['contained_fraction']:.2f} | {ci(s['time_to_containment_min'])} | {ci(s['steady_state_leak_per_min'])} | {ci(s['leaked_total'],0)} | "
-                     f"{ci(s['attacker_verifications'],0)} | {ci(s['legit_delivered_pct'])} | {ci(s['legit_challenge_rate_pct'])} | {ci(s['legit_refusal_rate_pct'])} |")
+                     f"{ci(s['attacker_verifications'],0)} | {ci(s['block_verdicts'])} | {ci(s['legit_delivered_pct'])} | {ci(s['legit_challenge_rate_pct'])} | {ci(s['legit_refusal_rate_pct'])} | {ci(s['legit_hit_by_verdict'])} |")
     L += ["", "Attacker descriptions:", ""] + [f"- `{n}`: {a.description}" for n, a in PUMPING_ATTACKERS.items()] + [""]
 
     L += ["## G. Pumper destination spread, and the dilution curve", "",
@@ -324,13 +349,18 @@ def write_markdown(R, path):
           "Spread sweep (behavioural-only, 10 seeds): the pumper's carrier serves 3, 30 or 300 ranges of 1 000, 10 000 or 100 000 "
           "numbers; the reputation key is the 8-digit block (10 000 numbers), so 1 000-number ranges sit inside one key, 10 000-number "
           "ranges align with it, and 100 000-number ranges span ten keys each. At the far end the pumper is the diluting flooder.", "",
-          "| Carrier verifies | Ranges | Numbers per range | Distinct destinations | Total leaked | Contained | Steady-state leak (SMS/min) |",
-          "|---|---:|---:|---:|---:|---:|---:|"]
+          f"The closed-form model (`evaluation/model.py`): leak = min(N, k B + in-flight), with B the 8-digit blocks touched, "
+          f"k = {R['meta']['model']['k_conv']} sends per block for a carrier that never verifies and k = {R['meta']['model']['k_fast']} for one "
+          f"that verifies within a second (speed test calibrated to P(fast | real user) = {R['meta']['model']['sprt_legit_fast']:.3f}), and "
+          f"in-flight = rate x (resolution timeout + delivery) for the former. A carrier evades the conversion test by verifying at least "
+          f"{100 * R['meta']['model']['evasion_share']:.0f} % of its codes, at that many verified fake accounts per pumped SMS.", "",
+          "| Carrier verifies | Ranges | Numbers per range | Distinct destinations | Blocks touched | Total leaked (measured) | Model | Contained | Steady-state leak (SMS/min) |",
+          "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for verify in (0.0, 1.0):
         for nb in SPREAD_BLOCKS:
             for digits, label in SPREAD_RANGE_DIGITS.items():
                 s = R["spread"][f"verify={verify},blocks={nb},digits={digits}"]
-                L.append(f"| {'yes, within 1 s' if verify else 'no'} | {nb} | {label} | {nb * 10 ** (12 - digits):,} | {ci(s['leaked_total'],0)} | {s['contained_fraction']:.2f} | {ci(s['steady_state_leak_per_min'])} |")
+                L.append(f"| {'yes, within 1 s' if verify else 'no'} | {nb} | {label} | {nb * 10 ** (12 - digits):,} | {s['blocks_touched']} | {ci(s['leaked_total'],0)} | {s['predicted'][0]:.0f} | {s['contained_fraction']:.2f} | {ci(s['steady_state_leak_per_min'])} |")
     L += ["", "Dilution curve (behavioural-only, 60-minute attack, 5 seeds): the captcha-farm attacker at multiples of the legitimate rate. "
           "The conversion penalty starts once the attacker exceeds about 1.8x the legitimate volume on the shared keys, but starting is not separating.", "",
           "| Attack rate / legitimate rate | Requests | Leaked | Leaked % of requests | Legit delivered % | Legit challenged % | Legit refused % |",
@@ -339,6 +369,50 @@ def write_markdown(R, path):
         s = R["dilution"][str(m)]
         pct = 100 * s["leaked_total"][0] / max(s["requests"][0], 1)
         L.append(f"| {m} | {ci(s['requests'],0)} | {ci(s['leaked_total'],0)} | {pct:.0f} % | {ci(s['legit_delivered_pct'])} | {ci(s['legit_challenge_rate_pct'])} | {ci(s['legit_refusal_rate_pct'])} |")
+    L.append("")
+
+    H = R["false_positives"]
+    L += ["## H. False positives of the destination-block tests", "",
+          "The block tests were calibrated to the modelled legitimate population; this section asks what they do to real users "
+          "when the population differs, over 24 hours, and during a carrier outage. A verdict in graded mode (the default) means "
+          "the block's first-time clients must solve a challenge for an hour (a second verdict: non-SMS channels only); clients "
+          "with verified history are never affected.", "",
+          "### H1. Monte Carlo of the tests on one block seeing only legitimate traffic (one 24-hour window)", "",
+          f"Tests as deployed: P(verify | user) = {Config().sprt_legit_conversion}, P(fast | user) = {R['meta']['model']['sprt_legit_fast']:.3f} "
+          f"(5 s from delivery, 20 % autofill). Rows vary the true conversion and the true share of fast verifications. "
+          f"Cells: probability that the block reaches a verdict (by conversion / by speed).", ""]
+    for n in FP_SENDS_PER_BLOCK:
+        L += [f"{n} legitimate sends on the block per day:", "", "| True conversion | " + " | ".join(f"fast share {f:.0%}" for f in FP_FAST_SHARES) + " |",
+              "|---:|" + "---:|" * len(FP_FAST_SHARES)]
+        for pconv in FP_CONVERSIONS:
+            cells = []
+            for f in FP_FAST_SHARES:
+                v = H["monte_carlo"][f"{n},{pconv},{f}"]
+                cells.append(f"{100 * (v['never_verified'] + v['machine_verified']):.2f} % ({100 * v['never_verified']:.2f} / {100 * v['machine_verified']:.2f})")
+            L.append(f"| {pconv:.0%} | " + " | ".join(cells) + " |")
+        L.append("")
+    L += ["### H2. Twenty-four hours of legitimate traffic only, in the simulation", "",
+          f"{'Two' if R['meta']['quick'] else 'Three'} seeds per cell, 20 requests/min, {'2 hours (quick run)' if R['meta']['quick'] else '24 hours'}; legitimate numbers drawn from a fixed set of blocks so that each block "
+          "sees a realistic number of sends per day. Returning clients (20 %) carry verified history and are exempt from verdicts.", "",
+          "| Sends per block per day | True conversion | Autofill share | Legit requests | Blocks under verdict (24 h) | Real users hit by a verdict | Delivered % | Challenged % | Refused % |",
+          "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    for b, label in LEGIT_ONLY_BLOCKS.items():
+        for c in LEGIT_ONLY_CONVERSIONS:
+            for af in LEGIT_ONLY_AUTOFILL:
+                s = H["legit_only"][f"blocks={b},conv={c},autofill={af}"]
+                L.append(f"| {label} | {c:.0%} | {af:.0%} | {ci(s['legit_users'],0)} | {ci(s['block_verdicts'])} | {ci(s['legit_hit_by_verdict'])} | "
+                         f"{ci(s['legit_delivered_pct'])} | {ci(s['legit_challenge_rate_pct'])} | {ci(s['legit_refusal_rate_pct'])} |")
+    L += ["", "### H3. A 30-minute carrier outage during legitimate traffic", "",
+          "One prefix (a seventh of the traffic) stops delivering from minute 10 to 40 of a 60-minute run at 144 sends per block per day. "
+          "`failed_receipts`: the provider reports every send as failed. `silent`: the provider reports delivery and nobody receives "
+          "anything. With receipts, an undelivered send resolves as neither verified nor failed; the detector suspends the block tests "
+          "on a carrier whose delivery collapses across many blocks, or whose returning clients stop verifying across many blocks.", "",
+          "| Outage | Variant | Blocks under verdict | Real users hit by a verdict | Outage alerts | Delivered % |",
+          "|---|---|---:|---:|---:|---:|"]
+    for kind in ("failed_receipts", "silent"):
+        for v in OUTAGE_VARIANTS:
+            s = H["outage"][f"{kind}|{v}"]
+            L.append(f"| {kind} | {v} | {ci(s['block_verdicts'])} | {ci(s['legit_hit_by_verdict'])} | {ci(s['outage_alerts'])} | {ci(s['legit_delivered_pct'])} |")
     L.append("")
 
     L += ["## E. Attacker economics (20-minute window)", "",

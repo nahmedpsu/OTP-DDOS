@@ -100,9 +100,33 @@ class Config:
     sprt_threshold: float = 1000.0
     sprt_legit_conversion: float = 0.8      # P(verify | real user)
     sprt_attack_conversion: float = 0.1     # P(verify | flooder)
-    sprt_legit_fast: float = 0.005          # P(verify within fast_verify_seconds | real user)
+    sprt_legit_fast: float = 0.2            # P(verify within fast_verify_seconds of delivery | real user). Set this from
+                                            # the deployment's own measured distribution: with OS autofill (iOS AutoFill,
+                                            # Android SMS Retriever, WebOTP) a fifth or more of real users are this fast.
     sprt_attack_fast: float = 0.9           # P(verify within fast_verify_seconds | machine)
     sprt_min_events: int = 3
+    # Delivery receipts. With receipts on, a send counts as failed for reputation only after the
+    # carrier confirmed delivery and the resolution timeout then passed; a send with no receipt, or a
+    # failed one, is 'undelivered' and feeds neither the conversion ratio nor the block tests.
+    # Verification speed is clocked from the receipt, not from the send.
+    delivery_receipts: bool = True
+    receipt_grace_s: int = 60                 # a send with no receipt this long after the send is undelivered
+    # Carrier outage detector: a conversion or delivery collapse across many destination blocks of one
+    # carrier (prefix) at once is an outage, not a pumper. While it is set, block tests are suspended.
+    outage_window_s: int = 600
+    outage_min_sends: int = 20
+    outage_undelivered_ratio: float = 0.5     # undelivered share of the carrier's recent sends
+    outage_min_blocks: int = 10               # distinct blocks with a failure in the window
+    outage_kg_window_s: int = 1800            # the conversion signal needs more history: known-good clients are fewer
+    outage_min_known_good: int = 10           # resolved sends of clients with verified history in that window
+    outage_conversion: float = 0.3            # their conversion below this: delivered but not received
+    outage_ttl: int = 900
+    # What a block verdict does. 'graded': first verdict makes the block's new clients solve an
+    # interactive challenge (apps: non-SMS channels); a second verdict inside the TTL moves them to
+    # non-SMS channels only. Clients with verified history are never affected. 'deny': the earlier
+    # design, a 24-hour denylist at Step 5.
+    block_action: str = "graded"
+    block_verdict_ttl: int = 3600
     tier_bounds: tuple = (20, 40, 60, 80)
     elevated_shift: int = 10
 

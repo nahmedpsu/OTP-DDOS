@@ -56,14 +56,17 @@
 | `otp:session:*`, `otp:ip:*`, `otp:subnet:*`, `otp:asn:*`, `otp:prefix:*`, `sms_cap_*`, `send_global_sms:limit:*`, `otp:verify:session:*` | counter | fixed-window rate limits | window |
 | `nonce:*` | flag | replay protection | 10 min |
 | `fp_first_seen:*` | float | fingerprint age | 90 d |
-| `deny:*` | flag | auto-denylist for ip, subnet, asn, fp | 24 h |
+| `deny:*` | flag | auto-denylist for ip, subnet, asn, fp (and blocks in `block_action = deny`) | 24 h |
+| `sprt:block:*` | hash | sequential-test counters per destination block (v, f, fv); restart after a verdict | 24 h |
+| `verdict:block:*`, `verdict:log` | json, zset | graded verdicts per block (stage, reason), and the blocks that reached one | 1 h, 24 h |
+| `outage:<prefix>`, `outage:{delivered,undelivered,failed,kg_verified,kg_failed,blocks}:<prefix>` | json, zset | carrier outage flag and the sliding windows behind it | 15 min, 2x window |
 | `rep:<key>:<hour>` | hash | sent, verified, failed per hour | 25 h |
 | `rep:trusted` | set | numbers that verified once | none |
 | `numseq:<client key>`, `numpfx:<prefix9>` | zset | sequential and narrow-range detection | 2 × window |
 | `hlr:*`, `ipintel:*` | json | vendor lookup caches | 30 d, 1 h |
 | `num_last_send:*`, `otp:latest:<session>:<mobile>` | value | progressive backoff, session-scoped verify | 24 h, 10 min |
 | `smslog:seq`, `smslog:<id>`, `smslog:delivery:<id>` | json | audit log and delivery status | 30 d |
-| `otp:code:<id>`, `otp:timeouts` | json, zset | pending codes and their deadlines | 20 min |
+| `otp:code:<id>`, `otp:timeouts` | json, zset | pending codes (with delivery state and resolution) and their deadlines | 20 min |
 | `global:sms:count:<hour>`, `global:sms:spend:<hour>`, `otp:mode` | counter, value | circuit breaker | hour |
 | `adaptive:mult:*`, `adaptive:override:*`, `adaptive:asn:*` | float, int | adaptive limits | none |
 | `appattest:key:*`, `appattest:counter:*` | value | enrolled App Attest keys | none |

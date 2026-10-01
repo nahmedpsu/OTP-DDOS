@@ -61,3 +61,13 @@ Use the worker instead where you can.
 ## `GET /healthz`
 
 `{"status", "mode", "wiring": {"real", "fake", "notes"}}`.
+
+## `POST /internal/delivery`
+
+Delivery receipt for one send. Needs `X-Service-Credential`. Body:
+`{"log_id": 123, "delivered": true, "at": 1700000000.0}` (`at` optional, provider
+timestamp in epoch seconds). Wire the provider's status callback (Twilio `StatusCallback`
+with the message SID mapped to the log id) to a small adapter that posts here. A send
+with no receipt inside `receipt_grace_s` resolves as undelivered; see
+`docs/sms_validation_process.md`, "Delivery receipts gate the tests".
+

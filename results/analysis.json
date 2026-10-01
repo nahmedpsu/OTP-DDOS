@@ -238,7 +238,7 @@
       "last_minute_with_sms": 2,
       "sustained_rate_last_10_min": 0.0,
       "stopped_by": {
-        "step5": 540,
+        "no_channel": 540,
         "sent:sms:delay": 60
       }
     },

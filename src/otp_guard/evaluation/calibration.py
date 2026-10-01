@@ -17,10 +17,22 @@ CALIBRATION = {
         "source": "Twilio reports a 65 %+ global SMS OTP conversion rate; well-run flows sit higher. "
                   "0.80 is ASSUMED within that range. https://www.twilio.com/en-us/blog/validate-measure-success-verify-implementation"},
     "legit_verify_delay_s": {
-        "value": {"lognormal_median_s": 25, "sigma": 0.6}, "unit": "seconds from send to code entry",
-        "source": "SMS delivery is typically 2 to 5 s and 67 % of users abandon if the code takes over 30 s; "
-                  "a median of 25 s with lognormal spread is ASSUMED to match. "
+        "value": {"lognormal_median_s": 22, "sigma": 0.6}, "unit": "seconds from delivery to code entry, typed by hand",
+        "source": "67 % of users abandon if the code takes over 30 s; with delivery at a median 3 s, a median of 22 s "
+                  "from delivery (25 s from the send) with lognormal spread is ASSUMED to match. "
                   "https://www.messagecentral.com/blog/customizable-otp-timeouts"},
+    "sms_delivery_delay_s": {
+        "value": {"lognormal_median_s": 3, "sigma": 0.5}, "unit": "seconds from send to the delivery receipt",
+        "source": "SMS delivery is typically 2 to 5 s on a healthy route; median 3 s, lognormal, ASSUMED to match. "
+                  "https://www.messagecentral.com/blog/customizable-otp-timeouts"},
+    "otp_autofill_fraction": {
+        "value": 0.2, "unit": "fraction of legitimate verifications where the OS or browser fills the code in",
+        "source": "ASSUMED. iOS Security Code AutoFill, Android SMS Retriever / User Consent and the WebOTP API "
+                  "all remove the typing step; no public adoption share exists, and the false-positive study sweeps "
+                  "0 to 30 %. https://github.com/WICG/WebOTP , https://developers.google.com/identity/sms-retriever/overview"},
+    "otp_autofill_entry_delay_s": {
+        "value": {"lognormal_median_s": 2.0, "sigma": 0.5}, "unit": "seconds from delivery to code entry with autofill",
+        "source": "ASSUMED: one tap on the suggested code and one on submit; SMS Retriever can auto-submit in under a second."},
     "recaptcha_threshold": {
         "value": 0.5, "unit": "score",
         "source": "Google's documented default, https://developers.google.com/recaptcha/docs/v3"},
@@ -57,6 +69,10 @@ CALIBRATION = {
     "legit_traffic_rate_per_min": {
         "value": 20, "unit": "legitimate OTP requests per minute at the source under test",
         "source": "ASSUMED; scaled in the low-and-slow study."},
+    "legit_returning_fraction": {
+        "value": 0.2, "unit": "fraction of legitimate requests from a browser that verified a code earlier",
+        "source": "ASSUMED (re-verification on the same device: new app install, second account, login flows on the "
+                  "same source). These clients carry verified history, which the adaptive cap and the block verdicts spare."},
     "legit_fresh_fingerprint_fraction": {
         "value": 0.6, "unit": "fraction of legitimate sign-ups from a browser never seen before",
         "source": "ASSUMED (sign-up traffic is mostly new visitors)."},
@@ -65,3 +81,22 @@ CALIBRATION = {
 
 def value(key):
     return CALIBRATION[key]["value"]
+
+
+def legit_fast_share(threshold_s, autofill_fraction=None, n=200_000, seed=11):
+    """Share of legitimate verifications that land within threshold_s of the delivery receipt, under
+    the calibrated entry-delay model with autofill. This is what cfg.sprt_legit_fast must be set to
+    from the deployment's own measured distribution; the evaluation sets it from this model."""
+    import math
+    import random
+    rng = random.Random(seed)
+    af = value("otp_autofill_fraction") if autofill_fraction is None else autofill_fraction
+    typed, auto = value("legit_verify_delay_s"), value("otp_autofill_entry_delay_s")
+    fast = 0
+    for _ in range(n):
+        if rng.random() < af:
+            d = auto["lognormal_median_s"] * math.exp(rng.gauss(0, auto["sigma"]))
+        else:
+            d = typed["lognormal_median_s"] * math.exp(rng.gauss(0, typed["sigma"]))
+        fast += d < threshold_s
+    return fast / n

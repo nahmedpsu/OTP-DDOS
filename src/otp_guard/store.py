@@ -165,6 +165,10 @@ class MemoryStore:
                 z = {m: s for m, s in v[0].items() if not (lo <= s <= hi)}
                 self._put(key, z, keep_ttl_from=v)
 
+    def zcount_many(self, keys, lo, hi):
+        """Members with lo <= score <= hi, for several keys; one round trip on Redis."""
+        return [len(self.zrangebyscore(k, lo, hi)) for k in keys]
+
     # ---- sets ----
     def sadd(self, key, member):
         with self.lock:
@@ -298,6 +302,13 @@ class RedisStore:
     def zremrangebyscore(self, key, lo, hi):
         self.round_trips += 1
         self.r.zremrangebyscore(key, lo, hi)
+
+    def zcount_many(self, keys, lo, hi):
+        self.round_trips += 1
+        pipe = self.r.pipeline(transaction=False)
+        for k in keys:
+            pipe.zcount(k, lo, hi)
+        return [int(n) for n in pipe.execute()]
 
     def sadd(self, key, member):
         self.round_trips += 1
