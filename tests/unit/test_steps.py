@@ -410,13 +410,14 @@ def test_step10_breaker_moves_to_elevated_then_emergency(h):
     r = h.send(h.web_request(ip="198.53.50.1", mobile="966509999990"))
     assert h.p.mode == "elevated" and r.channel == "sms"
     assert any("elevated" in a[0] for a in h.svc.alerts.alerts)
-    h.send(h.web_request(ip="198.53.51.1", mobile="966509999991"))   # 10th SMS
-    # emergency: a clean client (score < 10) still gets SMS, anything riskier is downgraded
+    h.send(h.web_request(ip="198.53.51.1", mobile="966509999991"))   # 10th SMS: the budget is spent
+    # the hourly budget is a hard ceiling: nobody gets SMS beyond it, however clean
     clean = h.send(h.web_request(ip="198.53.52.1", mobile="966509999992"))
-    assert h.p.mode == "emergency" and clean.channel == "sms" and clean.risk_score < 10
+    assert h.p.mode == "emergency" and clean.channel is None and "budget_exhausted" in clean.signals
+    assert h.p.store.get(f"global:sms:count:{h.p.current_hour()}") == 10
     young_tok, _ = h.session(age_hours=0)
     risky = h.send(h.web_request(session=young_tok, ip="198.53.54.1", mobile="966509999994"))
-    assert risky.channel is None and risky.rejected_at == "no_channel" and risky.tier == "downgrade"
+    assert risky.channel is None and risky.rejected_at == "no_channel"
     h.clock.advance(3600)
     r = h.send(h.web_request(ip="198.53.53.1", mobile="966509999993"))
     assert h.p.mode == "normal" and r.channel == "sms"
@@ -428,9 +429,13 @@ def test_step10_spend_units_trip_breaker_before_count(h):
     # elevated prefix costs 3 units: 4 sends = 12 units >= 100%
     for i in range(4):
         h.send(h.web_request(ip=f"198.54.{i}.1", mobile=f"97159{i:07d}"))
-    young_tok, _ = h.session(age_hours=0)
-    r = h.send(h.web_request(session=young_tok, ip="198.54.9.1", mobile="966501234567"))
-    assert h.p.mode == "emergency" and r.channel is None
+    # with the hard ceiling the fourth elevated-prefix send (9 + 3 units) is refused, spend stops at 9 of 10
+    assert h.p.store.get(f"global:sms:spend:{h.p.current_hour()}") == 9 and h.p.mode == "elevated"
+    tok, _ = h.session(age_hours=3)
+    r = h.send(h.web_request(session=tok, ip="198.54.9.1", mobile="966501234567"))
+    assert r.channel == "sms"                                     # a 1-unit send still fits: 9 + 1 = 10
+    r = h.send(h.web_request(session=h.session(age_hours=3)[0], ip="198.54.10.1", mobile="966501234568"))
+    assert r.channel is None and "budget_exhausted" in r.signals  # the ceiling
 
 
 def test_step10_kill_switch(h):

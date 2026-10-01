@@ -14,6 +14,17 @@ return 1
 """
 
 # KEYS = limit keys; ARGV = max1, window1, max2, window2, ...
+# KEYS[1] = counter; ARGV = units, max_units, window. Reserve units unless that would exceed the cap.
+LUA_TRY_RESERVE = """
+local cur = redis.call('INCRBY', KEYS[1], ARGV[1])
+if cur == tonumber(ARGV[1]) then redis.call('EXPIRE', KEYS[1], ARGV[3]) end
+if cur > tonumber(ARGV[2]) then
+    redis.call('DECRBY', KEYS[1], ARGV[1])
+    return 0
+end
+return 1
+"""
+
 LUA_TRY_ACQUIRE_ALL = """
 for i = 1, #KEYS do
     local cur = tonumber(redis.call('GET', KEYS[i]) or '0')
@@ -204,6 +215,27 @@ class MemoryStore:
                     self.expire(key, window)
             return True
 
+    def try_reserve(self, key, units, max_units, window):
+        """Atomically add `units` to a capped counter; False (and nothing added) if it would exceed the cap."""
+        with self.lock:
+            cur = self.incr(key, units)
+            if cur == units:
+                self.expire(key, window)
+            if cur > max_units:
+                self.incr(key, -units)
+                return False
+            return True
+
+    def release(self, key, units=1):
+        with self.lock:
+            if self.exists(key):
+                self.incr(key, -units)
+
+    def smembers(self, key):
+        with self.lock:
+            v = self._live(key)
+            return set(v[0]) if v is not None else set()
+
 
 class RedisStore:
     """Same interface on a redis-py client. Values are JSON so dicts and floats round-trip.
@@ -214,6 +246,7 @@ class RedisStore:
         self.clock = clock or SystemClock()
         self._acquire = self.r.register_script(LUA_TRY_ACQUIRE)
         self._acquire_all = self.r.register_script(LUA_TRY_ACQUIRE_ALL)
+        self._reserve = self.r.register_script(LUA_TRY_RESERVE)
         self.round_trips = 0        # one per method call below; a pipeline counts once
 
     @staticmethod
@@ -321,6 +354,18 @@ class RedisStore:
     def try_acquire(self, key, max_count, window):
         self.round_trips += 1
         return int(self._acquire(keys=[key], args=[int(max_count), int(window)])) == 1
+
+    def try_reserve(self, key, units, max_units, window):
+        self.round_trips += 1
+        return int(self._reserve(keys=[key], args=[int(units), int(max_units), int(window)])) == 1
+
+    def release(self, key, units=1):
+        self.round_trips += 1
+        self.r.decrby(key, int(units))
+
+    def smembers(self, key):
+        self.round_trips += 1
+        return {m.decode() if isinstance(m, bytes) else m for m in self.r.smembers(key)}
 
     def try_acquire_all(self, specs):
         self.round_trips += 1

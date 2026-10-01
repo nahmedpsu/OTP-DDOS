@@ -67,7 +67,7 @@
     },
     "global_circuit_breaker": {
       "hourly_budget": 10,
-      "sms_sent": 12,
+      "sms_sent": 10,
       "mode_after_each": [
         "normal",
         "normal",
@@ -82,7 +82,7 @@
         "emergency",
         "emergency"
       ],
-      "clean_user_in_emergency": "sms",
+      "clean_user_in_emergency": null,
       "risky_user_in_emergency": null,
       "note": "At 80 % the breaker goes elevated, at 100 % emergency: clean traffic (score < 10) still gets SMS, anything riskier is downgraded."
     }

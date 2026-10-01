@@ -103,10 +103,15 @@ def build_pipeline(env=None):
     if env.get("RECAPTCHA_SECRET"):
         from .providers.recaptcha import GoogleRecaptcha
         svc.recaptcha = GoogleRecaptcha(env["RECAPTCHA_SECRET"], expected_action=env.get("RECAPTCHA_ACTION"),
-                                        expected_hostnames=_csv(env.get("RECAPTCHA_HOSTNAMES")))
+                                        expected_hostnames=_csv(env.get("RECAPTCHA_HOSTNAMES")),
+                                        challenge_secret=env.get("RECAPTCHA_CHALLENGE_SECRET"))
         report.real["recaptcha"] = "GoogleRecaptcha"
     else:
         report.fake.append("recaptcha")
+        if env.get("FAKE_RECAPTCHA_SCORES"):            # load tests only: "token:score,token:score"
+            for item in env["FAKE_RECAPTCHA_SCORES"].split(","):
+                tok, score = item.split(":")
+                svc.recaptcha.scores[tok.strip()] = float(score)
 
     # ---- attestation ----
     from .providers.attestation import (AppAttestKeyStore, AppAttestVerifier, CompositeAttestationVerifier,

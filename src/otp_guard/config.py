@@ -44,6 +44,16 @@ ALL_FEATURES = frozenset({
 })
 # Evaluated but not a default: it needs hours of per-key history (see results/evaluation.md, section F).
 OPTIONAL_FEATURES = frozenset({"relative_baseline"})
+# Baseline designs the evaluation compares against (docs/evaluation.md, "Baselines"):
+BASELINE_DESIGNS = {
+    "v1": frozenset(),                                                    # header-trusted platform, static caps
+    "v1_corrected": frozenset({"attestation"}),                           # v1 with trusted platform handling
+    "budget_only": frozenset({"attestation", "session", "circuit_breaker"}),   # static caps and a hard budget, no scoring
+    "block_limit_only": frozenset({"attestation", "session", "block_count_limit"}),  # a per-block daily count, no scoring
+    "conversion_only": frozenset(ALL_FEATURES),                           # v2 with the speed test off (cfg.block_tests)
+    "speed_only": frozenset(ALL_FEATURES),                                # v2 with the conversion test off
+}
+BASELINE_CFG = {"conversion_only": {"block_tests": ("conversion",)}, "speed_only": {"block_tests": ("speed",)}}
 V1_FEATURES = frozenset()   # the v1 design: header-trusted platform, IP cap, reCAPTCHA, country, text, 1/min, static source caps
 
 
@@ -105,6 +115,12 @@ class Config:
                                             # Android SMS Retriever, WebOTP) a fifth or more of real users are this fast.
     sprt_attack_fast: float = 0.9           # P(verify within fast_verify_seconds | machine)
     sprt_min_events: int = 3
+    block_test: str = "cusum"               # 'cusum': evidence against the attacker hypothesis is floored at zero, so a
+                                            # block cannot bank goodwill (a trust-building carrier); 'sprt': plain cumulative
+    block_tests: tuple = ("conversion", "speed")
+    block_count_limit: tuple = (5, 86400)   # the 'block_limit_only' baseline: sends per destination block per day
+    budget_hard_ceiling: bool = True        # no SMS at all beyond the hourly budget; reserved atomically before sending
+    sms_text_template: str = "Your verification code is {code}"
     # Delivery receipts. With receipts on, a send counts as failed for reputation only after the
     # carrier confirmed delivery and the resolution timeout then passed; a send with no receipt, or a
     # failed one, is 'undelivered' and feeds neither the conversion ratio nor the block tests.

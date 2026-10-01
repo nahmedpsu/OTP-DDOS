@@ -48,6 +48,7 @@ class Request:
     timings_ms: dict = field(default_factory=dict)
     rep_cache: dict = field(default_factory=dict)
     rep_split: dict = field(default_factory=dict)
+    number_claims: list = field(default_factory=list)
     risk_score: float = None
     tier: str = None
     requires_challenge: bool = False
@@ -342,6 +343,10 @@ class Pipeline:
         # 5b prefix cost class
         prefix = self.svc.prefixes.lookup(mobile)
         req.prefix = prefix
+        if self.on("block_count_limit"):
+            # baseline design: a flat per-block daily count, no scoring, no feedback
+            if not self.rl("otp:blockcount", mobile[:self.cfg.destination_block_digits], self.cfg.block_count_limit).try_acquire():
+                return False
         if self.on("fine_destination_key") and self.on("feedback") and self.cfg.block_action == "deny" \
                 and self.store.exists("deny:" + self.block_key(mobile)):
             req.signals.append("block_denied")        # a destination block under a hard-deny verdict
@@ -470,7 +475,7 @@ class Pipeline:
         return "allow"
 
     def step7_risk(self, req):
-        if req.challenge_proof and req.challenge_proof in self.svc.recaptcha.scores:
+        if req.challenge_proof and self.svc.recaptcha.verify_challenge(req.challenge_proof):
             req.signals.append("challenge_passed")
         if not self.on("risk_engine"):
             req.risk_score, req.tier = 0.0, "allow"
@@ -512,26 +517,45 @@ class Pipeline:
 
     # ---------- Step 8 ----------
     def step8_per_number(self, req):
-        sends = self.rep_get(req, "num:" + req.mobile).sent
+        """Claims the number's window and daily slot atomically (SETNX with the window as TTL, and a
+        capped counter), so two concurrent requests for one number cannot both pass. A later step
+        that refuses the request releases the claim (release_number_claims)."""
+        sends = self.rep_get(req, "num:" + req.mobile).sent          # sends so far; this one would be sends + 1
         base, cap = self.cfg.per_number_base_window, self.cfg.per_number_max_window
-        if self.on("backoff"):
-            if sends >= self.cfg.per_number_daily_cap:
-                return False
-            window = min(base * 2 ** max(sends - 1, 0), cap) if sends > 0 else base
-        else:
-            window = base
-        # A shrinking or growing window must apply to the existing key, so refresh its TTL
-        # relative to the last send rather than trusting the TTL set at that send.
-        last = self.store.get("num_last_send:" + req.mobile)
-        if last is not None and self.clock.now() - float(last) < window:
+        # the claim carries the window that applies after this send: 60 s after the first, 120 after the second...
+        window = min(base * 2 ** sends, cap) if self.on("backoff") else base
+        if not self.store.setnx("num_window:" + req.mobile, self.clock.now(), int(window)):
             return False
+        req.number_claims.append(("num_window:" + req.mobile, None))
+        if self.on("backoff"):
+            daily = "num_daily:" + req.mobile
+            if not self.store.try_reserve(daily, 1, self.cfg.per_number_daily_cap, 86400):
+                self.release_number_claims(req)
+                return False
+            req.number_claims.append((daily, 1))
         return True
+
+    def release_number_claims(self, req):
+        for key, units in req.number_claims:
+            if units is None:
+                self.store.delete(key)
+            else:
+                self.store.release(key, units)
+        req.number_claims = []
 
     # ---------- Step 9 ----------
     def is_known_good(self, req):
         """A client that has verified a code before: its fingerprint has verified history or the
         number is trusted. A low risk score alone is not enough; an attacker can buy that."""
         return self.rep_get(req, "fp:" + req.fingerprint).verified > 0 or self.rep.is_trusted("num:" + req.mobile)
+
+    def record_volume(self, source, platform, cc):
+        """Per-minute count of requests that reached the source cap; the worker's baseline job reads it."""
+        minute = int(self.clock.now() // 60)
+        k = f"{source}|{platform}|{cc}"
+        self.store.incr(f"vol:{k}:{minute}")
+        self.store.expire(f"vol:{k}:{minute}", 2 * 86400)
+        self.store.sadd("vol:keys", k)
 
     def effective_limit(self, source, sl, period, platform, cc, known_good=False):
         base = sl.get("per_country", {}).get(cc, {}).get(f"{period}_{platform}")
@@ -549,6 +573,7 @@ class Pipeline:
         if sl is None or req.tier == "downgrade":
             return True                      # the source caps are SMS caps; a non-SMS channel spends none of it
         p, cc = req.trusted_platform, req.country_code
+        self.record_volume(req.source, p, cc)
         kg = self.is_known_good(req)
         minute_cap = self.effective_limit(req.source, sl, "per_minute", p, cc, kg)
         hour_cap = self.effective_limit(req.source, sl, "per_hour", p, cc, kg)
@@ -596,14 +621,40 @@ class Pipeline:
             return "silent_auth"
         return None
 
+    def reserve_budget(self, req):
+        """Atomic reservation against the hourly count and spend budgets. With the hard ceiling on,
+        a send that would exceed either budget is not made."""
+        h = self.current_hour()
+        cfg = self.cfg
+        if not cfg.budget_hard_ceiling:
+            self.store.incr(f"global:sms:count:{h}"); self.store.expire(f"global:sms:count:{h}", 7200)
+            self.store.incr(f"global:sms:spend:{h}", req.prefix.cost_units); self.store.expire(f"global:sms:spend:{h}", 7200)
+            return True
+        if not self.store.try_reserve(f"global:sms:count:{h}", 1, cfg.global_sms_per_hour, 7200):
+            return False
+        if not self.store.try_reserve(f"global:sms:spend:{h}", req.prefix.cost_units, cfg.global_spend_units_per_hour, 7200):
+            self.store.release(f"global:sms:count:{h}", 1)
+            return False
+        return True
+
     def step11_log_and_send(self, req):
         channel = self.select_channel(req)
+        if channel == "sms" and not self.reserve_budget(req):
+            req.tier = "downgrade"                     # over the hard ceiling: never SMS
+            req.signals.append("budget_exhausted")
+            channel = self.select_channel(req)
         if channel is None:
+            self.release_number_claims(req)
             return Response(200, dict(UNIFORM_BODY), rejected_at="no_channel", tier=req.tier, risk_score=req.risk_score)
         log_id = self.sms_history.next_id()
+        code = self.feedback.new_code()
+        template = req.text if "{code}" in (req.text or "") else (req.text or self.cfg.sms_text_template)
+        if "{code}" not in template:
+            template = template.rstrip() + " {code}"
+        message = template.replace("{code}", code)
         record = {
             "log_id": log_id, "source": req.source, "phone_number": req.mobile,
-            "headers": json.dumps(req.headers), "content": req.text,
+            "headers": json.dumps(req.headers), "content": template,      # the template; the code is never logged in clear
             "sms_provider": self.cfg.provider if channel == "sms" else None,
             "channel": channel, "trusted_platform": req.trusted_platform,
             "risk_score": req.risk_score, "signals": list(req.signals), "tier": req.tier,
@@ -617,20 +668,17 @@ class Pipeline:
 
         delay = 0
         if channel == "sms":
-            h = self.current_hour()
-            self.store.incr(f"global:sms:count:{h}")
-            self.store.incr(f"global:sms:spend:{h}", req.prefix.cost_units)
             if req.tier == "delay":
                 delay = min(5 * 2 ** self.previous_session_requests(req.session_id), 60)
-            self.svc.sender.enqueue("sms", req.mobile, req.text, log_id, delay, self.cfg.provider)
+            self.svc.sender.enqueue("sms", req.mobile, message, log_id, delay, self.cfg.provider)
         else:
-            self.svc.sender.enqueue(channel, req.mobile, req.text, log_id, 0)
+            self.svc.sender.enqueue(channel, req.mobile, message, log_id, 0)
 
         for key in record["reputation_keys"]:
             self.rep.incr(key, "sent")
         self.store.set("num_last_send:" + req.mobile, self.clock.now(), 86400)
         self.store.set(f"otp:latest:{req.session_id}:{req.mobile}", log_id, self.cfg.otp_ttl)
-        self.feedback.on_sent(log_id)
+        self.feedback.on_sent(log_id, code)
         if self.cfg.delivery_receipts and getattr(self.svc.sender, "instant_receipts", False):
             self.feedback.on_delivery(log_id, True)   # a fake or receipt-less provider: delivered on send
         return Response(200, dict(UNIFORM_BODY), tier=req.tier, channel=channel, log_id=log_id, risk_score=req.risk_score)
@@ -694,6 +742,7 @@ class Pipeline:
         if not self._timed(req, "step8", self.step8_per_number):
             return reject("step8")
         if not self._timed(req, "step9", self.step9_source_limits):
+            self.release_number_claims(req)
             return reject("step9")
         self._timed(req, "step10", self.step10_circuit_breaker)
         return finish(self._timed(req, "step11", self.step11_log_and_send))

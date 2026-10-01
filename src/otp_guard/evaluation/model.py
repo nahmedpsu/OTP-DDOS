@@ -44,5 +44,7 @@ def predicted_leak(cfg, blocks_touched, rate_per_min, requests, verifying, deliv
 
 
 def blocks_touched(n_ranges, range_digits, key_digits=8):
-    """Distinct key blocks a pumper touches with n ranges of 10^(12 - range_digits) numbers."""
+    """Nominal distinct key blocks for n distinct ranges of 10^(12 - range_digits) numbers. The
+    evaluation reports and uses the observed count of blocks actually requested instead, since a
+    finite attack does not touch every block of a wide range."""
     return n_ranges * max(1, 10 ** (key_digits - range_digits))

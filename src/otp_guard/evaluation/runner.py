@@ -6,7 +6,7 @@ import multiprocessing as mp
 import random
 from dataclasses import replace
 
-from ..config import ALL_FEATURES, V1_FEATURES, OPTIONAL_FEATURES
+from ..config import ALL_FEATURES, V1_FEATURES, OPTIONAL_FEATURES, BASELINE_DESIGNS, BASELINE_CFG
 from .calibration import value as cal
 from .sim import AttackerSpec, LegitSpec, SimSpec, run_sim
 from .stats import mean_ci
@@ -32,7 +32,7 @@ ATTACKERS = {
                                        numbers="sequential", captcha_beta=tuple(BOT_CAPTCHA["captcha_farm"])),
     "premium_pumping": AttackerSpec("premium_pumping", "Residential pool, premium-rate prefix", numbers="premium",
                                     captcha_beta=tuple(BOT_CAPTCHA["captcha_farm"]), earns_revenue=True),
-    "spoofed_platform": AttackerSpec("spoofed_platform", "Residential pool, HTTP_PLATFORM: ios without attestation",
+    "spoofed_platform": AttackerSpec("spoofed_platform", "Residential pool, HTTP_PLATFORM: ios without attestation; valid host and session (only the header is spoofed)",
                                      platform_spoof=True, captcha_beta=tuple(BOT_CAPTCHA["captcha_farm"])),
 }
 
@@ -53,6 +53,16 @@ ADAPTIVE_ATTACKERS = {
     "low_and_slow_20_asns": AttackerSpec("low_and_slow_20_asns",
         "2 requests/min spread over 20 residential ASNs, aged fingerprints, under legitimate volume",
         network="multi_asn", n_asns=20, rate_per_min=2.0, fp_mode="aged", captcha_beta=(9, 1.5)),
+    "trust_building_pumper": AttackerSpec("trust_building_pumper",
+        "Builds trust first: 500 identities and numbers verify everything (human-like delay) for 10 minutes, then the same "
+        "identities flood without verifying, so verified-history exemptions and trusted numbers work in its favour",
+        fp_mode="aged", captcha_beta=(9, 1.5), trust_building_minutes=10, trust_pool=500, verify_fraction=0.0, earns_revenue=True),
+    "receipt_faking_carrier": AttackerSpec("receipt_faking_carrier",
+        "Concentrated pumper whose carrier reports every delivery as failed: the sends are billed but feed no block test",
+        numbers="concentrated", n_blocks=3, fp_mode="aged", captcha_beta=(9, 1.5), fake_failed_receipts=True, earns_revenue=True),
+    "block_poisoner": AttackerSpec("block_poisoner",
+        "Floods the destination blocks that real users concentrate on, to get them a verdict (collateral-damage attack)",
+        numbers="poison", fp_mode="aged", captcha_beta=(9, 1.5)),
     "low_and_slow_below_dilution": AttackerSpec("low_and_slow_below_dilution",
         "10 requests/min over 20 ASNs against 20/min legitimate: under the 1.8x dilution bound",
         network="multi_asn", n_asns=20, rate_per_min=10.0, fp_mode="aged", captcha_beta=(9, 1.5)),
@@ -118,28 +128,58 @@ def summarise(results):
         "steady_state_leak_per_min": mean_ci(col(("attack", "steady_state_leak_per_min"))),
         "attacker_cost_usd": mean_ci(col(("attack", "cost_usd"))),
         "requests": mean_ci(col(("attack", "requests"))),
+        "time_to_containment_if_contained_min": mean_ci([t for t in ttc if t is not None]),
+        "legit_dispatched_pct": mean_ci(col(("friction", "dispatched_pct"))),
         "legit_delivered_pct": mean_ci(col(("friction", "delivered_pct"))),
+        "legit_completed_pct": mean_ci(col(("friction", "completed_pct"))),
         "legit_challenge_rate_pct": mean_ci(col(("friction", "challenge_rate_pct"))),
         "legit_refusal_rate_pct": mean_ci(col(("friction", "refusal_rate_pct"))),
         "legit_mean_added_delay_s": mean_ci(col(("friction", "mean_added_delay_s"))),
+        "first_time_refusal_rate_pct": mean_ci(col(("friction", "first_time", "refusal_rate_pct"))),
+        "first_time_delivered_pct": mean_ci(col(("friction", "first_time", "delivered_pct"))),
+        "first_time_challenge_rate_pct": mean_ci(col(("friction", "first_time", "challenge_rate_pct"))),
+        "returning_refusal_rate_pct": mean_ci(col(("friction", "returning", "refusal_rate_pct"))),
+        "returning_delivered_pct": mean_ci(col(("friction", "returning", "delivered_pct"))),
+        "returning_users": mean_ci(col(("friction", "returning", "users"))),
+        "attacker_session_attempts": mean_ci(col(("attacker_session_attempts",))),
+        "attacker_sessions_refused": mean_ci(col(("attacker_sessions_refused",))),
+        "attacker_blocks_requested": mean_ci(col(("attacker_blocks_requested",))),
+        "attacker_blocks_leaked": mean_ci(col(("attacker_blocks_leaked",))),
         "attacker_verifications": mean_ci(col(("attacker_verifications",))),
         "attacker_challenges_solved": mean_ci(col(("attacker_challenges_solved",))),
         "block_verdicts": mean_ci(col(("block_verdicts",))),
         "legit_hit_by_verdict": mean_ci(col(("legit_hit_by_verdict",))),
+        "legit_hit_by_verdict_pct": mean_ci([100.0 * r["legit_hit_by_verdict"] / max(r["friction"]["users"], 1) for r in results]),
     }
 
 
 MODES = {"behavioural_only": True, "with_adaptive_caps": False}     # name -> caps_lifted
 
+DESIGNS = dict(BASELINE_DESIGNS, v2=ALL_FEATURES)    # every design the main study runs
 
-def study_multi_seed(seeds, features=ALL_FEATURES, attackers=None, minutes=20, modes=MODES):
+
+def study_multi_seed(seeds, features=ALL_FEATURES, attackers=None, minutes=20, modes=MODES, design="v2"):
     specs, index = [], []
+    cfg = BASELINE_CFG.get(design, {})
     for mode, lifted in modes.items():
         for name, a in (attackers or ATTACKERS).items():
             for s in seeds:
-                specs.append(SimSpec(attacker=randomised(a, s), minutes=minutes, features=features, caps_lifted=lifted, seed=s))
+                specs.append(SimSpec(attacker=randomised(a, s), minutes=minutes, features=features, caps_lifted=lifted,
+                                     cfg_overrides=dict(cfg), seed=s))
                 index.append((mode, name, s))
     return specs, index
+
+
+def paired_difference(results_a, results_b, path):
+    """Mean and CI of per-seed differences a - b (same seeds, same offered workload)."""
+    def get(r):
+        v = r
+        for p in path:
+            v = v[p]
+        return v
+    by_seed_b = {r["spec"]["seed"]: get(r) for r in results_b}
+    diffs = [get(r) - by_seed_b[r["spec"]["seed"]] for r in results_a if r["spec"]["seed"] in by_seed_b]
+    return mean_ci(diffs)
 
 
 def study_ablation(seeds, attackers=None, minutes=20, caps_lifted=False):
@@ -234,6 +274,20 @@ def study_dilution(seeds, minutes=60):
 
 
 CAP_SWEEP = {"adaptive_floor": [0.1, 0.25, 0.5, 1.0], "base_cap_multiple": [1.5, 2.0, 3.0, 5.0]}
+CADENCES = {"every minute (worker default)": 60, "every 10 minutes": 600, "hourly": 3600}
+
+
+def study_cadence(seeds, attacker_names=("residential_captcha_farm", "residential_bot", "sequential_numbers"), minutes=20):
+    """The adaptive controller at the worker's cadence versus slower ones: a 20-minute attack seen by
+    an hourly job is a static cap."""
+    specs, index = [], []
+    for name in attacker_names:
+        for cname, tick in CADENCES.items():
+            for s in seeds:
+                specs.append(SimSpec(attacker=randomised(ATTACKERS[name], s), minutes=minutes, caps_lifted=False,
+                                     adaptive_tick_s=tick, seed=s))
+                index.append((name, cname, s))
+    return specs, index
 
 
 def study_cap_sweep(seeds, attacker_names=("residential_captcha_farm", "residential_bot"), minutes=20):
@@ -253,7 +307,7 @@ SWEEP_AXES = {
     "conversion_weight": [0, 10, 25, 40],
     "fresh_fp_weight": [0, 10, 20, 30, 40],
     "flood_points": [0, 15, 30],
-    "otp_ttl_s": [120, 300, 600],
+    "resolution_timeout_s": [60, 120, 300, 600],
 }
 
 
@@ -267,8 +321,8 @@ def sweep_spec(base: AttackerSpec, axis, val, seed, minutes=20):
         w["fresh_fp_5min"], w["fresh_fp_1h"] = val, val // 2
     elif axis == "flood_points":
         cfg["conversion_flood_points"] = val
-    elif axis == "otp_ttl_s":
-        cfg["otp_ttl"] = val
+    elif axis == "resolution_timeout_s":
+        cfg["resolution_timeout_s"] = val
     return SimSpec(attacker=randomised(base, seed), minutes=minutes, cfg_overrides=cfg, weight_overrides=w, seed=seed)
 
 
@@ -288,8 +342,10 @@ def study_adaptive(seeds, minutes=20, modes=MODES):
     for mode, lifted in modes.items():
         for name, a in ADAPTIVE_ATTACKERS.items():
             for s in seeds:
-                specs.append(SimSpec(attacker=a if a.network == "multi_asn" else randomised(a, s), minutes=minutes,
-                                     caps_lifted=lifted, seed=s))
+                legit = LegitSpec(blocks=20) if a.numbers == "poison" else LegitSpec()   # the poisoner needs shared blocks
+                specs.append(SimSpec(attacker=a if a.network == "multi_asn" else randomised(a, s), legit=legit,
+                                     minutes=minutes, caps_lifted=lifted, seed=s,
+                                     warmup_minutes=30 if a.trust_building_minutes else 10))
                 index.append((mode, name, s))
     return specs, index
 
@@ -362,19 +418,24 @@ LEGIT_ONLY_CONVERSIONS = [0.8, 0.65]
 LEGIT_ONLY_AUTOFILL = [0.0, 0.2, 0.3]
 
 
+LEGIT_ONLY_CALIBRATION = {"fixed (deployed calibration)": False, "recalibrated to this population": True}
+
+
 def study_legit_only_24h(seeds, minutes=24 * 60):
     """Twenty-four hours of legitimate traffic only, at realistic sends per destination block, over
     the conversion and autofill shares the tests might meet: how many blocks reach a verdict and how
-    many real users that touches."""
+    many real users that touches. Run twice: with the speed test's legitimate-fast rate fixed at the
+    deployed calibration (robustness to a wrong assumption) and recalibrated to the population."""
     specs, index = [], []
-    for blocks in LEGIT_ONLY_BLOCKS:
-        for conv in LEGIT_ONLY_CONVERSIONS:
-            for af in LEGIT_ONLY_AUTOFILL:
-                for s in seeds:
-                    legit = LegitSpec(conversion=conv, autofill_fraction=af, blocks=blocks)
-                    specs.append(SimSpec(attacker=ATTACKERS["naive_single_client"], legit=legit, legit_only=True,
-                                         minutes=minutes, warmup_minutes=0, caps_lifted=True, seed=s))
-                    index.append((blocks, conv, af, s))
+    for calib, recal in LEGIT_ONLY_CALIBRATION.items():
+        for blocks in LEGIT_ONLY_BLOCKS:
+            for conv in LEGIT_ONLY_CONVERSIONS:
+                for af in LEGIT_ONLY_AUTOFILL:
+                    for s in seeds:
+                        legit = LegitSpec(conversion=conv, autofill_fraction=af, blocks=blocks)
+                        specs.append(SimSpec(attacker=ATTACKERS["naive_single_client"], legit=legit, legit_only=True,
+                                             minutes=minutes, warmup_minutes=0, caps_lifted=True, seed=s, recalibrate_speed=recal))
+                        index.append((calib, blocks, conv, af, s))
     return specs, index
 
 

@@ -22,10 +22,15 @@ class FeedbackLoop:
         return f"otp:code:{log_id}"
 
     # ---- send side ----
-    def on_sent(self, log_id):
+    @staticmethod
+    def new_code():
+        return f"{secrets.randbelow(10**4):04d}"
+
+    def on_sent(self, log_id, code):
+        """Called after the message carrying `code` was handed to the sender."""
         cfg = self.p.cfg
         now = self.p.clock.now()
-        self.p.store.set(self._key(log_id), {"code": f"{secrets.randbelow(10**4):04d}", "attempts": 0,
+        self.p.store.set(self._key(log_id), {"code": code, "attempts": 0,
                                              "expires": now + cfg.otp_ttl, "done": False, "timed_out": False,
                                              "resolution": None, "delivery": None, "delivered_at": None},
                          cfg.otp_ttl * 2)
@@ -123,6 +128,8 @@ class FeedbackLoop:
         cfg = self.p.cfg
         before = self.p.store.get(self._key(log_id)) or {}
         entry = self._finish(log_id)
+        if entry is None:
+            return                                            # already closed: a duplicate callback
         earlier = before.get("resolution")                   # already counted: reclassify
         clock_from = before.get("delivered_at") if (cfg.delivery_receipts and before.get("delivered_at") is not None) \
             else float(rec.get("sent_at", 0))
@@ -142,7 +149,11 @@ class FeedbackLoop:
 
     def on_failed_or_timeout(self, log_id, keep_code=False):
         rec = self.p.sms_history[log_id]
-        self._finish(log_id, resolution="failed" if keep_code else None)
+        before = self.p.store.get(self._key(log_id)) or {}
+        if before.get("resolution"):
+            return                                            # already resolved: a duplicate timeout
+        if self._finish(log_id, resolution="failed" if keep_code else None) is None:
+            return
         cfg = self.p.cfg
         self._outage_record(rec, "kg_failed" if rec.get("known_good") else "failed", self.p.clock.now())
         suspended = self._outage_active(rec)
@@ -212,33 +223,54 @@ class FeedbackLoop:
         return self.p.store.exists(f"outage:{self._carrier(rec)}")
 
     # ---- destination-block tests ----
+    def _increments(self):
+        cfg = self.p.cfg
+        return {"verify": math.log(cfg.sprt_attack_conversion / cfg.sprt_legit_conversion),
+                "fail": math.log((1 - cfg.sprt_attack_conversion) / (1 - cfg.sprt_legit_conversion)),
+                "fast": math.log(cfg.sprt_attack_fast / cfg.sprt_legit_fast),
+                "slow": math.log((1 - cfg.sprt_attack_fast) / (1 - cfg.sprt_legit_fast))}
+
     def _block_event(self, key, verified, fast=False, undo=False):
         """One resolved send on a destination block, fed to the sequential tests. Counters live apart
-        from the reputation hash so that a verdict restarts them and an outage leaves them untouched."""
+        from the reputation hash so that a verdict restarts them and an outage leaves them untouched.
+        In 'cusum' mode the two statistics are floored at zero after every event (Page's CUSUM), so a
+        block cannot bank goodwill with verified sends and spend it later; in 'sprt' mode the
+        statistics are plain cumulative log-likelihood ratios."""
         cfg = self.p.cfg
         if "feedback" not in cfg.features:
             return
         skey = "sprt:" + key
+        inc = self._increments()
+        stat = self.p.store.get("cusum:" + key) or {"conv": 0.0, "speed": 0.0}
         if verified:
             self.p.store.hincrby(skey, "v", 1, ttl=cfg.denylist_ttl)
+            stat["conv"] += inc["verify"]
             if fast:
                 self.p.store.hincrby(skey, "fv", 1, ttl=cfg.denylist_ttl)
+                stat["speed"] += inc["fast"]
+            else:
+                stat["speed"] += inc["slow"]
             if undo:
                 self.p.store.hincrby(skey, "f", -1, ttl=cfg.denylist_ttl)
+                stat["conv"] -= inc["fail"]
         else:
             self.p.store.hincrby(skey, "f", 1, ttl=cfg.denylist_ttl)
+            stat["conv"] += inc["fail"]
+        if cfg.block_test == "cusum":
+            stat["conv"], stat["speed"] = max(0.0, stat["conv"]), max(0.0, stat["speed"])
+        self.p.store.set("cusum:" + key, stat, cfg.denylist_ttl)
         self._sprt_block(key)
 
     def block_llr(self, key):
-        """(conversion LLR, speed LLR, counts) for a block from its sequential-test counters."""
+        """(conversion statistic, speed statistic, counts) for a block."""
         cfg = self.p.cfg
         c = self.p.store.hgetall("sprt:" + key)
         v, f, fv = max(c.get("v", 0), 0), max(c.get("f", 0), 0), max(c.get("fv", 0), 0)
-        conv = v * math.log(cfg.sprt_attack_conversion / cfg.sprt_legit_conversion) + \
-            f * math.log((1 - cfg.sprt_attack_conversion) / (1 - cfg.sprt_legit_conversion))
-        speed = fv * math.log(cfg.sprt_attack_fast / cfg.sprt_legit_fast) + \
-            (v - fv) * math.log((1 - cfg.sprt_attack_fast) / (1 - cfg.sprt_legit_fast))
-        return conv, speed, (v, f, fv)
+        if cfg.block_test == "cusum":
+            stat = self.p.store.get("cusum:" + key) or {"conv": 0.0, "speed": 0.0}
+            return stat["conv"], stat["speed"], (v, f, fv)
+        inc = self._increments()
+        return v * inc["verify"] + f * inc["fail"], fv * inc["fast"] + (v - fv) * inc["slow"], (v, f, fv)
 
     def _sprt_block(self, key):
         """Sequential probability-ratio tests on a destination block. Two hypothesis pairs:
@@ -248,11 +280,13 @@ class FeedbackLoop:
         cfg = self.p.cfg
         conv, speed, (v, f, fv) = self.block_llr(key)
         thr = math.log(cfg.sprt_threshold)
-        hit = (v + f >= cfg.sprt_min_events and conv > thr) or (v >= cfg.sprt_min_events and speed > thr)
-        if not hit:
+        conv_hit = "conversion" in cfg.block_tests and v + f >= cfg.sprt_min_events and conv > thr
+        speed_hit = "speed" in cfg.block_tests and v >= cfg.sprt_min_events and speed > thr
+        if not (conv_hit or speed_hit):
             return
         self.p.store.delete("sprt:" + key)                   # the next test starts from zero
-        reason = "never_verified" if conv > thr else "machine_verified"
+        self.p.store.delete("cusum:" + key)
+        reason = "never_verified" if conv_hit else "machine_verified"
         self.p.store.zadd(self.VERDICT_LOG, self.p.clock.now(), key, ttl=cfg.denylist_ttl)   # for dashboards and audits
         if cfg.block_action == "deny":
             self.p.store.set("deny:" + key, reason, cfg.denylist_ttl)

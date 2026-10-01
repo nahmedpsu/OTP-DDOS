@@ -114,8 +114,13 @@ resolved sends of history on the key and so cannot act in the first hours of a k
 life; in the evaluation it adds nothing on top of the destination-block key, and it is not
 a default (`results/evaluation.md`, section F).
 
-**Destination blocks are judged by sequential probability-ratio tests**, not by the
-shared-key thresholds above. A 10 000-number block is touched by legitimate traffic a
+**Destination blocks are judged by sequential tests of the CUSUM form**, not by the
+shared-key thresholds above. Each block keeps two statistics, conversion and verification
+speed, that accumulate the log-likelihood ratio of each resolved send and are floored at
+zero after every event (Page's CUSUM), so a block cannot bank goodwill: a carrier that
+verifies a hundred codes and then stops is caught after the same five unverified sends as
+one that never verified. (The plain cumulative SPRT, kept as `block_test = "sprt"` for
+comparison, would need 143 more failures after that history.) A 10 000-number block is touched by legitimate traffic a
 fraction of a time per day, so a block with several sends is almost certainly one
 party's. Two tests, each reaching a verdict when the likelihood ratio attacker:legitimate
 exceeds 1 000: conversion (real users verify 80 %, a flooder at most 10 %: five
@@ -645,15 +650,27 @@ multiplied by an **adaptive multiplier** in the range 0.25 to 1.5 produced by th
 baseline job (the multiplier and the known-good exemption below are v2 behaviour behind
 the `adaptive_caps` flag; v1 had static caps, and the evaluation runs v1 that way):
 
-- Every hour, compute the expected volume for each (source, platform, country,
-  hour-of-day, day-of-week) from the last 4 weeks (median and MAD).
+- The worker runs the job every minute (`otp_guard.baseline.BaselineJob`): the observed
+  volume is the last minute's count of requests that reached the cap, recorded by Step 9;
+  the expected volume for each (source, platform, country) is the median per-minute rate
+  for this hour of the week over the last 4 weeks, with its MAD, learned by the same job
+  from those counters (until two weekly samples exist, the trailing 24-hour mean stands in).
+  The evaluation runs the job at this cadence and also at 10-minute and hourly cadences
+  (`results/evaluation.md`, B2).
 - Multiplier rises toward 1.5 when the key's conversion ratio is healthy (≥ 0.5) and
   traffic is within 2 MAD of expected.
 - Multiplier falls toward 0.25 when traffic exceeds expected by more than 3 MAD or the
   key's conversion ratio drops below 0.3.
 - Marketing calendar entries override the multiplier upward for planned campaigns.
 
-Both windows are checked before either counter is consumed.
+Both windows are checked before either counter is consumed. The per-number controls of
+Step 8 are atomic too: the request claims the number's window with `SETNX` (TTL = the
+window that applies after this send) and a slot in the capped daily counter; a later step
+that refuses the request releases both. Two concurrent requests for one number cannot both
+pass. What is *not* one operation is the sequence of steps itself: the atomic parts are
+each counter's check-and-consume, and the delivery and verification callbacks are
+idempotent (a duplicate receipt or verification is ignored), which is what concurrent
+requests and repeated provider callbacks require.
 
 **Rationing spares known-good clients only.** When the multiplier is below 1 the reduced
 cap applies to every client except those with verified history (a fingerprint that has
@@ -718,8 +735,12 @@ spend is the sum of prefix cost units from Step 5b.
 | ≥ 100 %                      | `emergency`    | SMS only for score < 10; everything else downgraded or blocked; page on-call |
 
 The mode is recomputed on every request from the current hourly counters and resets when
-the window rolls. Automatic `emergency` mode still lets the cleanest traffic (score < 10)
-use SMS, so an attack cannot turn the breaker into a denial of service against real users.
+the window rolls. **The budget is a hard ceiling**: before any SMS, Step 11 reserves one
+unit of the hourly count and the message's cost units atomically (`INCRBY` with a cap, one
+Lua script); a reservation that would exceed either budget fails and the request is
+downgraded to a non-SMS channel or refused, whatever its score. Between 80 % and 100 %
+(`emergency`) only the cleanest traffic (score < 10) may still use SMS, so the last part
+of the budget goes to the users most likely to be real.
 The manual **kill switch** (`SMS_KILL_SWITCH`) is different: it forces `emergency` and
 stops **all** SMS; every request is downgraded to a non-SMS channel or dropped.
 
@@ -755,13 +776,24 @@ write the audit record, and answer the client without revealing what happened.
 | `delay`     | push, SMS after a delay of `min(5 * 2^k, 60)` s where k = previous requests in session |
 | `downgrade` | push, WhatsApp OTP, silent network authentication; **never SMS**; block if none available |
 
+**The code travels in the message.** Step 11 generates the code before the send, fills the
+message template (`{code}`), hands the filled message to the sender and stores the code
+separately for 20 minutes; the audit record keeps the template, never the code.
+
 **Audit log** includes the v1 fields plus `trusted_platform`, `risk_score`, `signals`,
 `tier`, `channel`, `operating_mode`, `session_id`, `fingerprint`, `ip`, `asn`.
 
-**Uniform response** (**Gap H**): every outcome from Step 1 onward returns HTTP 200 with
-the same body, `{"status": "ok", "message": "If this number is eligible, a code has been
-sent."}`, and an ASGI middleware pads the whole request, from arrival to just before the
-response is written, to a constant floor `RESPONSE_FLOOR_MS = 400`. The floor must sit
+**Response contract** (**Gap H**). The observable contract is: Step 0 refusals return
+403 (proxy, failed attestation) or 426 (app update required); the `challenge` tier on web
+returns 200 with a body naming the interactive challenge to render; every other outcome
+from Step 1 onward, sent or refused, returns 200 with the same body, `{"status": "ok",
+"message": "If this number is eligible, a code has been sent."}`. So a caller can learn
+that it was not a legitimate client (Step 0), or that it must solve a challenge, but not
+whether a code was sent or which later step refused it. An ASGI middleware pads the whole
+request, from arrival to just before the response is written, to a minimum
+`RESPONSE_FLOOR_MS = 400`; this is a floor, not a constant response time, and
+`results/performance.md` reports what an attacker measuring latency can and cannot
+distinguish. The floor must sit
 above the deployment's p99 processing time under production load, including vendor calls;
 `results/performance.md` reports the fraction of requests that exceeded it in the load
 test (those leak timing), and a single uvicorn worker at high concurrency exceeds it, so

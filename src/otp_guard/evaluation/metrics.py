@@ -41,6 +41,10 @@ class AttackMetrics:
 
     @staticmethod
     def build(leaked_per_min, attack_per_min, hlr_calls, recaptcha_calls, cost_model, stopped_by, tail_fraction=0.05):
+        """time_to_containment_min is None for an uncontained run (a censored observation: the run
+        ended first). steady_state_leak_per_min is the mean leakage per minute after containment, or
+        over the final five minutes of an uncontained run; it is a late-window rate, not evidence of
+        stationarity."""
         m = containment(leaked_per_min, attack_per_min, tail_fraction)
         total = sum(leaked_per_min)
         if m is None:
@@ -60,24 +64,49 @@ class AttackMetrics:
 
 
 @dataclass
-class FrictionMetrics:
+class FrictionGroup:
+    """Outcomes for one legitimate population. dispatched: a channel was chosen and the message
+    handed to the sender. delivered: the provider's receipt said delivered. completed: the person
+    entered the code. refused: rejected by a hard step, downgraded with no channel, or
+    undelivered."""
     users: int = 0
+    dispatched: int = 0
     delivered: int = 0
+    completed: int = 0
     challenged: int = 0
-    refused: int = 0            # rejected by a hard step, or downgraded with no channel
+    refused: int = 0
     delayed: int = 0
     added_delay_s_total: float = 0.0
+    by_channel: dict = field(default_factory=dict)
+    dispatched_pct: float = 0.0
     delivered_pct: float = 0.0
+    completed_pct: float = 0.0
     challenge_rate_pct: float = 0.0
     refusal_rate_pct: float = 0.0
     mean_added_delay_s: float = 0.0
 
     def finish(self):
         u = max(self.users, 1)
+        self.dispatched_pct = 100.0 * self.dispatched / u
         self.delivered_pct = 100.0 * self.delivered / u
+        self.completed_pct = 100.0 * self.completed / u
         self.challenge_rate_pct = 100.0 * self.challenged / u
         self.refusal_rate_pct = 100.0 * self.refused / u
-        self.mean_added_delay_s = self.added_delay_s_total / max(self.delivered, 1)
+        self.mean_added_delay_s = self.added_delay_s_total / max(self.dispatched, 1)
+        return self
+
+
+@dataclass
+class FrictionMetrics(FrictionGroup):
+    """All legitimate requests, plus the same outcomes for first-time clients (no verified history)
+    and returning clients (a fingerprint that verified before)."""
+    first_time: FrictionGroup = field(default_factory=FrictionGroup)
+    returning: FrictionGroup = field(default_factory=FrictionGroup)
+
+    def finish(self):
+        super().finish()
+        self.first_time.finish()
+        self.returning.finish()
         return self
 
 

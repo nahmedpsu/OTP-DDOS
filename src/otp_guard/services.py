@@ -38,6 +38,11 @@ class FakeRecaptcha:
             return {"valid": True, "score": self.scores[token]}
         return {"valid": False, "score": 0.0}
 
+    def verify_challenge(self, token):
+        """Interactive (v2 checkbox / image) challenge: valid or not, no score."""
+        self.calls += 1
+        return token in self.scores
+
 
 @dataclass
 class IpInfo:

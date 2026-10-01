@@ -109,7 +109,8 @@ def start_api(floor_ms):
     env = dict(os.environ, PORT=str(API_PORT), REDIS_URL=f"redis://127.0.0.1:{REDIS_PORT}/1", RESPONSE_FLOOR_MS=str(floor_ms),
                LOAD_TEST_DEBUG_HEADER="1", PYTHONPATH=str(ROOT / "src"), PREFIX_TABLE_PATH=str(ROOT / "config" / "prefixes.json"),
                SOURCE_LIMITS_PATH=str(LIMITS_PATH), ATTESTATION_GRACE_UNTIL="2030-01-01T00:00:00Z", SESSION_HMAC_KEY="load-test-key",
-               WORKERS=os.environ.get("LOAD_TEST_WORKERS", "4"), ASN_LIMIT_DEFAULT="1000000000", IP_LIMIT_PER_MINUTE="1000000000")
+               WORKERS=os.environ.get("LOAD_TEST_WORKERS", "4"), ASN_LIMIT_DEFAULT="1000000000", IP_LIMIT_PER_MINUTE="1000000000",
+               FAKE_RECAPTCHA_SCORES="good:0.9,mid:0.6")
     p = subprocess.Popen([sys.executable, "-m", "otp_guard.api"], env=env, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     import httpx
     for _ in range(100):
@@ -142,25 +143,39 @@ def phase2(n, concurrency, floor_ms, redis_client):
             r1.set("fp_first_seen:" + fp, json.dumps(time.time() - 7200))      # a browser seen two hours ago
             r = client.post("/session", json={"platform": "android", "fingerprint": fp, "app_version": "3.0"})
             return r.json()["session_token"]
+        def web_session_fresh():
+            # a browser never seen before: +20 points; with a 0.6 captcha (+10) and an unknown prefix (+10) it is challenged
+            r = client.post("/session", json={"platform": "web", "fingerprint": f"wfp{random.random()}", "recaptcha_token": "good"})
+            return r.json()["session_token"]
         # the per-session cap is 3 requests per 10 minutes: one session per three requests
         toks = [session() for _ in range(n // 3 + 1)]
+        wtoks = [web_session_fresh() for _ in range(n // 10 + 1)]
         nonce = itertools.count(); lock = threading.Lock()
-        kinds = ["happy"] * 55 + ["no_session"] * 15 + ["bad_country"] * 15 + ["repeat_number"] * 15
+        kinds = ["happy"] * 45 + ["no_session"] * 12 + ["bad_country"] * 12 + ["repeat_number"] * 12 + ["challenge"] * 19
         out = []
         def one(i):
             rng = random.Random(i)
             kind = rng.choice(kinds)
             with lock: nn = next(nonce)
             mobile = {"happy": f"96650{rng.randrange(10**7):07d}", "no_session": "966501234567",
-                      "bad_country": f"1415{rng.randrange(10**7):07d}", "repeat_number": "966501234567"}[kind]
-            headers = {"X-App-Version": "3.0", "X-Forwarded-For": f"198.{(i >> 8) & 255}.{i & 255}.7"}
-            if kind != "no_session": headers["Authorization"] = "Bearer " + toks[i // 3]
+                      "bad_country": f"1415{rng.randrange(10**7):07d}", "repeat_number": "966501234567",
+                      "challenge": f"96652{rng.randrange(10**7):07d}"}[kind]            # 96652: not in the prefix table
+            headers = {"X-Forwarded-For": f"198.{(i >> 8) & 255}.{i & 255}.7"}
+            body = {"mobile": mobile, "nonce": f"n{nn}"}
+            if kind == "challenge":
+                headers["Authorization"] = "Bearer " + wtoks[i // 10]
+                headers["Origin"] = "https://example.com"
+                body["recaptcha_token"] = "mid"
+            else:
+                headers["X-App-Version"] = "3.0"
+                if kind != "no_session": headers["Authorization"] = "Bearer " + toks[i // 3]
             c = thread_client()
             t0 = time.perf_counter()
-            r = c.post("/otp/request", json={"mobile": mobile, "nonce": f"n{nn}"}, headers=headers)
+            r = c.post("/otp/request", json=body, headers=headers)
             dt = (time.perf_counter() - t0) * 1000
             dbg = json.loads(r.headers.get("x-debug-outcome", "{}"))
-            return kind, dbg.get("rejected_at") or "sent", dt, dbg.get("timings_ms") or {}
+            outcome = "challenge" if dbg.get("tier") == "challenge" and dbg.get("rejected_at") == "step7" else (dbg.get("rejected_at") or "sent")
+            return kind, outcome, dt, dbg.get("timings_ms") or {}
         t0 = time.perf_counter()
         with ThreadPoolExecutor(concurrency) as ex:
             out = list(ex.map(one, range(n)))

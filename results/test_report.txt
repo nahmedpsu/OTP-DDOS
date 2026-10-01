@@ -1,19 +1,20 @@
-........................................................................ [ 35%]
-........................................................................ [ 70%]
-.............................................................            [100%]
+........................................................................ [ 31%]
+........................................................................ [ 63%]
+........................................................................ [ 95%]
+...........                                                              [100%]
 =============================== warnings summary ===============================
-../../../tmp/claude-0/venv-clean/lib/python3.11/site-packages/fastapi/testclient.py:1
-  /tmp/claude-0/venv-clean/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+../../../usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1
+  /usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
 ==================================== PASSES ====================================
 ____________________ test_synthetic_logs_replay_round_trip _____________________
 ----------------------------- Captured stdout call -----------------------------
-wrote 319 rows to /tmp/pytest-of-root/pytest-15/test_synthetic_logs_replay_rou0/logs.csv
+wrote 319 rows to /tmp/pytest-of-root/pytest-40/test_synthetic_logs_replay_rou0/logs.csv
 _______ test_recaptcha_rejects_wrong_action_or_hostname_and_fails_closed _______
 ------------------------------ Captured log call -------------------------------
-WARNING  otp_guard.providers:recaptcha.py:24 recaptcha unavailable: down
+WARNING  otp_guard.providers:recaptcha.py:26 recaptcha unavailable: down
 _____________ test_play_integrity_fails_closed_when_google_is_down _____________
 ------------------------------ Captured log call -------------------------------
 WARNING  otp_guard.providers:attestation.py:55 play integrity unavailable:
@@ -93,6 +94,28 @@ PASSED tests/unit/test_providers.py::test_twilio_messaging_request_shapes
 PASSED tests/unit/test_providers.py::test_http_provider_and_fcm
 PASSED tests/unit/test_providers.py::test_routing_sender_routes_delays_and_reports
 PASSED tests/unit/test_providers.py::test_slack_alert_posts_and_survives_failure
+PASSED tests/unit/test_review_round3.py::test_sent_message_carries_the_code_that_verifies[memory]
+PASSED tests/unit/test_review_round3.py::test_sent_message_carries_the_code_that_verifies[redis]
+PASSED tests/unit/test_review_round3.py::test_template_without_placeholder_gets_the_code_appended[memory]
+PASSED tests/unit/test_review_round3.py::test_template_without_placeholder_gets_the_code_appended[redis]
+PASSED tests/unit/test_review_round3.py::test_challenge_proof_goes_through_the_adapter_interface[memory]
+PASSED tests/unit/test_review_round3.py::test_challenge_proof_goes_through_the_adapter_interface[redis]
+PASSED tests/unit/test_review_round3.py::test_google_adapter_verify_challenge_shape
+PASSED tests/unit/test_review_round3.py::test_per_number_claim_is_atomic_under_concurrency
+PASSED tests/unit/test_review_round3.py::test_number_claim_released_when_a_later_step_refuses[memory]
+PASSED tests/unit/test_review_round3.py::test_number_claim_released_when_a_later_step_refuses[redis]
+PASSED tests/unit/test_review_round3.py::test_duplicate_callbacks_are_idempotent[memory]
+PASSED tests/unit/test_review_round3.py::test_duplicate_callbacks_are_idempotent[redis]
+PASSED tests/unit/test_review_round3.py::test_hard_budget_ceiling_is_atomic_and_unconditional[memory]
+PASSED tests/unit/test_review_round3.py::test_hard_budget_ceiling_is_atomic_and_unconditional[redis]
+PASSED tests/unit/test_review_round3.py::test_cusum_block_test_does_not_bank_goodwill[memory]
+PASSED tests/unit/test_review_round3.py::test_cusum_block_test_does_not_bank_goodwill[redis]
+PASSED tests/unit/test_review_round3.py::test_plain_sprt_banks_goodwill_for_comparison[memory]
+PASSED tests/unit/test_review_round3.py::test_plain_sprt_banks_goodwill_for_comparison[redis]
+PASSED tests/unit/test_review_round3.py::test_block_tests_can_be_restricted[memory]
+PASSED tests/unit/test_review_round3.py::test_block_tests_can_be_restricted[redis]
+PASSED tests/unit/test_review_round3.py::test_default_worker_runs_the_baseline_job[memory]
+PASSED tests/unit/test_review_round3.py::test_default_worker_runs_the_baseline_job[redis]
 PASSED tests/unit/test_steps.py::test_web_happy_path_sends_sms_and_logs[memory]
 PASSED tests/unit/test_steps.py::test_web_happy_path_sends_sms_and_logs[redis]
 PASSED tests/unit/test_steps.py::test_attested_ios_from_any_host_is_allowed[memory]
@@ -238,4 +261,4 @@ PASSED tests/unit/test_steps.py::test_relative_baseline_fires_when_a_healthy_key
 PASSED tests/unit/test_steps.py::test_relative_baseline_fires_when_a_healthy_key_drops[redis]
 PASSED tests/unit/test_steps.py::test_session_layer_off_keeps_client_identity[memory]
 PASSED tests/unit/test_steps.py::test_session_layer_off_keeps_client_identity[redis]
-205 passed, 1 warning in 30.61s
+227 passed, 1 warning in 124.73s (0:02:04)

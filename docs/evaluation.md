@@ -73,6 +73,38 @@ These are measured, not hypothetical. Each one is in `results/evaluation.md` or
     call to `/session`). The evaluation's attackers already do this; the cap's value is
     against the naive ones.
 
+## What changed after the Reviewer 2 report (implementation and evaluation)
+
+- The sent message carries the verification code; the simulation verifies with the code
+  read from the message, not from the store.
+- The challenge proof is checked through the CAPTCHA adapter's `verify_challenge`, which
+  the Google adapter implements against the interactive site key.
+- A challenged party retries with the same session, number and address.
+- Legitimate outcomes are *dispatched* (channel chosen), *delivered* (provider receipt) and
+  *completed* (code entered); an undelivered send counts as refused. Friction is reported
+  for all requests and for first-time (no verified history) and returning clients.
+- The timeout sweep varies the resolution timeout, not OTP validity.
+- The adaptive job runs in the simulation at the worker's cadence (every minute) and the
+  default worker implements it from the pipeline's own counters; a cadence study shows the
+  hourly alternative.
+- The spoofed-header attacker uses a valid host and session; only the header is forged.
+- Sessions are acquired through the CAPTCHA gate; refused attempts and their token cost are
+  counted.
+- Random streams are split: the offered workload is drawn at request creation and does not
+  depend on the defence, so same-seed runs are paired.
+- Events are processed at their own timestamps; receipt timing includes the sender's queue
+  delay.
+- Spread ranges are drawn without replacement; the observed count of blocks requested is
+  reported and used by the model.
+- Block tests are CUSUM (evidence floored at zero); a trust-building pumper, a
+  receipt-faking carrier and a block poisoner are evaluated; six baseline designs are
+  compared; the ablation reports paired per-seed differences and legitimate delivery.
+- The hourly budget is an atomic hard ceiling; per-number claims are atomic with release
+  on later refusal; delivery and verification callbacks are idempotent.
+- The timing test includes the challenge response class. Containment time is reported over
+  contained seeds only, with the contained fraction alongside; the late-window leakage is
+  labelled as such.
+
 ## Metric definitions
 
 All per-run metrics are computed from one simulated attack window (20 minutes, after a
@@ -80,14 +112,15 @@ All per-run metrics are computed from one simulated attack window (20 minutes, a
 
 | Metric | Definition |
 |---|---|
-| **Time to containment** | The earliest minute *m* such that for every minute ≥ *m* the attacker's leaked SMS are at most 5 % of the attacker's request rate in that minute. Reported in minutes from attack start. A run that never satisfies the condition is "not contained"; its value is the run length (20) in averages and the *contained fraction* column shows how many seeds were contained. |
+| **Time to containment** | The earliest minute *m* such that for every minute ≥ *m* the attacker's leaked SMS are at most 5 % of the attacker's request rate in that minute, in minutes from attack start. A run that never satisfies the condition within its 20 minutes is censored: it is reported through the *contained fraction*, and the mean time is taken over contained seeds only. Because the condition is checked to the end of a finite run, a quiet final minute can satisfy it; the late-leak column shows what followed. |
 | **SMS leaked before containment** | Sum of the attacker's leaked SMS over minutes before *m* (all leaked SMS if not contained). |
-| **Steady-state leakage** | Mean leaked SMS per minute over minutes ≥ *m*; over the last 5 minutes if not contained. This replaces the earlier "sustained rate over the last 10 minutes", which straddled the containment point. |
+| **Late leak** (formerly "steady state") | Mean leaked SMS per minute over minutes ≥ *m*; over the last 5 minutes if not contained. It is a late-window rate, not evidence of stationarity: hourly budgets, daily reputation, expiring verdicts and the controller all keep moving. |
 | **Total leaked** | Sum over the 20-minute window. |
 | **Defender cost** | Leaked SMS × SMS price + attacker-attributable HLR lookups × lookup price + attacker-attributable reCAPTCHA assessments × assessment price. Prices in `src/otp_guard/evaluation/calibration.py`. |
-| **Friction: delivered %** | Legitimate requests that received a code on any channel, over legitimate requests. |
+| **Friction: dispatched / delivered / completed %** | Dispatched: a channel was chosen and the message handed to the sender. Delivered: the provider's receipt said delivered. Completed: the person entered the code. All over legitimate requests. |
+| **Friction, stratified** | The same outcomes for first-time clients (no verified history) and returning clients (a fingerprint that verified before). The headline refusal figure for a design is the first-time rate, since returning clients are exempt from rationing and verdicts. |
 | **Friction: challenge rate %** | Legitimate requests that were shown an interactive challenge (90 % of simulated users then solve it). |
-| **Friction: refusal rate %** | Legitimate requests refused by a hard step or downgraded with no channel. |
+| **Friction: refusal rate %** | Legitimate requests refused by a hard step, downgraded with no channel, or whose delivery failed. |
 | **Friction: added delay** | Mean seconds of queueing added by the `delay` tier over delivered legitimate requests. |
 | **Attacker profit** | Leaked SMS × SMS price × revenue share − (proxy bytes × price per GB + CAPTCHA tokens + solved challenges) × prices. Only pumping profiles earn revenue. |
 
