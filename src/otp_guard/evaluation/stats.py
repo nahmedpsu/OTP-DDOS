@@ -79,3 +79,28 @@ def tost_mean_diff(a, b, margin):
     p_lower = 1 - sps.t.cdf((diff + margin) / se, df)      # H0: diff <= -margin
     p_upper = sps.t.cdf((diff - margin) / se, df)          # H0: diff >= +margin
     return {"mean_diff": diff, "p_value": float(max(p_lower, p_upper)), "margin": margin}
+
+
+def variance_components(groups, seed=12345):
+    """One-way random-effects decomposition for a nested design: groups = [[values of the simulation
+    seeds of one attacker configuration], ...], equal sizes. Returns the between-configuration and
+    within-configuration (simulation noise) variance components (ANOVA estimators, the between part
+    truncated at 0), the share of the between part, and a percentile-bootstrap interval for that
+    share obtained by resampling configurations."""
+    g = [np.asarray(x, float) for x in groups]
+    k, m = len(g), len(g[0])
+    assert k >= 2 and m >= 2 and all(len(x) == m for x in g)
+
+    def comps(gs):
+        means = np.array([x.mean() for x in gs])
+        msw = float(np.mean([x.var(ddof=1) for x in gs]))
+        msb = float(m * means.var(ddof=1))
+        between = max(0.0, (msb - msw) / m)
+        tot = between + msw
+        return between, msw, (between / tot if tot > 0 else 0.0)
+    between, within, share = comps(g)
+    rng = np.random.default_rng(seed)
+    shares = [comps([g[i] for i in rng.integers(0, k, size=k)])[2] for _ in range(_BOOT)]
+    lo, hi = np.quantile(shares, [0.025, 0.975])
+    return {"configs": k, "sims_per_config": m, "between_var": between, "within_var": within,
+            "between_share": share, "between_share_ci": (float(lo), float(hi))}

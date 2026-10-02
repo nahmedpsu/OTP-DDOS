@@ -56,91 +56,14 @@ def group(results, index, keyfn):
     return g
 
 
-def _job(spec):
-    return run_sim(spec)
+from otp_guard.evaluation.jobs import JobRunner, spec_key, spec_hash                        # noqa: E402
+from otp_guard.evaluation.provenance import environment                                     # noqa: E402
+
+RUNNER = None
 
 
-REUSE = {}
-REUSED = [0, 0.0]      # runs taken from --reuse, wall time of the invocation that produced them
-
-
-def spec_key(spec):
-    d = asdict(spec)
-    d.pop("seed")
-    d["features"] = sorted(d["features"])
-    return json.dumps(d, sort_keys=True, default=str)
-
-
-def spec_hash(spec):
-    return hashlib.sha1(spec_key(spec).encode()).hexdigest()[:12]
-
-
-def load_reuse(path):
-    out = {}
-    prior = pathlib.Path(path).with_name("evaluation.json")
-    if prior.exists():
-        REUSED[1] = json.loads(prior.read_text())["meta"].get("wall_s", 0.0)
-    with gzip.open(path, "rt") as f:
-        for line in f:
-            r = json.loads(line)
-            key = (r.pop("spec_hash"), r["spec"]["seed"])
-            r.pop("study", None); r.pop("index", None)
-            out[key] = r
-    return out
-
-
-CHECKPOINT = {"path": None, "loaded": {}, "resumed": 0}
-
-
-def _job_indexed(item):
-    i, spec = item
-    return i, run_sim(spec)
-
-
-def load_checkpoint(path):
-    out = {}
-    if path.exists():
-        with open(path) as f:
-            for line in f:
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:          # a line cut off by the interruption
-                    continue
-                out[(row["spec_hash"], row["seed"])] = row["result"]
-    return out
-
-
-def run_jobs(specs, procs):
-    """Longest runs first (24-hour runs dominate), results returned in the input order. Runs whose
-    spec and seed match a row of --reuse are taken from it."""
-    res = [None] * len(specs)
-    todo = []
-    for i, sp in enumerate(specs):
-        key = (spec_hash(sp), sp.seed)
-        hit = REUSE.get(key)
-        if hit is not None:
-            res[i] = hit
-        elif key in CHECKPOINT["loaded"]:
-            res[i] = CHECKPOINT["loaded"][key]
-            CHECKPOINT["resumed"] += 1
-        else:
-            todo.append(i)
-    if CHECKPOINT["loaded"]:
-        print(f"  resumed from checkpoint: {CHECKPOINT['resumed']} so far", flush=True)
-    if REUSE:
-        REUSED[0] += len(specs) - len(todo)
-        print(f"  reused {len(specs) - len(todo)}, running {len(todo)}", flush=True)
-    order = sorted(todo, key=lambda i: -(specs[i].minutes + specs[i].warmup_minutes + 60 * 24 * 7 * specs[i].profile_weeks / 60))
-    ck = open(CHECKPOINT["path"], "a") if CHECKPOINT["path"] else None
-    with mp.Pool(procs or mp.cpu_count()) as pool:
-        for i, r in pool.imap_unordered(_job_indexed, [(i, specs[i]) for i in order], chunksize=1):
-            res[i] = r
-            if ck:
-                ck.write(json.dumps({"spec_hash": spec_hash(specs[i]), "seed": specs[i].seed, "result": r}, default=str) + "\n")
-                ck.flush()
-    if ck:
-        ck.close()
-    return res
+def run_jobs(specs, procs=None):
+    return RUNNER.run(specs)
 
 
 def main():
@@ -155,11 +78,8 @@ def main():
     ap.add_argument("--checkpoint", default=None, help="append every finished run to this JSONL file and, on a restart, "
                     "take runs already in it instead of rerunning them (an interrupted invocation resumes)")
     a = ap.parse_args()
-    if a.checkpoint:
-        CHECKPOINT["path"] = pathlib.Path(a.checkpoint)
-        CHECKPOINT["loaded"] = load_checkpoint(CHECKPOINT["path"])
-    global REUSE
-    REUSE = load_reuse(a.reuse) if a.reuse else {}
+    global RUNNER
+    RUNNER = JobRunner(a.procs, a.checkpoint, a.reuse, code_extra=("scripts/run_evaluation.py",))
     out = pathlib.Path(a.out); out.mkdir(exist_ok=True)
     seeds = list(range(3 if a.quick else a.seeds))
     sseeds = list(range(2 if a.quick else a.sweep_seeds))
@@ -176,8 +96,10 @@ def main():
     for design, feats in DESIGNS.items():
         add(design, *R_.study_multi_seed(seeds, feats, design=design))
     add("variance", *R_.study_variance(seeds))
+    add("variance_nested", *(R_.study_variance_nested(n_configs=3, n_sims=2) if a.quick else R_.study_variance_nested()))
     add("cadence", *R_.study_cadence(sseeds))
     add("ablation", *R_.study_ablation(sseeds))
+    add("interactions", *R_.study_interactions(sseeds))
     add("sweep", *R_.study_sweep(sseeds))
     add("capsweep", *R_.study_cap_sweep(sseeds))
     add("adaptive", *R_.study_adaptive(sseeds))
@@ -224,11 +146,7 @@ def main():
     all_results = results + results2
     by["matched_eval"] = (results2, [j[1] for j in jobs2])
 
-    with gzip.open(out / "evaluation_runs.jsonl.gz", "wt") as f:
-        for (study, idx, spec), r in zip(all_jobs, all_results):
-            r = dict(r); r["study"] = study; r["index"] = idx
-            r["spec_hash"] = spec_hash(spec)
-            f.write(json.dumps(r, default=str) + "\n")
+    RUNNER.write_runs(out / "evaluation_runs.jsonl.gz", all_jobs, all_results)
     write_study_specs(all_jobs, out / "study_specs.json")
     write_attacker_profiles(out / "attacker_profiles.md")
 
@@ -236,8 +154,8 @@ def main():
     cfg_default.sprt_legit_fast = max(0.005, legit_fast_share(cfg_default.fast_verify_seconds))   # as the sim sets it
     k_conv, k_fast = sends_to_verdict(cfg_default)
     protocol_sha = hashlib.sha256(R_.PROTOCOL_PATH.read_bytes()).hexdigest()
-    R = {"meta": {"seeds": len(seeds), "sweep_seeds": len(sseeds), "runs": len(all_jobs), "wall_s": wall + (REUSED[1] if REUSED[0] else 0.0),
-                  "reused_runs": REUSED[0], "resumed_from_checkpoint": CHECKPOINT["resumed"],
+    R = {"meta": {"seeds": len(seeds), "sweep_seeds": len(sseeds), "runs": len(all_jobs), "wall_s": wall,
+                  "provenance": dict(RUNNER.meta(), environment=environment()),
                   "calibration": CALIBRATION, "quick": a.quick, "protocol_sha256": protocol_sha,
                   "tuning_seeds": tuning_seeds, "evaluation_seeds": eval_seeds, "legit_day_minutes": day,
                   "intervals": "95 % percentile bootstrap over runs (2000 resamples); paired differences likewise",
@@ -256,6 +174,15 @@ def main():
     for (name, kind), rs in g.items():
         V.setdefault(name, {})[kind] = summarise(rs)
     R["variance"] = V
+    from otp_guard.evaluation.stats import variance_components
+    VN = {}
+    g = group(*by["variance_nested"], lambda i: (i[0], i[1]))
+    for name in R_.VARIANCE_ATTACKERS:
+        cfgs = sorted({c for (n, c) in g if n == name})
+        VN[name] = {m: variance_components([[f(r) for r in g[(name, c)]] for c in cfgs]) for m, f in (
+            ("leaked_total", lambda r: r["attack"]["leaked_total"]),
+            ("legit_completed_pct", lambda r: r["friction"]["completed_pct"]))}
+    R["variance_nested"] = VN
 
     # B. ablation with paired differences for every layer
     B = {}
@@ -272,6 +199,21 @@ def main():
             B[name][flag]["paired_completed_diff"] = paired_difference(rs, full, ("friction", "completed_pct"))
             B[name][flag]["paired_delivered_diff"] = paired_difference(rs, full, ("friction", "delivered_pct"))
     R["ablation"] = B
+    IX = {}
+    g = group(*by["interactions"], lambda i: (i[0], i[1], i[2]))
+    abl = {(i[0], i[1], i[2]): r for r, i in zip(*by["ablation"])}
+    for (name, f1, f2), rs in g.items():
+        contrast, both = [], []
+        for r in rs:
+            s_ = r["spec"]["seed"]
+            full, a1, a2 = (abl[(name, k, s_)]["attack"]["leaked_total"] for k in ("full", f1, f2))
+            ab = r["attack"]["leaked_total"]
+            both.append(ab - full)
+            contrast.append((ab - full) - (a1 - full) - (a2 - full))
+        IX[f"{name}|{f1}|{f2}"] = {"both_removed": summarise(rs), "both_removed_diff": boot_ci(both),
+                                   "first_removed_diff": B[name][f1]["paired_leak_diff"], "second_removed_diff": B[name][f2]["paired_leak_diff"],
+                                   "interaction": boot_ci(contrast)}
+    R["interactions"] = IX
 
     Cd = {}
     g = group(*by["cadence"], lambda i: (i[0], i[1], i[2], i[3]))
@@ -523,14 +465,23 @@ def write_spread_chart(R, out):
     fig.savefig(out / "pumper_spread.png"); fig.savefig(out / "pumper_spread.svg"); plt.close(fig)
 
 
+def provenance_sentence(pv):
+    """How this invocation's runs were obtained, and the code they were produced by."""
+    if pv["invocation"] == "clean":
+        how = "; a clean invocation (every run executed by it)"
+    else:
+        how = (f"; {pv['resumed']} runs were resumed from this invocation's checkpoint and {pv['reused']} reused from an earlier "
+               "one, all produced by the same code (rows from other code are rejected), and the wall time is the final "
+               "invocation's only")
+    return how + f"; code hash `{pv['code_hash'][:16]}...`"
+
+
 def write_markdown(R, path):
     meta = R["meta"]
     L = ["# Evaluation", "",
          f"Generated by `scripts/run_evaluation.py`: {meta['runs']} simulation runs in two stages, {meta['seeds']} seeds for the main "
          f"study and {meta['sweep_seeds']} for most other studies, {meta['wall_s']:.0f} s wall time"
-         + (f" (of which {meta['reused_runs']} runs were taken unchanged, by spec hash and seed, from an earlier invocation)" if meta.get("reused_runs") else "")
-         + (f" (the invocation was interrupted and resumed; {meta['resumed_from_checkpoint']} runs came from its checkpoint, and the "
-            "wall time is the final invocation's only)" if meta.get("resumed_from_checkpoint") else "")
+         + provenance_sentence(meta["provenance"])
          + ". Values are means with 95 % "
          "percentile-bootstrap intervals over runs in brackets (they stay inside the range of the data); paired differences are "
          "bootstrapped per seed and marked * when the interval excludes zero (many differences are inspected, so an isolated * is not "
@@ -564,14 +515,27 @@ def write_markdown(R, path):
                          f"{ci(s['leaked_total'],0)} | {ci(s['leak_fraction_pct'])} | {ci(s['legit_completed_pct'])} | {ci(s['legit_challenge_rate_pct'])} | "
                          f"{ci(s['legit_refusal_rate_pct'])} | {ci(s['first_time_refusal_rate_pct'])} | {ci(s['returning_refusal_rate_pct'])} |")
         L.append("")
-    L += ["### A2. Where the spread comes from (with adaptive caps, v2)", "",
-          "The main study draws each seed's pool size, attack rate and CAPTCHA class (*randomised*). With those fixed at the profile's own "
-          "parameters (*fixed*), the remaining spread is simulation noise alone. Intervals mixing both should not be read as Monte Carlo error.", "",
+    L += ["### A2. Attacker-parameter variation and simulation noise (with adaptive caps, v2)", "",
+          "*Fixed-parameter sensitivity comparison.* The main study draws each seed's pool size, attack rate and CAPTCHA class "
+          "(*randomised*); with those fixed at the profile's own parameters (*fixed*) only simulation noise remains. Comparing the two "
+          "spreads shows that parameter variation matters; it does not measure its share, since the fixed configuration need not have "
+          "the average configuration's noise.", "",
           "| Attacker | Attacker parameters | Total leaked | Leak % of requests | Legit completed % | Leaked: 90th percentile / max over seeds |", "|---|---|---:|---:|---:|---:|"]
     for name, d in R["variance"].items():
         for kind, s in d.items():
             t = s["tails"]["leaked_total"]
             L.append(f"| `{name}` | {kind} | {ci(s['leaked_total'],0)} | {ci(s['leak_fraction_pct'])} | {ci(s['legit_completed_pct'])} | {t['p90']:.0f} / {t['max']:.0f} |")
+    vc0 = next(iter(next(iter(R["variance_nested"].values())).values()))
+    L += ["", f"*Nested decomposition.* {vc0['configs']} attacker configurations drawn as the main study draws them, each run with "
+          f"{vc0['sims_per_config']} simulation seeds; one-way random-effects (ANOVA) estimates of the between-configuration and "
+          "within-configuration (simulation-noise) variance, and the between share with a percentile-bootstrap interval over "
+          f"configurations. {vc0['configs']} configurations are few: the share's interval is wide, and a resample that repeats "
+          "one configuration has no between-configuration variance, which pulls the lower bound towards zero.", "",
+          "| Attacker | Metric | Between-configuration variance | Within (simulation noise) | Between share [95 % interval] |", "|---|---|---:|---:|---:|"]
+    for name, d in R["variance_nested"].items():
+        for m, vc in d.items():
+            lo, hi = vc["between_share_ci"]
+            L.append(f"| `{name}` | {m} | {vc['between_var']:.1f} | {vc['within_var']:.1f} | {vc['between_share']:.2f} [{lo:.2f}, {hi:.2f}] |")
     L += ["", "Attacker descriptions: `results/attacker_profiles.md`.", ""]
 
     # ---------------- B
@@ -590,6 +554,17 @@ def write_markdown(R, path):
         for f in flags:
             s = R["ablation"][name][f]
             L.append(f"| `{name}` | -{f} | {diff(s['paired_leak_diff'],0)} | {diff(s['paired_completed_diff'],2)} |")
+    L += ["", "Selected interactions (both layers removed on the same seeds). *Interaction* is (both removed - full) - (first removed - "
+          "full) - (second removed - full), paired per seed. Zero: the two effects add up. "
+          "Negative: removing both costs less than the sum of removing each, i.e. the layers overlap; at minus the smaller single "
+          "effect, one layer works only through the other (the block key, for instance, is read only by the feedback loop). "
+          "Positive: they complement each other. The ablation entries are conditional effects in this pipeline, not shares of "
+          "protection that add up.", "",
+          "| Attacker | Layers | First removed | Second removed | Both removed | Interaction |", "|---|---|---:|---:|---:|---:|"]
+    for key, d in R["interactions"].items():
+        name, f1, f2 = key.split("|")
+        L.append(f"| `{name}` | -{f1}, -{f2} | {diff(d['first_removed_diff'],0)} | {diff(d['second_removed_diff'],0)} | "
+                 f"{diff(d['both_removed_diff'],0)} | {diff(d['interaction'],0)} |")
     L += ["", "### B2. Controller cadence, tick phase and attack length (with adaptive caps)", "",
           "The oracle baseline job at five cadences, with the tick aligned with the attack start and offset by half a period, for a 20-minute "
           "attack and (hourly job) a 60-minute one. The job accumulates the volume since its last tick, so cadence changes both when and on what it acts.", "",
@@ -664,15 +639,19 @@ def write_markdown(R, path):
           "(the observe-only counterfactual with the same fallback reachability and run length) and did not complete under the variant, "
           "net of the reverse. The recovery variant stops the attack after 10 minutes of a 70-minute run, longer than the verdicts' "
           "one-hour lifetime. Observe-only rows are the counterfactuals.", "",
-          "| Variant | Run (min) | WhatsApp reachable | Verdict events | Blocks with a verdict | Stage 1 / stage 2 | Block-minutes under verdict | Requests hit | Hit and never completed | Attributable loss (requests) | Attributable loss (% of users) | Hit after the attack stopped | Legit completed % | Legit challenged % |",
-          "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+          "| Variant | Run (min) | WhatsApp reachable | Verdict events | Blocks with a verdict | Stage 1 / stage 2 | Block-minutes under verdict | Requests hit | Hit and never completed | Attributable loss, whole run (requests) | Attributable loss, whole run (% of users) | Gross lost / gained | Hit after the attack stopped | Attributable loss after the attack stopped (requests) | Legit completed % | Legit challenged % |",
+          "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for vname, (cfg, active, minutes, wa) in R_.POISONER_VARIANTS.items():
         s = R["poisoner"][vname]
         al = s.get("attributable_loss_vs_observe")
-        L.append(f"| {vname} | {minutes} | {wa:.0%} | {ci(s['block_verdicts'])} | {ci(s['blocks_with_verdict'])} | {s['verdicts_stage1'][0]:.1f} / {s['verdicts_stage2'][0]:.1f} | "
-                 f"{ci(s['verdict_exposure_block_min'],0)} | {ci(s['legit_hit_by_verdict'])} | {ci(s['legit_hit_lost'])} | "
-                 f"{diff(al['net_lost'],1) if al else '–'} | {diff(al['net_lost_pct'],2) if al else '–'} | {ci(s['legit_hit_after_stop'])} | "
-                 f"{ci(s['legit_completed_pct'])} | {ci(s['legit_challenge_rate_pct'])} |")
+        row = (f"| {vname} | {minutes} | {wa:.0%} | {ci(s['block_verdicts'])} | {ci(s['blocks_with_verdict'])} | {s['verdicts_stage1'][0]:.1f} / {s['verdicts_stage2'][0]:.1f} | "
+               f"{ci(s['verdict_exposure_block_min'],0)} | {ci(s['legit_hit_by_verdict'])} | {ci(s['legit_hit_lost'])} | ")
+        row += (f"{diff(al['net_lost'],1)} | {diff(al['net_lost_pct'],2)} | {al['gross_lost'][0]:.1f} / {al['gross_gained'][0]:.1f} | "
+                if al else "– | – | – | ")
+        L.append(row)
+        L[-1] += (f"{ci(s['legit_hit_after_stop'])} | "
+                  f"{diff(al['after_stop']['net_lost'],1) if al and active and 'after_stop' in al else '–'} | "
+                  f"{ci(s['legit_completed_pct'])} | {ci(s['legit_challenge_rate_pct'])} |")
     L.append("")
 
     L += ["### D3. Two design alternatives against the attacks that defeat the default", "",

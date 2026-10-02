@@ -215,7 +215,7 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
   negative) and eventual events (issued at or after the attack start including the drain, i.e.
   caused by sends inside the window). The second-round exposure clipped interval ends to the window
   but kept drain-time starts, which produced negative block-minutes.
-- **Atomic compound transitions and exactly-once effects** (`feedback.py`): a negative receipt
+- **Atomic compound transitions and recorded effects** (`feedback.py`): a negative receipt
   marks the send failed and resolves it as undelivered in one compare-and-set; a timeout decides
   inside the compare-and-set; a code entry counts the attempt and closes the send together; the
   effects of a transition are recorded in the same write and applied idempotently, with a

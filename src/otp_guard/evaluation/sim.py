@@ -141,6 +141,7 @@ class LegitSpec:
                                        # correlated-failure stress: those who cannot fall back also fail challenges
     hot_blocks: int = 0                # this many hot 8-digit blocks receive hot_fraction of legitimate requests
     hot_fraction: float = 0.0
+    hot_bad_route: bool = False        # the hot blocks are on a poor route (lose bad_route_failure of their messages)
     launch: tuple = ()                 # (start minute, end minute, rate multiplier, hot fraction): a product launch, i.e. a
                                        # burst of first-time users with fresh fingerprints concentrated on the hot blocks
 
@@ -352,7 +353,8 @@ class Simulation:
                 m, sd = l.conversion, l.block_conversion_sd
                 k = max(m * (1 - m) / (sd * sd) - 1, 1e-3)
                 conv = r.betavariate(m * k, (1 - m) * k)
-            self.block_traits[block] = (conv, r.random() < l.bad_route_fraction)
+            bad = r.random() < l.bad_route_fraction or (l.hot_bad_route and block in self.hot_blocks)
+            self.block_traits[block] = (conv, bad)
         return self.block_traits[block]
 
     def _ranges(self):
@@ -973,7 +975,8 @@ class Simulation:
                                "hit": _bits([u["rid"] for u in hits], n),
                                "returning": _bits([u["rid"] for u in measured if u["cohort"] == "returning"], n),
                                "attacked_block": _bits([u["rid"] for u in measured if u.get("block") in attacked], n),
-                               "after_stop": _bits([u["rid"] for u in measured if stop is not None and u["minute"] >= stop], n)}
+                               "after_stop": _bits([u["rid"] for u in measured if stop is not None and u["minute"] >= stop], n),
+                               "hot_block": _bits([u["rid"] for u in measured if u.get("block") in set(self.hot_blocks)], n)}
         return out
 
     @staticmethod

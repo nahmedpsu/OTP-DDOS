@@ -26,7 +26,7 @@ recorded, so a process that dies between the compare-and-set and the end of its 
 a later sweep completes.
 
 Applying is idempotent within a replay horizon H = replay_horizon_s() (the entry's lifetime,
-2 x otp_ttl): the reputation increments of a batch are one exactly-once script
+2 x otp_ttl): the reputation increments of a batch are one once-only script
 (store.hincrby_batch_once, keyed by log id and batch number, marker kept H + 1 h), and block-test
 events carry an event id the block document remembers for H + 60 s. Identifiers are kept by age,
 not by count, so no volume of later events can push one out early (an earlier version kept the

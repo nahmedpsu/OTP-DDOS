@@ -100,7 +100,7 @@ rolling 24-hour window (implemented as hourly buckets). Reputation keys:
 | `country`     | `country:966`                 |
 | `prefix`      | `prefix:96650`                |
 | `number`      | `num:966501234567`            |
-| `block`       | `block:96650123` (first 8 digits: 10 000 numbers) | the one key a pumper cannot rotate: it is paid only on the ranges its partner carrier terminates |
+| `block`       | `block:96650123` (first 8 digits: 10 000 numbers) | a pumper can rotate numbers and blocks only within the ranges its partner carrier terminates (it is paid on no others), so block-based protection scales with the number of usable blocks |
 
 The ratio counts only **resolved** sends (verified, or failed after five wrong attempts
 or the **resolution timeout**, 2 minutes by default; 99 % of real users verify within

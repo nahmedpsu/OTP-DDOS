@@ -269,21 +269,40 @@ def attributable_loss(results_policy, results_none):
     requests lost because of it had met an intervention, and the descriptive 'hit and not completed'."""
     from .sim import unbits
     by_seed = {r["spec"]["seed"]: r for r in results_none}
-    net, pct, hit_lost, desc = [], [], [], []
+    net, pct, hit_lost, desc, gross_lost, gross_gained = [], [], [], [], [], []
+    groups = {g: {"net": [], "pct": [], "users": []} for g in ("first_time", "returning", "attacked_block", "after_stop", "hot_block")}
     for r in results_policy:
         ref = by_seed.get(r["spec"]["seed"])
         if ref is None or "requests" not in r or "requests" not in ref:
             continue
         assert r["workload_digest"] == ref["workload_digest"], "paired runs must offer the same trace"
+        n = r["requests"]["n"]
         c_pol, c_ref = unbits(r["requests"]["completed"]), unbits(ref["requests"]["completed"])
         hit = unbits(r["requests"]["hit"])
         lost, gained = c_ref - c_pol, c_pol - c_ref
         net.append(len(lost) - len(gained))
-        pct.append(100.0 * (len(lost) - len(gained)) / max(r["requests"]["n"], 1))
+        pct.append(100.0 * (len(lost) - len(gained)) / max(n, 1))
+        gross_lost.append(len(lost)); gross_gained.append(len(gained))
         hit_lost.append(len(lost & hit))
         desc.append(r["legit_hit_lost"])
-    return {"net_lost": boot_ci(net), "net_lost_pct": boot_ci(pct), "lost_among_hit": boot_ci(hit_lost),
-            "descriptive_hit_and_not_completed": boot_ci(desc), "n_pairs": len(net)}
+        if "returning" in r["requests"]:
+            ret = unbits(r["requests"]["returning"])
+            members = {"returning": ret, "first_time": set(range(n)) - ret,
+                       "attacked_block": unbits(r["requests"]["attacked_block"]),
+                       "after_stop": unbits(r["requests"]["after_stop"]),
+                       "hot_block": unbits(r["requests"].get("hot_block", ""))}
+            for g, ids in members.items():
+                d = len(lost & ids) - len(gained & ids)
+                groups[g]["net"].append(d)
+                groups[g]["pct"].append(100.0 * d / len(ids) if ids else 0.0)
+                groups[g]["users"].append(len(ids))
+    out = {"net_lost": boot_ci(net), "net_lost_pct": boot_ci(pct), "lost_among_hit": boot_ci(hit_lost),
+           "gross_lost": boot_ci(gross_lost), "gross_gained": boot_ci(gross_gained),
+           "descriptive_hit_and_not_completed": boot_ci(desc), "n_pairs": len(net), "per_seed_net_lost_pct": pct}
+    for g, d in groups.items():
+        if d["net"]:
+            out[g] = {"net_lost": boot_ci(d["net"]), "net_lost_pct_of_group": boot_ci(d["pct"]), "users": boot_ci(d["users"])}
+    return out
 
 
 def study_ablation(seeds, attackers=None, minutes=20, caps_lifted=False):
@@ -634,8 +653,9 @@ VARIANCE_ATTACKERS = ["residential_captcha_farm", "sequential_numbers", "datacen
 
 
 def study_variance(seeds):
-    """R12: per-seed variation in attack volume, pool and CAPTCHA class versus simulation noise alone:
-    the same attackers with the randomisation on and with it fixed at the profile's own parameters."""
+    """A fixed-parameter sensitivity comparison: the same attackers with the per-seed randomisation
+    on, and with it fixed at the profile's own parameters (a comparison of two spreads, not a
+    decomposition; see study_variance_nested)."""
     specs, index = [], []
     for name in VARIANCE_ATTACKERS:
         for randomise in (True, False):
@@ -643,6 +663,40 @@ def study_variance(seeds):
                 a = randomised(ATTACKERS[name], s) if randomise else replace(ATTACKERS[name])
                 specs.append(SimSpec(attacker=a, caps_lifted=False, seed=s))
                 index.append((name, "randomised" if randomise else "fixed parameters", s))
+    return specs, index
+
+
+NESTED_CONFIGS, NESTED_SIMS = 10, 3
+
+
+def study_variance_nested(n_configs=NESTED_CONFIGS, n_sims=NESTED_SIMS):
+    """A nested design for the variance decomposition: n_configs attacker configurations drawn as the
+    main study draws them (configuration seeds 1000+), each run with n_sims simulation seeds."""
+    specs, index = [], []
+    for name in VARIANCE_ATTACKERS:
+        for c in range(n_configs):
+            a = randomised(ATTACKERS[name], 1000 + c)
+            for m in range(n_sims):
+                specs.append(SimSpec(attacker=a, caps_lifted=False, seed=2000 + 10 * c + m))
+                index.append((name, c, m))
+    return specs, index
+
+
+INTERACTIONS = [("sequential_numbers", "feedback", "fine_destination_key"),
+                ("sequential_numbers", "risk_engine", "feedback"),
+                ("residential_reused_profile", "feedback", "session"),
+                ("residential_captcha_farm", "adaptive_caps", "risk_engine")]
+
+
+def study_interactions(seeds, minutes=20, caps_lifted=False):
+    """Selected two-layer removals, on the ablation's seeds and attacker draws, so the interaction
+    contrast (both removed) - (first removed) - (second removed) + (full) is paired per seed."""
+    specs, index = [], []
+    for name, f1, f2 in INTERACTIONS:
+        for s in seeds:
+            specs.append(SimSpec(attacker=randomised(ATTACKERS[name], s), minutes=minutes,
+                                 features=frozenset(ALL_FEATURES - {f1, f2}), caps_lifted=caps_lifted, seed=s))
+            index.append((name, f1, f2, s))
     return specs, index
 
 

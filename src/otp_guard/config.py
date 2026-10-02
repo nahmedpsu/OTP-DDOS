@@ -40,7 +40,7 @@ ALL_FEATURES = frozenset({
     "backoff",              # Step 8 progressive backoff and daily cap (off: fixed 1 per minute)
     "circuit_breaker",      # Step 10
     "adaptive_caps",        # Step 9 multiplier from the baseline job and the known-good exemption (off: static caps)
-    "fine_destination_key", # reputation on the 8-digit destination block (the range a pumper cannot rotate)
+    "fine_destination_key", # reputation on the 8-digit destination block (a pumper is confined to its paid ranges)
 })
 # Evaluated but not a default: it needs hours of per-key history (see results/evaluation.md, section F).
 OPTIONAL_FEATURES = frozenset({"relative_baseline"})

@@ -42,7 +42,10 @@ pseudocode:         ## regenerate docs/pseudocode/ from the design document
 smoke:              ## boot the HTTP service on fakes and drive a flow; writes results/api_smoke.txt
 	$(PY) scripts/smoke_api.py
 
-results: test-report scenarios analysis evaluation load-test smoke figures headline   ## regenerate everything under results/ and paper/figures/
+results: test-report scenarios analysis evaluation counter-study load-test smoke figures headline   ## regenerate everything under results/ and paper/figures/
+
+counter-study:      ## the destination-counter study (config/counter_protocol.json) -> results/counter_study.*
+	$(PY) scripts/run_counter_study.py
 
 run-api:            ## run the HTTP service from the environment (.env)
 	PYTHONPATH=src $(PY) -m otp_guard.api

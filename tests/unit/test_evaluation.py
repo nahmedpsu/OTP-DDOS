@@ -58,3 +58,30 @@ def test_every_enforcing_poisoner_variant_has_a_matched_observe_reference():
         assert ref is not None, vname
         rcfg, ractive, rminutes, rwa = R_.POISONER_VARIANTS[ref]
         assert rcfg == {"block_action": "observe"} and (ractive, rminutes, rwa) == (active, minutes, wa)
+
+
+def test_checkpoint_rows_from_other_code_are_rejected(tmp_path):
+    import json
+    from otp_guard.evaluation.jobs import JobRunner, spec_hash
+    from otp_guard.evaluation.runner import ATTACKERS
+    from otp_guard.evaluation.sim import SimSpec
+    spec = SimSpec(attacker=ATTACKERS["naive_single_client"], minutes=1, warmup_minutes=0, seed=1)
+    ck = tmp_path / "ck.jsonl"
+    runner = JobRunner(procs=1, checkpoint=ck)
+    ck.write_text(json.dumps({"spec_hash": spec_hash(spec), "seed": 1, "code_hash": "0" * 64, "result": {"stale": True}}) + "\n"
+                  + json.dumps({"spec_hash": spec_hash(spec), "seed": 1, "code_hash": runner.code, "result": {"fresh": True}}) + "\n")
+    runner = JobRunner(procs=1, checkpoint=ck)
+    assert runner.counts["stale_rejected"] == 1
+    assert runner.run([spec]) == [{"fresh": True}]
+    assert runner.meta()["invocation"] == "resumed"
+
+
+def test_variance_components_separate_configurations_from_noise():
+    import numpy as np
+    from otp_guard.evaluation.stats import variance_components
+    rng = np.random.default_rng(0)
+    groups = [list(c + rng.normal(0, 1, 5)) for c in rng.normal(0, 10, 40)]
+    vc = variance_components(groups)
+    assert vc["between_share"] > 0.9 and 0.5 < vc["within_var"] < 2.0
+    flat = [list(rng.normal(0, 1, 5)) for _ in range(40)]
+    assert variance_components(flat)["between_share"] < 0.2

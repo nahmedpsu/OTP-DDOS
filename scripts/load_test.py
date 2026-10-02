@@ -122,6 +122,26 @@ def start_api(floor_ms, latency_ms=0, sigma=0.5, timeout_prob=0.0, timeout_ms=20
     raise RuntimeError("api did not start")
 
 
+UNIFORM_EXCLUDED = ("challenge", "step0", "server_error")     # outcomes whose response differs anyway (body or status)
+
+
+def threshold_accuracy(a, b):
+    """Observer model: a remote client that sees only its own response times and must tell two
+    outcome classes apart with one latency threshold (either direction), with the classes equally
+    likely. Returns the best balanced accuracy over all thresholds (0.5 = no information)."""
+    xs = sorted([(v, 0) for v in a] + [(v, 1) for v in b])
+    na, nb = len(a), len(b)
+    best, ca, cb = 0.5, 0, 0
+    for v, lab in xs:
+        if lab == 0:
+            ca += 1
+        else:
+            cb += 1
+        acc = 0.5 * (ca / na + (nb - cb) / nb)          # predict class a below the threshold
+        best = max(best, acc, 1 - acc)
+    return best
+
+
 def phase2(n, concurrency, floor_ms, redis_client, latency_ms=0, mix="default", sigma=0.5, timeout_prob=0.0, timeout_ms=2000):
     import httpx
     from otp_guard.evaluation.stats import ks_2samp
@@ -212,7 +232,10 @@ def phase2(n, concurrency, floor_ms, redis_client, latency_ms=0, mix="default", 
                 if a < b and len(by_outcome[a]) >= 20 and len(by_outcome[b]) >= 20:
                     stat, pv = ks_2samp(by_outcome[a], by_outcome[b])
                     ks[f"{a} vs {b}"] = {"statistic": stat, "p_value": pv, "n_a": len(by_outcome[a]), "n_b": len(by_outcome[b]),
-                                         "tost_2ms": tost_mean_diff(by_outcome[a], by_outcome[b], margin=2.0)}
+                                         "tost_2ms": tost_mean_diff(by_outcome[a], by_outcome[b], margin=2.0),
+                                         "uniform_body_pair": a not in UNIFORM_EXCLUDED and b not in UNIFORM_EXCLUDED,
+                                         "threshold_balanced_accuracy": threshold_accuracy(by_outcome[a], by_outcome[b])}
+        over_by_outcome = {k: sum(1 for v in vs if v > floor_ms + 25) / len(vs) for k, vs in by_outcome.items()} if floor_ms else None
         return {"requests": n, "concurrency": concurrency, "workers": int(os.environ.get("LOAD_TEST_WORKERS", "4")),
                 "floor_ms": floor_ms, "vendor_latency_ms": latency_ms, "mix": mix, "vendor_sigma": sigma,
                 "vendor_timeout_prob": timeout_prob, "wall_s": wall, "throughput_rps": n / wall,
@@ -220,7 +243,7 @@ def phase2(n, concurrency, floor_ms, redis_client, latency_ms=0, mix="default", 
                 "throughput_note": ("bounded by concurrency / floor = %.1f req/s, not server capacity" % (concurrency / (floor_ms / 1000.0))) if floor_ms else "server capacity at this concurrency",
                 "pipeline_time_over_floor_fraction": over_floor / n if floor_ms else None,
                 "latency_by_outcome_ms": {k: {"p50": pct(v, 50), "p95": pct(v, 95), "p99": pct(v, 99), "mean": statistics.fmean(v), "n": len(v)} for k, v in by_outcome.items()},
-                "ks_tests": ks}
+                "ks_tests": ks, "client_over_floor_by_outcome": over_by_outcome}
     finally:
         api.terminate(); api.wait(timeout=10)
 
@@ -288,10 +311,11 @@ def write_md(R, path):
         L += ["", "Two-sample Kolmogorov-Smirnov tests on client-observed latency (an attacker's view): a small p-value means the outcomes "
               "are distinguishable by timing. The TOST column is an equivalence test on the mean difference with a +/-2 ms margin: "
               "a small p-value there means the means are demonstrably within 2 ms of each other.", "",
-              "| Pair | n | KS statistic | KS p-value | mean diff (ms) | TOST p (equivalent within 2 ms) |", "|---|---:|---:|---:|---:|---:|"]
+              "| Pair | n | KS statistic | KS p-value | mean diff (ms) | TOST p (equivalent within 2 ms) | Best threshold accuracy |", "|---|---:|---:|---:|---:|---:|---:|"]
         for k, v in p2["ks_tests"].items():
             t = v["tost_2ms"]
-            L.append(f"| {k} | {v['n_a']} / {v['n_b']} | {v['statistic']:.3f} | {v['p_value']:.2e} | {t['mean_diff']:.2f} | {t['p_value']:.2e} |")
+            L.append(f"| {k} | {v['n_a']} / {v['n_b']} | {v['statistic']:.3f} | {v['p_value']:.2e} | {t['mean_diff']:.2f} | {t['p_value']:.2e} | "
+                     f"{v.get('threshold_balanced_accuracy', float('nan')):.3f} |")
     if R.get("phase3_capacity"):
         p3 = R["phase3_capacity"]
         L += ["", f"## Phase 3: capacity as deployed, {p3[0]['requests']} requests per row", "",
@@ -328,9 +352,27 @@ def write_md(R, path):
             L.append(f"| {p['concurrency']} | {p['throughput_rps']:.1f} | {100 * (p['pipeline_time_over_floor_fraction'] or 0):.1f} % | "
                      f"{100 * happy.get('sent', 0) / n_h:.1f} % | {sent['p50']:.0f} / {sent['p95']:.0f} / {sent['p99']:.0f} | "
                      f"{chal['p50']:.0f} / {chal['p99']:.0f} | {s0['p50']:.0f} | {errs} |")
-        L += ["", "The timing tests above are failures to detect a difference with these tests at these sample sizes; they do not "
-              "show that a response time carries no information, and they do not cover this phase's heavy tails, where requests "
-              "over the floor are distinguishable by construction."]
+        L += ["", "Timing by outcome under this mixture. Observer model: a remote client that sees only the response times of its own "
+              "requests and wants to tell two server-side outcomes apart whose responses are otherwise identical (same status and "
+              "body: an SMS sent, or a refusal at a hard step), with the two equally likely. *Over floor (client)*: share of the "
+              "class whose observed time exceeded the floor by more than 25 ms. *Best threshold accuracy*: the balanced accuracy of "
+              "the best single latency threshold between the two classes on these samples (0.5 = no information; optimistic, since "
+              "the threshold is chosen on the same data). A KS p-value above 0.05 is a failure to detect a difference, not evidence "
+              "of none.", ""]
+        for p in p4:
+            lat = p["latency_by_outcome_ms"]
+            ob = p.get("client_over_floor_by_outcome") or {}
+            L += [f"Concurrency {p['concurrency']}:", "", "| Outcome | n | p50 / p95 / p99 (ms) | Over floor (client) |", "|---|---:|---:|---:|"]
+            for k in sorted(lat):
+                v = lat[k]
+                L.append(f"| {k} | {v['n']} | {v['p50']:.0f} / {v['p95']:.0f} / {v['p99']:.0f} | {100 * ob.get(k, 0):.1f} % |")
+            L += ["", "| Uniform-body pair | n | KS p-value | Best threshold accuracy |", "|---|---:|---:|---:|"]
+            for pair, t in sorted(p["ks_tests"].items()):
+                if t.get("uniform_body_pair"):
+                    L.append(f"| {pair} | {t['n_a']} / {t['n_b']} | {t['p_value']:.2g} | {t['threshold_balanced_accuracy']:.3f} |")
+            L.append("")
+        L += ["Exceeding the floor removes the guarantee of equal completion times for those requests; how much it reveals about "
+              "the protected outcome is the accuracy column, under the observer model stated, not a general side-channel bound."]
     path.write_text("\n".join(L) + "\n")
 
 
