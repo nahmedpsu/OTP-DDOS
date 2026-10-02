@@ -11,6 +11,9 @@ What is established here, and only here (the unit suite runs on the memory store
   * a feedback transition whose process dies before its effects are applied is completed by the
     other instance's recovery sweep, exactly once;
   * concurrent mixed receipts for one send leave a consistent entry;
+  * the graded destination counter's first boundary holds under concurrent requests from two
+    instances (requests past it are challenged), and its second tier admits only solved challenges
+    up to twice the limit;
   * store.update (WATCH/MULTI/EXEC) serialises conflicting writers.
 Not established: behaviour under network partitions or a Redis failover, Redis Cluster (the Lua
 scripts assume one shard), and process crashes at points other than the injected ones.
@@ -186,3 +189,64 @@ def test_store_update_serialises_conflicting_writers(redis_url):
         return go
     _run([worker(k) for k in range(8)])
     assert pipes[0].store.get("counter") == 400
+
+
+def _counter_instances(redis_url, setting="counter graded 4/10 min"):
+    from otp_guard.evaluation.runner import MATCHED
+    h, pipes = two_instances(redis_url)
+    _, feats, cfg = MATCHED[setting]
+    h.cfg.features = set(feats)
+    for k, v in cfg.items():
+        setattr(h.cfg, k, v)
+    return h, pipes
+
+
+def _gate_after_step5(pipes, n):
+    """Every request finishes Step 5 (the counter read) before any proceeds to its reservation."""
+    barrier = threading.Barrier(n)
+    for p in pipes:
+        orig = p.step5_number
+        p.step5_number = (lambda o: (lambda req: (o(req), barrier.wait(timeout=10))[0]))(orig)
+
+
+def test_graded_counter_first_boundary_across_instances(redis_url):
+    """Fourth-round M5: eight requests to one block that all read a count below the limit of 4 at
+    Step 5, split over two instances: four send, four are challenged."""
+    h, pipes = _counter_instances(redis_url)
+    reqs = [_req(h, i) for i in range(8)]
+    _gate_after_step5(pipes, 8)
+    out, lock = [], threading.Lock()
+    def worker(k):
+        def go():
+            r = pipes[k % 2].process(reqs[k])
+            with lock: out.append(r)
+        return go
+    _run([worker(k) for k in range(8)])
+    assert sum(r.channel == "sms" and r.rejected_at is None for r in out) == 4
+    assert sum(r.tier == "challenge" for r in out) == 4
+    assert int(pipes[0].store.get(pipes[0].block_count_key(reqs[0].mobile))) == 4
+
+
+def test_graded_counter_second_tier_across_instances(redis_url):
+    """Solved challenges fill the second tier to twice the limit and no further; unsolved requests
+    past the first boundary never send."""
+    h, pipes = _counter_instances(redis_url)
+    for i in range(4):
+        pipes[0].process(_req(h, i))
+    reqs = [_req(h, 100 + i) for i in range(6)]
+    for r in reqs[:3]:
+        r.challenge_proof = "challenge-ok"
+    reqs += [_req(h, 200 + i) for i in range(3)]
+    for r in reqs[6:]:
+        r.challenge_proof = "challenge-ok"
+    _gate_after_step5(pipes, len(reqs))
+    out, lock = [], threading.Lock()
+    def worker(k):
+        def go():
+            r = pipes[k % 2].process(reqs[k])
+            with lock: out.append((k, r))
+        return go
+    _run([worker(k) for k in range(len(reqs))])
+    sent = {k for k, r in out if r.channel == "sms" and r.rejected_at is None}
+    assert len(sent) == 4 and all(reqs[k].challenge_proof for k in sent)
+    assert int(pipes[0].store.get(pipes[0].block_count_key(reqs[0].mobile))) == 8

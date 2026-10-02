@@ -25,6 +25,24 @@ end
 return 1
 """
 
+# KEYS[1] = counter; ARGV = units, free_cap, hard_cap, window, allow_tier2 (0/1).
+# A two-tier reservation decided on the count it changes: returns 1 if reserved within the free
+# tier, 2 if reserved within the second tier (only when allowed), -1 if the request belongs to the
+# second tier but is not allowed there (nothing reserved), -2 if over the hard cap (nothing reserved).
+LUA_TRY_RESERVE_TIERED = """
+local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
+local u = tonumber(ARGV[1])
+local tier
+if cur + u <= tonumber(ARGV[2]) then tier = 1
+elseif cur + u <= tonumber(ARGV[3]) then
+    if tonumber(ARGV[5]) == 0 then return -1 end
+    tier = 2
+else return -2 end
+local v = redis.call('INCRBY', KEYS[1], u)
+if v == u then redis.call('EXPIRE', KEYS[1], ARGV[4]) end
+return tier
+"""
+
 # KEYS[1] = marker; KEYS[2..] = hashes. ARGV[1] = marker TTL, then (field, by, ttl) per hash.
 # The whole batch is applied once: a replay after a crash or a duplicate callback finds the marker.
 LUA_HINCRBY_BATCH_ONCE = """
@@ -271,6 +289,23 @@ class MemoryStore:
                     self.expire(key, window)
             return True
 
+    def try_reserve_tiered(self, key, units, free_cap, hard_cap, window, allow_tier2):
+        """Two-tier capped reservation decided atomically on the count it changes (see
+        LUA_TRY_RESERVE_TIERED): 1 or 2 = reserved in that tier; -1 = second tier, not allowed; -2 = full."""
+        with self.lock:
+            cur = int(self.get(key) or 0)
+            if cur + units <= free_cap:
+                tier = 1
+            elif cur + units <= hard_cap:
+                if not allow_tier2:
+                    return -1
+                tier = 2
+            else:
+                return -2
+            if self.incr(key, units) == units:
+                self.expire(key, window)
+            return tier
+
     def try_reserve(self, key, units, max_units, window):
         """Atomically add `units` to a capped counter; False (and nothing added) if it would exceed the cap."""
         with self.lock:
@@ -303,6 +338,7 @@ class RedisStore:
         self._acquire = self.r.register_script(LUA_TRY_ACQUIRE)
         self._acquire_all = self.r.register_script(LUA_TRY_ACQUIRE_ALL)
         self._reserve = self.r.register_script(LUA_TRY_RESERVE)
+        self._reserve_tiered = self.r.register_script(LUA_TRY_RESERVE_TIERED)
         self._batch_once = self.r.register_script(LUA_HINCRBY_BATCH_ONCE)
         self.round_trips = 0        # one per method call below; a pipeline counts once
 
@@ -449,6 +485,11 @@ class RedisStore:
     def try_reserve(self, key, units, max_units, window):
         self.round_trips += 1
         return int(self._reserve(keys=[key], args=[int(units), int(max_units), int(window)])) == 1
+
+    def try_reserve_tiered(self, key, units, free_cap, hard_cap, window, allow_tier2):
+        self.round_trips += 1
+        return int(self._reserve_tiered(keys=[key], args=[int(units), int(free_cap), int(hard_cap), int(window),
+                                                          1 if allow_tier2 else 0]))
 
     def release(self, key, units=1):
         self.round_trips += 1

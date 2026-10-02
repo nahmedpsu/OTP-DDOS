@@ -587,18 +587,28 @@ class Pipeline:
         return int(self.store.get(self.block_count_key(mobile)) or 0)
 
     def reserve_block_count(self, req):
-        """Atomic reservation of one send against the destination counter (Step 11). Refusing action:
-        capped at the limit; graded: capped at twice the limit (stage 2 sends nothing); a client with
-        verified history is exempt from the graded cap but still counted."""
+        """Atomic reservation of one send against the destination counter (Step 11). Returns 'ok', or
+        the stage the request belongs to if it may not send: 'refused' (refusing action, at the
+        limit), 'stage1' (graded: the block is past the limit and this request has not solved the
+        challenge) or 'stage2' (graded: at twice the limit). The graded stage is decided again here,
+        on the count the reservation changes, so requests that all read a count below the limit at
+        Step 5 cannot together pass the first boundary without a challenge. A client with verified
+        history is exempt from the graded caps but still counted."""
         limit, window = self.cfg.block_count_limit
+        key = self.block_count_key(req.mobile)
         if self.cfg.block_count_action == "refuse":
-            cap = limit
+            if not self.store.try_reserve(key, 1, limit, window):
+                return "refused"
+        elif self.is_known_good(req):
+            self.store.try_reserve(key, 1, 10 ** 9, window)
         else:
-            cap = 10 ** 9 if self.is_known_good(req) else 2 * limit
-        ok = self.store.try_reserve(self.block_count_key(req.mobile), 1, cap, window)
-        if ok:
-            req.number_claims.append((self.block_count_key(req.mobile), 1))   # released if the send is not made
-        return ok
+            tier = self.store.try_reserve_tiered(key, 1, limit, 2 * limit, window, "challenge_passed" in req.signals)
+            if tier == -1:
+                return "stage1"
+            if tier == -2:
+                return "stage2"
+        req.number_claims.append((key, 1))     # released if the send is not made
+        return "ok"
 
     # ---------- Step 9 ----------
     def is_known_good(self, req):
@@ -708,12 +718,23 @@ class Pipeline:
 
     def step11_log_and_send(self, req):
         channel = self.select_channel(req)
-        if channel == "sms" and self.on("block_count_limit") and not self.reserve_block_count(req):
+        held = self.reserve_block_count(req) if channel == "sms" and self.on("block_count_limit") else "ok"
+        if held == "refused":
             # a concurrent send took the block's last slot between Step 5 and here
-            if self.cfg.block_count_action == "refuse":
-                req.signals.append("block_count_refused")
-                self.release_number_claims(req)
-                return Response(200, dict(UNIFORM_BODY), rejected_at="step5", tier=req.tier, risk_score=req.risk_score)
+            req.signals.append("block_count_refused")
+            self.release_number_claims(req)
+            return Response(200, dict(UNIFORM_BODY), rejected_at="step5", tier=req.tier, risk_score=req.risk_score)
+        if held == "stage1":
+            # concurrent sends moved the block past its limit after Step 5: the stage-1 action applies
+            req.signals.append("block_count_stage1")
+            if req.trusted_platform == "web":
+                self.release_number_claims(req)        # the retry with the proof claims the number again
+                req.tier = "challenge"
+                return Response(200, {"status": "challenge", "challenge": "interactive_recaptcha"},
+                                rejected_at="step11", tier="challenge", risk_score=req.risk_score)
+            req.tier = "downgrade"                     # apps have no challenge surface: non-SMS channels
+            channel = self.select_channel(req)
+        elif held == "stage2":
             req.tier = "downgrade"
             req.signals.append("block_count_stage2")
             channel = self.select_channel(req)
