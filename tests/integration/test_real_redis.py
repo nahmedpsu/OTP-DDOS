@@ -9,7 +9,8 @@ What is established here, and only here (the unit suite runs on the memory store
     under the denylist action and under the default graded action, where the second crossing
     while a verdict is active is stage 2 whichever instance processed it;
   * a feedback transition whose process dies before its effects are applied is completed by the
-    other instance's recovery sweep, exactly once;
+    other instance's recovery sweep, once, including after 256 later events on the same block
+    (identifiers are kept for the replay horizon, not by count);
   * concurrent mixed receipts for one send leave a consistent entry;
   * the graded destination counter's first boundary holds under concurrent requests from two
     instances (requests past it are challenged), and its second tier admits only solved challenges
@@ -250,3 +251,30 @@ def test_graded_counter_second_tier_across_instances(redis_url):
     sent = {k for k, r in out if r.channel == "sms" and r.rejected_at is None}
     assert len(sent) == 4 and all(reqs[k].challenge_proof for k in sent)
     assert int(pipes[0].store.get(pipes[0].block_count_key(reqs[0].mobile))) == 8
+
+
+def test_replay_after_many_later_block_events_across_instances(redis_url):
+    """Fourth-round M6: instance 0 applies a failure's block effect and dies before clearing the
+    batch; 256 later events reach the block through instance 1; instance 1's sweep must not count
+    the failure again."""
+    h, pipes = two_instances(redis_url)
+    h.cfg.block_tests = ()                                     # accounting only, no verdicts
+    r = pipes[0].process(_req(h, 9, block="96650447"))
+    pipes[0].feedback.on_delivery(r.log_id, True)
+    h.clock.advance(h.cfg.resolution_timeout_s + 1)
+
+    class Crash(Exception):
+        pass
+    fb0 = pipes[0].feedback
+    orig = fb0._block_event
+    def dying(*a, **k):
+        orig(*a, **k)
+        raise Crash()
+    fb0._block_event = dying
+    with pytest.raises(Crash):
+        fb0.run_due_timeouts()
+    for i in range(256):
+        pipes[1].feedback._block_event("block:96650447", verified=False, event_id=f"synthetic:{i}")
+    h.clock.advance(pipes[1].feedback.RECOVER_AFTER_S + 1)
+    pipes[1].feedback.recover()
+    assert pipes[1].feedback.block_llr("block:96650447")[2][1] == 257

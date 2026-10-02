@@ -132,6 +132,8 @@ class FeedbackLoop:
                 tseq = new.get("tseq", 0) + 1
                 batch = {"tseq": tseq, "at": now, "effects": effects}
                 new["tseq"] = tseq
+                if any(f[0] == "block" and not f[2] and not f[4] for f in effects):
+                    new["block_fail_tseq"] = tseq          # a later reversal names this failure
                 new["pending"] = list(new.get("pending") or []) + [batch]
                 out["batch"] = batch
             out["entry"] = new
@@ -164,13 +166,17 @@ class FeedbackLoop:
                 if suspended is None:
                     suspended = self._suspension_decision(log_id, batch, rec)
                 if not suspended:
-                    _, key, verified, fast, undo = eff
-                    self._block_event(key, verified=verified, fast=fast, undo=undo, event_id=f"{log_id}:{tseq}")
+                    key, verified, fast, undo = eff[1:5]
+                    of = eff[5] if len(eff) > 5 and eff[5] is not None else None
+                    self._block_event(key, verified=verified, fast=fast, undo=undo, event_id=f"{log_id}:{tseq}",
+                                      undo_of=f"{log_id}:{of}" if of is not None else None)
             elif kind == "block_unfail":
                 if suspended is None:
                     suspended = self._suspension_decision(log_id, batch, rec)
                 if not suspended:
-                    self._block_event(eff[1], verified=False, undo_fail_only=True, event_id=f"{log_id}:{tseq}")
+                    of = eff[2] if len(eff) > 2 and eff[2] is not None else None
+                    self._block_event(eff[1], verified=False, undo_fail_only=True, event_id=f"{log_id}:{tseq}",
+                                      undo_of=f"{log_id}:{of}" if of is not None else None)
             elif kind == "trusted":
                 self.p.rep.mark_trusted(eff[1])
             elif kind == "timeout":
@@ -272,7 +278,7 @@ class FeedbackLoop:
                     n["resolution"], n["timed_out"] = None, False
                     fx.append(["rep", self._rep_ops(rec, ("undelivered", -1))])
                     if e.get("receipt_block_fail"):
-                        fx += [["block_unfail", k] for k in rec["reputation_keys"] if k.startswith("block:")]
+                        fx += [["block_unfail", k, e.get("block_fail_tseq")] for k in rec["reputation_keys"] if k.startswith("block:")]
                         n["receipt_block_fail"] = False
                     return n, "reopened", fx
                 return n, "delivered", fx
@@ -332,7 +338,8 @@ class FeedbackLoop:
         ops = [("verified", 1)] + ([(earlier, -1)] if earlier else []) + ([("fast_verified", 1)] if fast else [])
         fx = ([["outage", "kg_verified"]] if rec.get("known_good") else []) + [["rep", self._rep_ops(rec, *ops)]]
         undo = earlier == "failed" or bool(e.get("receipt_block_fail"))
-        fx += [["block", k, True, fast, undo] for k in rec["reputation_keys"] if k.startswith("block:")]
+        fx += [["block", k, True, fast, undo, e.get("block_fail_tseq") if undo else None]
+               for k in rec["reputation_keys"] if k.startswith("block:")]
         fx.append(["trusted", "num:" + rec["phone_number"]])
         return fx
 
@@ -452,12 +459,15 @@ class FeedbackLoop:
         return {"v": 0, "f": 0, "fv": 0, "conv": 0.0, "speed": 0.0, "verdicts": verdicts,
                 "verdict": None, "history": [], "seen": {}}
 
-    def _block_event(self, key, verified, fast=False, undo=False, event_id=None, undo_fail_only=False):
+    def _block_event(self, key, verified, fast=False, undo=False, event_id=None, undo_fail_only=False, undo_of=None):
         """One resolved send on a destination block. Counts, statistics, the current verdict and the
         verdict history are one document updated by one compare-and-set: concurrent events are all
         counted, a crossing happens once, and its stage is decided from the verdict already active in
         the same document (a crossing while a verdict is active escalates to stage 2). An event with
-        an id the document has seen is ignored (replay after a crash). The statistics are floored at
+        an id the document has seen is ignored (replay after a crash). A reversal (undo, undo_fail_only)
+        names the failure it reverses (undo_of): if that failure has not reached the block yet, the
+        reversal does not subtract it but records its id, so the failure is ignored when it arrives;
+        the outcome does not depend on the order in which the two are applied. The statistics are floored at
         -block_credit_thresholds x log(threshold) ('cusum'; 0 is Page's CUSUM) or unbounded ('sprt')."""
         cfg = self.p.cfg
         if "feedback" not in cfg.features:
@@ -480,9 +490,14 @@ class FeedbackLoop:
             if event_id is not None and event_id in seen:
                 return None                                  # already applied
             st["seen"] = seen
+            reverses = not (undo_of is not None and undo_of not in seen)   # False: the failure has not arrived
+            if undo_of is not None and not reverses:
+                seen = dict(seen, **{undo_of: now})          # tombstone: the failure will be ignored
+                st["seen"] = seen
             if undo_fail_only:
-                st["f"] = max(0, st["f"] - 1)
-                st["conv"] -= inc["fail"]
+                if reverses:
+                    st["f"] = max(0, st["f"] - 1)
+                    st["conv"] -= inc["fail"]
             elif verified:
                 st["v"] += 1
                 st["conv"] += inc["verify"]
@@ -491,7 +506,7 @@ class FeedbackLoop:
                     st["speed"] += inc["fast"]
                 else:
                     st["speed"] += inc["slow"]
-                if undo:                                     # a late verification of a send counted as failed
+                if undo and reverses:                        # a late verification of a send counted as failed
                     st["f"] = max(0, st["f"] - 1)
                     st["conv"] -= inc["fail"]
             else:

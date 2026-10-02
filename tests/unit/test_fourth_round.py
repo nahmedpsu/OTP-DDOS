@@ -184,3 +184,51 @@ def test_a_batch_older_than_the_replay_horizon_is_abandoned_not_replayed(h):
     fb._apply(r.log_id, rec, batch)                                       # a very late replay
     assert fb.block_llr("block:96650779")[2][1] == 2
     assert int(h.p.store.get("otp:fx:abandoned") or 0) == 1
+
+
+# ---------------- M15: a reversal that reaches the block before the failure it reverses ----------------
+
+def _crash_before_block_effect(fb):
+    """The next batch's process dies before any of its effects is applied."""
+    orig = fb._apply
+    def dying(log_id, rec, batch):
+        fb._apply = orig
+        raise Crash()
+    fb._apply = dying
+
+
+def test_late_verification_reversal_before_the_failure_is_applied(h):
+    """A send times out as failed, but that transition's process dies before its block effect; the
+    person then enters the code late (the reversal is applied at once), and recovery applies the
+    failure afterwards. The block must end with one verification and no failure, whatever the order."""
+    _open(h)
+    fb = h.p.feedback
+    r = h.send(_req(h, 3, block="96650780"))
+    fb.on_delivery(r.log_id, True)
+    h.clock.advance(h.cfg.resolution_timeout_s + 1)
+    _crash_before_block_effect(fb)
+    with pytest.raises(Crash):
+        fb.run_due_timeouts()                                  # resolved 'failed', effects pending
+    sid = h.p.sms_history[r.log_id]["session_id"]
+    fb.verify(sid, r.log_id, fb.code_for(r.log_id))          # late verification: reversal applied first
+    h.clock.advance(fb.RECOVER_AFTER_S + 1)
+    fb.recover()                                               # then the failure
+    assert fb.block_llr("block:96650780")[2][:2] == (1, 0)
+    rep = h.p.rep.get("block:96650780")
+    assert rep.verified == 1 and rep.failed == 0
+
+
+def test_corrected_receipt_reversal_before_the_failure_is_applied(h):
+    """The same ordering for the receipt-robust policy: a failed receipt's block failure is pending
+    when the corrected (positive) receipt's reversal is applied."""
+    _open(h)
+    h.cfg.receipt_policy = "robust"
+    fb = h.p.feedback
+    r = h.send(_req(h, 4, block="96650781"))
+    _crash_before_block_effect(fb)
+    with pytest.raises(Crash):
+        fb.on_delivery(r.log_id, False)
+    fb.on_delivery(r.log_id, True)
+    h.clock.advance(fb.RECOVER_AFTER_S + 1)
+    fb.recover()
+    assert fb.block_llr("block:96650781")[2] == (0, 0, 0)

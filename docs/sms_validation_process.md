@@ -817,7 +817,11 @@ completes. The guarantee is conditional on that horizon: every effect is applied
 once, and exactly once if a sweep runs within 20 minutes of the transition; a batch older
 than the horizon has its counting effects skipped and counted (`otp:fx:abandoned`), never
 applied twice. (Up to 2.7.0 a block remembered only its last 256 event ids, so a replay
-after 256 later events on the same block counted a failure twice; fourth-round review.) The verdict
+after 256 later events on the same block counted a failure twice; fourth-round review.) A
+reversal (a late verification of a send counted as failed, or a corrected receipt under the
+receipt-robust policy) names the failure it reverses; if it reaches the block first, the
+failure is ignored when it arrives, so the block's statistics do not depend on the order in
+which a crashed failure and its reversal are applied. The verdict
 of a destination block (stage, reason, until) lives in the block's own document and is
 decided in the compare-and-set that crosses the threshold, so a second crossing while a
 verdict is active is stage 2 whichever worker processed it. Rules: the top of
