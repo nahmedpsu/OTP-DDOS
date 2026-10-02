@@ -1,8 +1,9 @@
-........................................................................ [ 20%]
-........................................................................ [ 40%]
-........................................................................ [ 61%]
-........................................................................ [ 81%]
-.................................................................        [100%]
+........................................................................ [ 18%]
+........................................................................ [ 36%]
+........................................................................ [ 54%]
+........................................................................ [ 73%]
+........................................................................ [ 91%]
+.................................                                        [100%]
 =============================== warnings summary ===============================
 ../../../usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1
   /usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
@@ -12,7 +13,10 @@
 ==================================== PASSES ====================================
 ____________________ test_synthetic_logs_replay_round_trip _____________________
 ----------------------------- Captured stdout call -----------------------------
-wrote 319 rows to /tmp/pytest-of-root/pytest-50/test_synthetic_logs_replay_rou0/logs.csv
+wrote 319 rows to /tmp/pytest-of-root/pytest-57/test_synthetic_logs_replay_rou0/logs.csv
+______________ test_checkpoint_rows_from_other_code_are_rejected _______________
+----------------------------- Captured stdout call -----------------------------
+  reused 0, resumed 1, running 0 (stale rows rejected: 1)
 _______ test_recaptcha_rejects_wrong_action_or_hostname_and_fails_closed _______
 ------------------------------ Captured log call -------------------------------
 WARNING  otp_guard.providers:recaptcha.py:26 recaptcha unavailable: down
@@ -58,6 +62,10 @@ PASSED tests/integration/test_real_redis.py::test_graded_escalation_across_insta
 PASSED tests/integration/test_real_redis.py::test_crash_recovery_across_instances
 PASSED tests/integration/test_real_redis.py::test_concurrent_mixed_receipts_leave_a_consistent_entry
 PASSED tests/integration/test_real_redis.py::test_store_update_serialises_conflicting_writers
+PASSED tests/integration/test_real_redis.py::test_graded_counter_first_boundary_across_instances
+PASSED tests/integration/test_real_redis.py::test_graded_counter_second_tier_across_instances
+PASSED tests/integration/test_real_redis.py::test_replay_after_many_later_block_events_across_instances
+PASSED tests/integration/test_real_redis.py::test_token_bucket_first_boundary_across_instances
 PASSED tests/integration/test_replay.py::test_synthetic_logs_replay_round_trip
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[memory]
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[redis]
@@ -93,9 +101,39 @@ PASSED tests/unit/test_evaluation.py::test_mean_ci_and_ks
 PASSED tests/unit/test_evaluation.py::test_simulation_runs_and_is_deterministic
 PASSED tests/unit/test_evaluation.py::test_v1_leaks_more_than_v2_for_datacenter_attacker
 PASSED tests/unit/test_evaluation.py::test_every_enforcing_poisoner_variant_has_a_matched_observe_reference
+PASSED tests/unit/test_evaluation.py::test_checkpoint_rows_from_other_code_are_rejected
+PASSED tests/unit/test_evaluation.py::test_variance_components_separate_configurations_from_noise
 PASSED tests/unit/test_factory.py::test_empty_env_builds_all_fakes_and_reports_them
 PASSED tests/unit/test_factory.py::test_full_env_wires_real_adapters
 PASSED tests/unit/test_factory.py::test_kill_switch_and_grace_parsing
+PASSED tests/unit/test_fourth_round.py::test_counter_serial_first_boundary[memory]
+PASSED tests/unit/test_fourth_round.py::test_counter_serial_first_boundary[redis]
+PASSED tests/unit/test_fourth_round.py::test_counter_concurrent_first_boundary_is_enforced[memory]
+PASSED tests/unit/test_fourth_round.py::test_counter_concurrent_first_boundary_is_enforced[redis]
+PASSED tests/unit/test_fourth_round.py::test_counter_concurrent_solved_challenges_fill_the_second_tier_only[memory]
+PASSED tests/unit/test_fourth_round.py::test_counter_concurrent_solved_challenges_fill_the_second_tier_only[redis]
+PASSED tests/unit/test_fourth_round.py::test_counter_concurrent_unsolved_at_second_boundary[memory]
+PASSED tests/unit/test_fourth_round.py::test_counter_concurrent_unsolved_at_second_boundary[redis]
+PASSED tests/unit/test_fourth_round.py::test_counter_challenged_request_releases_its_number_claim[memory]
+PASSED tests/unit/test_fourth_round.py::test_counter_challenged_request_releases_its_number_claim[redis]
+PASSED tests/unit/test_fourth_round.py::test_block_effect_is_not_replayed_after_many_later_events[memory]
+PASSED tests/unit/test_fourth_round.py::test_block_effect_is_not_replayed_after_many_later_events[redis]
+PASSED tests/unit/test_fourth_round.py::test_event_identifiers_are_kept_for_the_replay_horizon[memory]
+PASSED tests/unit/test_fourth_round.py::test_event_identifiers_are_kept_for_the_replay_horizon[redis]
+PASSED tests/unit/test_fourth_round.py::test_a_batch_older_than_the_replay_horizon_is_abandoned_not_replayed[memory]
+PASSED tests/unit/test_fourth_round.py::test_a_batch_older_than_the_replay_horizon_is_abandoned_not_replayed[redis]
+PASSED tests/unit/test_fourth_round.py::test_late_verification_reversal_before_the_failure_is_applied[memory]
+PASSED tests/unit/test_fourth_round.py::test_late_verification_reversal_before_the_failure_is_applied[redis]
+PASSED tests/unit/test_fourth_round.py::test_corrected_receipt_reversal_before_the_failure_is_applied[memory]
+PASSED tests/unit/test_fourth_round.py::test_corrected_receipt_reversal_before_the_failure_is_applied[redis]
+PASSED tests/unit/test_fourth_round.py::test_token_bucket_burst_then_refill[memory]
+PASSED tests/unit/test_fourth_round.py::test_token_bucket_burst_then_refill[redis]
+PASSED tests/unit/test_fourth_round.py::test_token_bucket_burst_is_separate_from_the_rate[memory]
+PASSED tests/unit/test_fourth_round.py::test_token_bucket_burst_is_separate_from_the_rate[redis]
+PASSED tests/unit/test_fourth_round.py::test_token_bucket_concurrent_first_boundary_and_second_tier[memory]
+PASSED tests/unit/test_fourth_round.py::test_token_bucket_concurrent_first_boundary_and_second_tier[redis]
+PASSED tests/unit/test_fourth_round.py::test_token_bucket_returns_the_token_when_no_sms_is_sent[memory]
+PASSED tests/unit/test_fourth_round.py::test_token_bucket_returns_the_token_when_no_sms_is_sent[redis]
 PASSED tests/unit/test_providers.py::test_recaptcha_maps_success_and_score
 PASSED tests/unit/test_providers.py::test_recaptcha_rejects_wrong_action_or_hostname_and_fails_closed
 PASSED tests/unit/test_providers.py::test_play_integrity_accepts_good_verdict_and_sends_bearer
@@ -192,6 +230,12 @@ PASSED tests/unit/test_simulator_invariants.py::test_heterogeneous_population_op
 PASSED tests/unit/test_simulator_invariants.py::test_threshold_aware_carrier_evades_by_verifying_near_the_zero_drift_share
 PASSED tests/unit/test_simulator_invariants.py::test_containment_needs_a_sustained_quiet_period
 PASSED tests/unit/test_simulator_invariants.py::test_legitimate_traffic_is_the_same_with_and_without_an_attack
+PASSED tests/unit/test_simulator_invariants.py::test_whatsapp_reachability_is_a_stable_property_of_the_number
+PASSED tests/unit/test_simulator_invariants.py::test_returning_account_holders_have_verified_fingerprint_history
+PASSED tests/unit/test_simulator_invariants.py::test_shared_block_pumper_uses_the_legitimate_hot_blocks
+PASSED tests/unit/test_simulator_invariants.py::test_quota_aware_pumper_never_exceeds_its_quota_per_block
+PASSED tests/unit/test_simulator_invariants.py::test_launch_brings_first_time_fresh_users_to_the_hot_blocks
+PASSED tests/unit/test_simulator_invariants.py::test_no_whatsapp_users_can_be_made_worse_at_challenges
 PASSED tests/unit/test_steps.py::test_web_happy_path_sends_sms_and_logs[memory]
 PASSED tests/unit/test_steps.py::test_web_happy_path_sends_sms_and_logs[redis]
 PASSED tests/unit/test_steps.py::test_attested_ios_from_any_host_is_allowed[memory]
@@ -394,4 +438,4 @@ PASSED tests/unit/test_third_round.py::test_two_baseline_workers_neither_double_
 PASSED tests/unit/test_third_round.py::test_partial_first_hour_is_not_a_sample_and_restart_keeps_the_last_hour[memory]
 PASSED tests/unit/test_third_round.py::test_partial_first_hour_is_not_a_sample_and_restart_keeps_the_last_hour[redis]
 PASSED tests/unit/test_third_round.py::test_weekly_profile_is_learned_in_the_simulation
-353 passed, 1 warning in 166.85s (0:02:46)
+393 passed, 1 warning in 192.61s (0:03:12)
