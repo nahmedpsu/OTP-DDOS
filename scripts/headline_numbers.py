@@ -78,6 +78,21 @@ ENTRIES = [
     ("Poisoner, recovery run (70 min): requests hit after the attack stopped", "evaluation.json", ("poisoner", "graded, attacker stops after 10 min (recovery, 70-minute run)", "legit_hit_after_stop"), "10 seeds"),
     ("Economics, human-like carrier under v2: break-even revenue share", "evaluation.json", ("economics", "pumping_study", "concentrated_pumper_verifies_humanlike", 1, "breakeven_share"), "10 seeds, scenario accounting"),
     ("Economics, non-verifying carrier under v2: break-even revenue share", "evaluation.json", ("economics", "pumping_study", "concentrated_pumper_no_verify", 1, "breakeven_share"), "10 seeds, scenario accounting"),
+    ("Poisoner, recovery run: attributable loss after the attack stopped (requests)", "evaluation.json", ("poisoner", "graded, attacker stops after 10 min (recovery, 70-minute run)", "attributable_loss_vs_observe", "after_stop", "net_lost"), "10 seeds, paired per request"),
+    ("Nested variance: farm leakage, between-configuration share", "evaluation.json", ("variance_nested", "residential_captcha_farm", "leaked_total", "between_share"), "10 configurations x 3 seeds"),
+    ("Counter study: claims K1-K5", "counter_study.json", ("E2", "claims"), "12 points x 3 seeds (fresh)"),
+    ("Counter study E1, 200 shared: principal counter leaked (human-like carrier)", "counter_study.json", ("E1", "200 shared", "concentrated_pumper_verifies_humanlike", "counter graded 4/10 min", "leaked_total"), "seeds 300-309"),
+    ("Counter study E1, 200 shared: default leaked (human-like carrier)", "counter_study.json", ("E1", "200 shared", "concentrated_pumper_verifies_humanlike", "sequential T1000 c1", "leaked_total"), "seeds 300-309"),
+    ("Counter study E1, 200 shared: principal counter attributable loss, % of users (no-verify pumper)", "counter_study.json", ("E1", "200 shared", "concentrated_pumper_no_verify", "counter graded 4/10 min", "attributable_loss_vs_none", "net_lost_pct"), "seeds 300-309, paired per request"),
+    ("Counter study E1, 200 shared: poisoner leaked under the counter", "counter_study.json", ("E1", "200 shared", "block_poisoner", "counter graded 4/10 min", "leaked_total"), "seeds 300-309"),
+    ("Counter study E3: trust-building pumper leaked under the counter", "counter_study.json", ("E3", "trust_building_pumper", "counter graded 4/10 min", "leaked_total"), "seeds 300-309"),
+    ("Counter study E3: spread over 300 blocks, counter leaked", "counter_study.json", ("E3", "spread over 300 blocks, never verifies", "counter graded 4/10 min", "leaked_total"), "seeds 300-309"),
+    ("Counter study E3: spread over 300 blocks, no policy leaked", "counter_study.json", ("E3", "spread over 300 blocks, never verifies", "none", "leaked_total"), "seeds 300-309"),
+    ("Counter study E3: quota-aware over 300 blocks, counter leaked", "counter_study.json", ("E3", "quota-aware over 300 blocks (4 per 10 min each)", "counter graded 4/10 min", "leaked_total"), "seeds 300-309"),
+    ("Counter study E3: threshold-aware carrier, counter leaked", "counter_study.json", ("E3", "threshold_aware_carrier", "counter graded 4/10 min", "leaked_total"), "seeds 300-309"),
+    ("Counter study E3: 360-min human-like carrier, counter leaked per hour", "counter_study.json", ("E3", "concentrated_pumper_verifies_humanlike, 360 minutes", "counter graded 4/10 min", "leaked_per_hour"), "seeds 300-309"),
+    ("Counter study E3: 360-min human-like carrier, default leaked per hour", "counter_study.json", ("E3", "concentrated_pumper_verifies_humanlike, 360 minutes", "sequential T1000 c1", "leaked_per_hour"), "seeds 300-309"),
+    ("Counter study E4: 8 sends/hot block/10 min, attack-free, counter loss among hot-block users (pp)", "counter_study.json", ("E4", "service", "8|0.7|benign|counter graded 4/10 min", "attributable_loss_vs_none", "hot_block", "net_lost_pct_of_group"), "seeds 300-304"),
     ("Robustness claims", "evaluation.json", ("robustness",), "12 points x 3 seeds"),
     ("Performance: in-process send p50 ms", "performance.json", ("phase1_in_process", "end_to_end_ms", "sent", "p50"), "3000 requests"),
     ("Performance: HTTP throughput without the floor (req/s)", "performance.json", ("phase2_http_floor_0", "throughput_rps"), "6000 requests, concurrency 32"),
@@ -93,6 +108,8 @@ def fmt(v):
             return "; ".join(f"{k}: {x}" for k, x in v.items())
         if "C1" in v:
             return "; ".join(f"{c} {'holds' if v[c]['holds'] else 'fails'} ({v[c]['true']}/{v[c]['cells']})" for c in ("C1", "C2", "C3", "C4", "C5"))
+        if "K1" in v:
+            return "; ".join(f"{c} {'holds' if v[c]['holds'] else 'fails'} ({v[c]['true']}/{v[c]['cells']})" for c in ("K1", "K2", "K3", "K4", "K5"))
         return f"{len(v)} cells"
     if isinstance(v, float):
         return f"{v:.2f}"
@@ -104,7 +121,7 @@ def main():
     ap.add_argument("--results", default=str(ROOT / "results"))
     a = ap.parse_args()
     res = pathlib.Path(a.results)
-    files = {f: json.loads((res / f).read_text()) for f in ("evaluation.json", "performance.json") if (res / f).exists()}
+    files = {f: json.loads((res / f).read_text()) for f in ("evaluation.json", "performance.json", "counter_study.json") if (res / f).exists()}
     L = ["# Headline numbers and where they come from", "",
          "Every figure quoted in the README resolves to one entry here: the file under `results/`, the JSON path, the seed set and "
          "the value (mean with 95 % percentile-bootstrap interval and n, where the metric is an interval). Regenerate with `python3 scripts/headline_numbers.py` "
