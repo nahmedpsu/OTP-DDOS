@@ -182,3 +182,59 @@ def test_legitimate_traffic_is_the_same_with_and_without_an_attack():
     assert len({r["legit_workload_digest"] for r in runs}) == 1
     assert len({r["friction"]["users"] for r in runs}) == 1
     assert len({r["workload_digest"] for r in runs}) == 3
+
+
+# ---------------- fourth-round simulator options ----------------
+
+def test_whatsapp_reachability_is_a_stable_property_of_the_number():
+    sim = Simulation(SimSpec(attacker=ATTACKERS["naive_single_client"], legit=LegitSpec(whatsapp_fraction=0.5), seed=3))
+    nums = [f"9665012{i:05d}" for i in range(400)]
+    first = [sim._reachable(m, 0.0) for m in nums]
+    assert first == [sim._reachable(m, 0.99) for m in nums]               # the per-request draw is ignored
+    assert 0.4 < sum(first) / len(first) < 0.6
+    per_req = Simulation(SimSpec(attacker=ATTACKERS["naive_single_client"],
+                                 legit=LegitSpec(whatsapp_fraction=0.5, whatsapp_mode="per_request"), seed=3))
+    assert per_req._reachable(nums[0], 0.1) and not per_req._reachable(nums[0], 0.9)
+
+
+def test_returning_account_holders_have_verified_fingerprint_history():
+    sim = Simulation(SimSpec(attacker=ATTACKERS["naive_single_client"], seed=1))
+    fp, mobile = sim.population[0]
+    assert sim.h.p.rep.get("fp:" + fp).verified > 0 and sim.h.p.rep.is_trusted("num:" + mobile)
+
+
+def test_shared_block_pumper_uses_the_legitimate_hot_blocks():
+    a = replace(PUMPING_ATTACKERS["concentrated_pumper_no_verify"], shared_blocks=True)
+    r = run_sim(SimSpec(attacker=a, legit=LegitSpec(blocks=200, hot_blocks=3, hot_fraction=0.05), minutes=5,
+                        warmup_minutes=1, seed=2, record_requests=True))
+    assert r["attacker_blocks_requested"] == 3
+    attacked = unbits(r["requests"]["attacked_block"])
+    assert 0 < len(attacked) < r["requests"]["n"]                          # some real users share those blocks
+
+
+def test_quota_aware_pumper_never_exceeds_its_quota_per_block():
+    a = replace(PUMPING_ATTACKERS["concentrated_pumper_no_verify"], n_blocks=5, quota=(4, 600), rate_per_min=30)
+    sim = Simulation(SimSpec(attacker=a, minutes=15, warmup_minutes=1, seed=4))
+    r = sim.run()
+    for times in sim.attack_state["quota"].values():
+        times = sorted(times)
+        for i, t in enumerate(times):
+            assert sum(1 for u in times[i:] if u < t + 600) <= 4
+    assert r["attack"]["requests"] <= 5 * 4 * 2 + 5                       # at most two windows' quota over 15 minutes
+
+
+def test_launch_brings_first_time_fresh_users_to_the_hot_blocks():
+    spec = SimSpec(attacker=ATTACKERS["naive_single_client"], legit_only=True, minutes=10, warmup_minutes=0, seed=5,
+                   legit=LegitSpec(hot_blocks=2, launch=(0, 10, 3.0, 1.0), bursts=((0, 10, 3.0),)))
+    sim = Simulation(spec)
+    sim.run()
+    users = [u for u in sim.users if not u["warm"]]
+    assert all(u["cohort"] == "first_time" and u["block"] in sim.hot_blocks for u in users)
+
+
+def test_no_whatsapp_users_can_be_made_worse_at_challenges():
+    spec = SimSpec(attacker=ATTACKERS["naive_single_client"], seed=6,
+                   legit=LegitSpec(whatsapp_fraction=0.5, solves_challenges=1.0, no_whatsapp_solves=0.0))
+    sim = Simulation(spec)
+    ctxs = [sim.make_legit_ctx(0, False) for _ in range(300)]
+    assert all(c["solves"] == c["whatsapp"] for c in ctxs)

@@ -20,8 +20,9 @@ def _counter(h, setting="counter graded 4/10 min"):
 
 def _req(h, i, block="96650123", **kw):
     # a web client whose fingerprint is old enough to be sent to directly, but with no verified history
+    # numbers spread over the block's 9-digit ranges, so Step 5's narrow-range rule stays out of the way
     return h.web_request(session=h.session(age_hours=3)[0], ip=f"198.71.{i // 250}.{i % 250 + 1}",
-                         mobile=f"{block}{i:04d}", **kw)
+                         mobile=f"{block}{i % 10}{(i // 10) % 1000:03d}", **kw)
 
 
 def _outcomes(resps):
@@ -232,3 +233,44 @@ def test_corrected_receipt_reversal_before_the_failure_is_applied(h):
     h.clock.advance(fb.RECOVER_AFTER_S + 1)
     fb.recover()
     assert fb.block_llr("block:96650781")[2] == (0, 0, 0)
+
+
+# ---------------- the token-bucket destination limiter ----------------
+
+def _bucket(h, n=4, window=600, burst=None):
+    _counter(h)
+    h.cfg.block_count_mode, h.cfg.block_count_limit, h.cfg.block_bucket_burst = "token_bucket", (n, window), burst
+    return h
+
+
+def test_token_bucket_burst_then_refill(h):
+    _bucket(h)
+    resps = [h.send(_req(h, i)) for i in range(6)]
+    assert _outcomes(resps) == {"sms": 4, "challenge": 2}
+    h.clock.advance(150)                                    # 4 tokens / 600 s: one token back
+    assert _outcomes([h.send(_req(h, 10))])["sms"] == 1
+    assert _outcomes([h.send(_req(h, 11))])["challenge"] == 1
+
+
+def test_token_bucket_burst_is_separate_from_the_rate(h):
+    _bucket(h, n=4, window=600, burst=10)
+    resps = [h.send(_req(h, i)) for i in range(12)]
+    assert _outcomes(resps) == {"sms": 10, "challenge": 2}
+
+
+def test_token_bucket_concurrent_first_boundary_and_second_tier(h):
+    _bucket(h)
+    resps = _concurrent(h, [_req(h, i) for i in range(8)])
+    assert _outcomes(resps) == {"sms": 4, "challenge": 4}
+    resps = _concurrent(h, [_req(h, 100 + i, challenge_proof="challenge-ok") for i in range(6)])
+    assert _outcomes(resps)["sms"] == 4                     # the second bucket, nothing beyond it
+
+
+def test_token_bucket_returns_the_token_when_no_sms_is_sent(h):
+    _bucket(h)
+    h.cfg.global_sms_per_hour = 1
+    h.send(_req(h, 0, block="96650999"))                    # spends the hour's budget on another block
+    for i in range(6):
+        h.send(_req(h, i))                                  # each reservation is made, then returned at the budget
+    a, b = h.p._bucket_levels(h.p.store.get(h.p.block_count_key("966501230000")), h.clock.now())
+    assert (a, b) == (4.0, 4.0)

@@ -99,6 +99,10 @@ class AttackerSpec:
     trust_concentrated: bool = False   # the pool's numbers lie inside the attacker's concentrated blocks
     fake_failed_receipts: bool = False # the colluding carrier reports its own deliveries as failed
     active_minutes: int = None         # the attack stops after this many minutes (recovery studies); None = whole run
+    shared_blocks: bool = False        # concentrated: the carrier's ranges are blocks real users also use (legit hot blocks
+                                       # if any, else the legitimate block set); needs 8-digit ranges
+    quota: tuple = None                # (sends, window_s): a quota-aware pumper that knows the destination counter and
+                                       # sends at most this many per block per window, moving to another of its blocks
 
 
 @dataclass
@@ -131,6 +135,14 @@ class LegitSpec:
     resend_prob: float = 0.0           # a converting user whose code has not been entered after resend_after_s asks again
     resend_after_s: float = 90.0
     bursts: tuple = ()                 # ((start minute, end minute, rate multiplier), ...): campaign-like demand bursts
+    whatsapp_mode: str = "per_number"  # 'per_number': reachability is a stable property of the number (hash of seed and
+                                       # number); 'per_request': redrawn for every request (up to 2.7.0)
+    no_whatsapp_solves: float = None   # challenge completion of users without WhatsApp (None: solves_challenges); a
+                                       # correlated-failure stress: those who cannot fall back also fail challenges
+    hot_blocks: int = 0                # this many hot 8-digit blocks receive hot_fraction of legitimate requests
+    hot_fraction: float = 0.0
+    launch: tuple = ()                 # (start minute, end minute, rate multiplier, hot fraction): a product launch, i.e. a
+                                       # burst of first-time users with fresh fingerprints concentrated on the hot blocks
 
 
 @dataclass
@@ -257,6 +269,11 @@ class Simulation:
             universe = len(STANDARD_PREFIXES) * 1000
             picks = self.rng_l.sample(range(universe), min(spec.legit.blocks, universe))
             self.legit_blocks = [f"{STANDARD_PREFIXES[i // 1000]}{i % 1000:03d}" for i in picks]
+        self.hot_blocks = []
+        if spec.legit.hot_blocks:
+            pool = self.legit_blocks or [f"{STANDARD_PREFIXES[i // 1000]}{i % 1000:03d}" for i in
+                                         self.rng_l.sample(range(len(STANDARD_PREFIXES) * 1000), spec.legit.hot_blocks)]
+            self.hot_blocks = pool[:spec.legit.hot_blocks]
         self.block_traits = {}              # block -> (conversion, bad route), drawn once per block from its own stream
         self.legit_block_sends = collections.Counter()
         self.legit_identities = []          # returning_mode 'trace': fingerprints the trace has offered so far
@@ -297,6 +314,7 @@ class Simulation:
             self.population.append((fp, mobile))
             h.p.sessions.set_first_seen(fp, h.clock.now() - 30 * 86400)
             h.p.rep.mark_trusted("num:" + mobile)
+            h.p.rep.incr("fp:" + fp, "verified", 1)        # the account holder's device has verified before
 
     def _token(self, score):
         tok = f"t{next(self.tokens)}"
@@ -339,6 +357,11 @@ class Simulation:
 
     def _ranges(self):
         a = self.spec.attacker
+        if "blocks" not in self.attack_state and a.shared_blocks:
+            assert a.block_range_digits == 8, "shared blocks are 8-digit blocks"
+            pool = self.hot_blocks or self.legit_blocks
+            assert pool, "a shared-block attacker needs legitimate blocks (legit.blocks or legit.hot_blocks)"
+            self.attack_state["blocks"] = list(pool[:a.n_blocks])
         if "blocks" not in self.attack_state:
             fixed = a.block_range_digits - 5
             universe = len(STANDARD_PREFIXES) * 10 ** fixed            # distinct ranges that exist
@@ -349,7 +372,22 @@ class Simulation:
     def _concentrated_number(self):
         a = self.spec.attacker
         tail = 12 - a.block_range_digits
-        return f"{self.rng_w.choice(self._ranges())}{self.rng_w.randrange(10**tail):0{tail}d}"
+        blocks = self._ranges()
+        u_block, u_tail = self.rng_w.random(), self.rng_w.randrange(10**tail)   # drawn whatever the policy below
+        if a.quota:
+            # quota-aware: the first of its blocks (from a random start) with quota left in the current window
+            n, w = a.quota
+            now = self.h.clock.now()
+            sent = self.attack_state.setdefault("quota", {})
+            start = int(u_block * len(blocks))
+            for k in range(len(blocks)):
+                b = blocks[(start + k) % len(blocks)]
+                times = [t for t in sent.get(b, []) if t > now - w]
+                if len(times) < n:
+                    sent[b] = times + [now]
+                    return f"{b}{u_tail:0{tail}d}"
+            return None                                     # every block's quota is spent: the pumper waits
+        return f"{blocks[int(u_block * len(blocks))]}{u_tail:0{tail}d}"
 
     def _trust_pool(self):
         """(identity, number) pairs, one-to-one, drawn once; the flood phase reuses exactly these."""
@@ -406,6 +444,8 @@ class Simulation:
             fp, age, reuse = self.attacker_identity(k)
             mobile = self.attacker_number(k)
         u_verify = self.rng_w.random()
+        if mobile is None:
+            return None                                       # a quota-aware pumper with no quota left waits
         verify = True if in_trust_phase else (None if a.verify_policy == "threshold_aware" else u_verify < a.verify_fraction)
         ctx = dict(attacker=True, k=k, minute=minute, fp=fp, age=age, reuse_session=reuse, ip=self.attacker_ip(k), mobile=mobile,
                    gate_scores=self._scores(a.captcha_beta, MAX_SESSION_ATTEMPTS), recaptcha_score=self.rng_w.betavariate(*a.captcha_beta),
@@ -416,14 +456,31 @@ class Simulation:
         self._digest(ctx)
         return ctx
 
-    def _legit_number(self):
+    def _legit_number(self, hot_fraction=None):
+        l = self.spec.legit
+        hf = l.hot_fraction if hot_fraction is None else hot_fraction
+        if self.hot_blocks and hf > 0 and self.rng_l.random() < hf:
+            return f"{self.rng_l.choice(self.hot_blocks)}{self.rng_l.randrange(10**4):04d}"
         if self.legit_blocks:
             return f"{self.rng_l.choice(self.legit_blocks)}{self.rng_l.randrange(10**4):04d}"
         return f"{self.rng_l.choice(STANDARD_PREFIXES)}{self.rng_l.randrange(10**7):07d}"
 
+    def _in_launch(self, minute):
+        la = self.spec.legit.launch
+        return bool(la) and la[0] <= minute < la[1]
+
+    def _reachable(self, mobile, u):
+        """WhatsApp reachability of a legitimate number: stable per number (default) or the per-request draw u."""
+        l = self.spec.legit
+        if l.whatsapp_mode == "per_request":
+            return u < l.whatsapp_fraction
+        h = int(hashlib.blake2b(f"{self.spec.seed}:{mobile}".encode(), digest_size=8).hexdigest(), 16)
+        return h / 2 ** 64 < l.whatsapp_fraction
+
     def make_legit_ctx(self, minute, warm):
         l = self.spec.legit
-        returning = self.rng_l.random() < l.returning_fraction
+        launch = self._in_launch(minute)
+        returning = self.rng_l.random() < l.returning_fraction and not launch
         mobile = None
         if returning and l.returning_mode == "population":
             fp, mobile = self.rng_l.choice(self.population)
@@ -432,7 +489,7 @@ class Simulation:
             fp, age = self.rng_l.choice(self.legit_identities), 24
         else:
             returning = False
-            fresh = self.rng_l.random() < l.fresh_fp_fraction
+            fresh = self.rng_l.random() < l.fresh_fp_fraction or launch
             fp, age = f"legit-fp-{len(self.legit_identities)}", (0 if fresh else 24)
             self.legit_identities.append(fp)
         u = self.rng_l.random()
@@ -445,12 +502,12 @@ class Simulation:
         else:
             ip = _res_ip(self.rng_l.randrange(1 << 22))
         if mobile is None:
-            mobile = self._legit_number()
+            mobile = self._legit_number(l.launch[3] if launch else None)
         u_convert = self.rng_l.random()
         autofill = self.rng_l.random() < l.autofill_fraction
         entry = (l.autofill_median_s * math.exp(self.rng_l.gauss(0, l.autofill_sigma)) if autofill
                  else l.verify_median_s * math.exp(self.rng_l.gauss(0, l.verify_sigma)))
-        whatsapp = self.rng_l.random() < l.whatsapp_fraction
+        whatsapp = self._reachable(mobile, self.rng_l.random())
         u_route = self.rng_l.random()
         resends = self.rng_l.random() < l.resend_prob
         conv_b, bad_route = self._traits(mobile[:8])
@@ -460,10 +517,11 @@ class Simulation:
                    delivery=l.delivery_median_s * math.exp(self.rng_l.gauss(0, l.delivery_sigma)),
                    retry_score=self.rng_l.betavariate(9, 1.5), whatsapp=whatsapp, spoof=False, returning=returning,
                    lost_on_route=bad_route and u_route < l.bad_route_failure, resends=resends,
-                   solves=self.rng_p.random() < l.solves_challenges)
+                   solves=self.rng_p.random() < (l.solves_challenges if whatsapp or l.no_whatsapp_solves is None
+                                                 else l.no_whatsapp_solves))
         self._digest(ctx)
         user = dict(rid=None if warm else self.n_measured, warm=warm, cohort="returning" if returning else "first_time",
-                    minute=minute, challenged=False, dispatched=False, delivered=False, completed=False, loss=None,
+                    minute=minute, block=mobile[:8], challenged=False, dispatched=False, delivered=False, completed=False, loss=None,
                     delayed=False, delay_s=0.0, channel=None, hit_stage=None, hit_minute=None, known_good=None, requests=0)
         if not warm:
             self.n_measured += 1
@@ -720,6 +778,8 @@ class Simulation:
                     self.process_due_events(until=t0 + offset)
                     if is_attacker:
                         ctx = self.make_attacker_ctx(-1, -1)
+                        if ctx is None:
+                            continue
                         ctx["fp"] = ctx["fp"] or f"poison-fp-{next(self.tokens)}"
                         self.handle_attacker(ctx, -1)
                     else:
@@ -764,6 +824,9 @@ class Simulation:
                 if is_attacker:
                     ctx = self.make_attacker_ctx(k_attack, minute)
                     k_attack += 1
+                    if ctx is None:
+                        na -= 1                              # not sent: the attack rate is what was actually offered
+                        continue
                     if not warm:
                         self.attacker_requests_offered += 1
                     if ctx["fp"] is None:
@@ -904,8 +967,13 @@ class Simulation:
         out.update(self._verdict_estimands())
         if spec.record_requests:
             n = self.n_measured
+            attacked = self.attacker_blocks_requested
+            stop = spec.attacker.active_minutes
             out["requests"] = {"n": n, "completed": _bits([u["rid"] for u in measured if u["completed"]], n),
-                               "hit": _bits([u["rid"] for u in hits], n)}
+                               "hit": _bits([u["rid"] for u in hits], n),
+                               "returning": _bits([u["rid"] for u in measured if u["cohort"] == "returning"], n),
+                               "attacked_block": _bits([u["rid"] for u in measured if u.get("block") in attacked], n),
+                               "after_stop": _bits([u["rid"] for u in measured if stop is not None and u["minute"] >= stop], n)}
         return out
 
     @staticmethod

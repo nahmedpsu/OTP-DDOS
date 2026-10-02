@@ -127,6 +127,11 @@ class Config:
     block_count_action: str = "refuse"      # 'refuse': once `limit` sends were made, further requests are refused;
                                             # 'graded': beyond `limit`, first-time clients must solve a challenge, beyond
                                             # 2 x limit they are moved off SMS (the verdicts' actions); verified history exempt
+    block_count_mode: str = "window"        # 'window': the counter above (a quota that refills when its window expires);
+                                            # 'token_bucket': per block, a bucket refilled continuously at limit / window
+                                            # tokens a second up to block_bucket_burst (rate and burst set separately,
+                                            # as in RFC 2697); graded: a second bucket of the same size serves solved challenges
+    block_bucket_burst: int = None          # token bucket capacity (None: the limit)
     budget_hard_ceiling: bool = True        # no SMS at all beyond the hourly budget; reserved atomically before sending
     sms_text_template: str = "Your verification code is {code}"
     # Delivery receipts. With receipts on, a send counts as failed for reputation only after the

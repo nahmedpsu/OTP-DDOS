@@ -349,14 +349,13 @@ class Pipeline:
             # the destination counter: SMS sends already dispatched to this block in its window. Read
             # only here; the send itself is reserved atomically at Step 11, so a refused request, a
             # challenge and its retry cost nothing unless an SMS goes out.
-            limit, _ = self.cfg.block_count_limit
-            n = self.block_count(mobile)
+            stage = self.block_count_stage(mobile)
             if self.cfg.block_count_action == "refuse":
-                if n >= limit:
+                if stage:
                     req.signals.append("block_count_refused")
                     return False
-            elif n >= limit:
-                req.count_stage = 1 if n < 2 * limit else 2
+            elif stage:
+                req.count_stage = stage
         if self.on("fine_destination_key") and self.on("feedback") and self.cfg.block_action == "deny" \
                 and self.feedback.block_denied(self.block_key(mobile)):
             req.signals.append("block_denied")        # a destination block under a hard-deny verdict
@@ -568,23 +567,91 @@ class Pipeline:
 
     def release_number_claims(self, req):
         for key, units in req.number_claims:
-            if units is None:
-                self.store.delete(key)
-            else:
-                self.store.release(key, units)
+            self._release_claim(key, units)
         req.number_claims = []
 
     def release_block_count(self, req):
         key = self.block_count_key(req.mobile)
         for k, units in [c for c in req.number_claims if c[0] == key]:
-            self.store.release(k, units)
+            self._release_claim(k, units)
         req.number_claims = [c for c in req.number_claims if c[0] != key]
 
+    def _release_claim(self, key, units):
+        if units is None:
+            self.store.delete(key)
+        elif key.startswith(self.BUCKET):
+            self._bucket_release(key, units)
+        else:
+            self.store.release(key, units)
+
+    BUCKET = "otp:blockbucket:"
+
     def block_count_key(self, mobile):
+        if self.cfg.block_count_mode == "token_bucket":
+            return self.BUCKET + mobile[:self.cfg.destination_block_digits]
         return "otp:blockcount:" + mobile[:self.cfg.destination_block_digits]
 
     def block_count(self, mobile):
-        return int(self.store.get(self.block_count_key(mobile)) or 0)
+        """Sends counted in the block's current window ('window' mode)."""
+        return int(self.store.get("otp:blockcount:" + mobile[:self.cfg.destination_block_digits]) or 0)
+
+    def block_count_stage(self, mobile):
+        """Read only (Step 5): None below the limit, 1 past it, 2 past twice the limit (or, for the token
+        bucket, the first bucket empty / both empty). The decision that counts is the reservation's."""
+        limit, _ = self.cfg.block_count_limit
+        if self.cfg.block_count_mode == "token_bucket":
+            a, b = self._bucket_levels(self.store.get(self.block_count_key(mobile)), self.clock.now())
+            return None if a >= 1 else (1 if b >= 1 and self.cfg.block_count_action != "refuse" else 2)
+        n = self.block_count(mobile)
+        return None if n < limit else (1 if n < 2 * limit else 2)
+
+    # token bucket (block_count_mode = 'token_bucket'): {"t": last refill, "a": first bucket, "b": second}
+    def _bucket_params(self):
+        limit, window = self.cfg.block_count_limit
+        return limit / float(window), float(self.cfg.block_bucket_burst or limit)
+
+    def _bucket_levels(self, doc, now):
+        rate, burst = self._bucket_params()
+        if not doc:
+            return burst, burst
+        dt = max(0.0, now - doc["t"])
+        return min(burst, doc["a"] + rate * dt), min(burst, doc["b"] + rate * dt)
+
+    def _bucket_take(self, key, known_good, allow_tier2):
+        """Atomic: take one token. Returns 1 or 2 (the bucket used), 0 for an exempt client with both empty
+        (sent, nothing to take), -1 (second tier, not allowed) or -2 (both empty)."""
+        now = self.clock.now()
+        out = {}
+
+        def fn(doc):
+            a, b = self._bucket_levels(doc, now)
+            if a >= 1:
+                a -= 1; out["r"] = 1
+            elif known_good:
+                out["r"] = 0
+            elif b >= 1 and allow_tier2:
+                b -= 1; out["r"] = 2
+            else:
+                out["r"] = -1 if b >= 1 and self.cfg.block_count_action != "refuse" else -2
+                return None
+            return {"t": now, "a": a, "b": b}
+        _, window = self.cfg.block_count_limit
+        self.store.update(key, fn, int(window) + 3600)
+        return out["r"]
+
+    def _bucket_release(self, key, tier):
+        now = self.clock.now()
+        _, burst = self._bucket_params()
+
+        def fn(doc):
+            a, b = self._bucket_levels(doc, now)
+            if tier == 1:
+                a = min(burst, a + 1)
+            elif tier == 2:
+                b = min(burst, b + 1)
+            return {"t": now, "a": a, "b": b}
+        _, window = self.cfg.block_count_limit
+        self.store.update(key, fn, int(window) + 3600)
 
     def reserve_block_count(self, req):
         """Atomic reservation of one send against the destination counter (Step 11). Returns 'ok', or
@@ -596,6 +663,14 @@ class Pipeline:
         history is exempt from the graded caps but still counted."""
         limit, window = self.cfg.block_count_limit
         key = self.block_count_key(req.mobile)
+        if self.cfg.block_count_mode == "token_bucket":
+            kg = self.cfg.block_count_action != "refuse" and self.is_known_good(req)
+            tier = self._bucket_take(key, kg, "challenge_passed" in req.signals)
+            if tier in (-1, -2):
+                return "refused" if self.cfg.block_count_action == "refuse" else ("stage1" if tier == -1 else "stage2")
+            if tier:
+                req.number_claims.append((key, tier))
+            return "ok"
         if self.cfg.block_count_action == "refuse":
             if not self.store.try_reserve(key, 1, limit, window):
                 return "refused"

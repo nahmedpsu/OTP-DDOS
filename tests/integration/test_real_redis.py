@@ -278,3 +278,21 @@ def test_replay_after_many_later_block_events_across_instances(redis_url):
     h.clock.advance(pipes[1].feedback.RECOVER_AFTER_S + 1)
     pipes[1].feedback.recover()
     assert pipes[1].feedback.block_llr("block:96650447")[2][1] == 257
+
+
+def test_token_bucket_first_boundary_across_instances(redis_url):
+    """The token-bucket limiter's first bucket under concurrent requests from two instances
+    (store.update: WATCH/MULTI/EXEC): four send, four are challenged."""
+    h, pipes = _counter_instances(redis_url)
+    h.cfg.block_count_mode = "token_bucket"
+    reqs = [_req(h, i) for i in range(8)]
+    _gate_after_step5(pipes, 8)
+    out, lock = [], threading.Lock()
+    def worker(k):
+        def go():
+            r = pipes[k % 2].process(reqs[k])
+            with lock: out.append(r)
+        return go
+    _run([worker(k) for k in range(8)])
+    assert sum(r.channel == "sms" and r.rejected_at is None for r in out) == 4
+    assert sum(r.tier == "challenge" for r in out) == 4
