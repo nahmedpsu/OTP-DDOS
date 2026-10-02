@@ -11,71 +11,79 @@ recorded results.
 
 The evaluation is entirely simulated (see "Status and artifact availability"); every number
 below resolves to a study, seed set and JSON path in `results/headline_numbers.md`, and the
-simulator's own invariants (identical offered traffic across designs, cohort conservation,
-clock progression, drain) are asserted by tests. Within it, the thesis the results support is
-narrower than a theorem: **in this design, outcome-based reputation separated an attacker
-from users in the tested settings only when the attacker dominated the key it was judged
-on.** Client-side keys (IP, fingerprint, session) can be rotated for almost nothing and a
-CAPTCHA solve costs about 0.003 USD, so the attacker decides how pure those keys are. What a
-pumper cannot rotate is the destination: it is paid only on the number blocks its partner
-carrier terminates.
+simulator's own invariants (identical offered traffic across designs, identical legitimate
+traffic across attack scenarios, cohort conservation, clock progression, drain) are asserted by
+tests. Within it, the thesis the results support is narrower than a theorem: **in this design,
+outcome-based reputation separated an attacker from users in the tested settings only when the
+attacker dominated the key it was judged on.** Client-side keys (IP, fingerprint, session) can be
+rotated for almost nothing and a CAPTCHA solve costs about 0.003 USD, so the attacker decides how
+pure those keys are. What a pumper cannot rotate is the destination: it is paid only on the
+number blocks its partner carrier terminates.
 
 1. **Positive, with the residue stated.** Attacks that leave a signature in the request are
-   contained in every seed with 77 to 80 % of simulated users completing registration, the
-   same as with no attack: datacenter IP rotation and premium-rate pumping leak 0 of 600, a
-   single client leaks 2, a sequential-number walk 63 to 70 before its destination block
-   reaches a verdict. The cost is not zero: 1 to 3 % of first-time users are refused and
-   about 2 % challenged under these attacks, against 1 % with no attack. A flat limit of
-   five sends per destination block per day stops the walk and the premium pumper at 5 SMS
-   each, better than the sequential tests; what it costs is in result 3.
+   contained in all 30 seeds with 77.5 to 79.1 % of simulated users completing registration,
+   against 79.3 % with no attack: datacenter IP rotation and premium-rate pumping leak 0 of
+   about 600 requests, a single client 2, a sequential-number walk 61 to 69 before its
+   destination block reaches a verdict. The cost is not zero: 1.1 to 3.5 % of first-time users
+   are refused and 1.6 % challenged, against 0.9 % refused with no attack. In the predeclared
+   robustness study (held-out attack rates and pools, 12 jointly shifted operating points),
+   the claim "leak at most 5 % and lose at most 2 points of completion against no attack at the
+   same point and seed" held in 108 of 108 cells. A flat limit of five sends per destination
+   block per day stops the walk and the premium pumper at 5 SMS each.
 2. **Negative, and general.** A residential flooder that looks like a real user (farmed
-   CAPTCHA scores, fresh or pre-aged fingerprints, valid numbers) leaves nothing but
-   rationing. Against it v1 with static caps leaks 562 of 600 and refuses 4 % of first-time
-   users; v2's adaptive cap leaks 236 and refuses 54 % of first-time users, so 42 % of all
-   simulated users complete instead of 77 %. That gain is rationing, and it depends on the
-   controller's cadence and phase (section B2): every 2 minutes it is nearly the same (285
-   leaked), every 5 minutes it is 398 or 546 depending on the tick phase, every 10 minutes
-   521 or 427, and an hourly job sees a 20-minute attack as a static cap (546) and a
-   60-minute attack almost as one (88 to 94 % leaked). The deployed baseline job, learning
-   from the pipeline's own counters, reproduces the oracle's rationing once it has one
-   closed hour of history (242 to 247 leaked); with none it leaves the static cap (649). At
-   10 times the legitimate volume for an hour, 69 % of the attack still leaks while 18 % of
-   real users are challenged. One sweep point does contain this attacker without the cap:
-   a fresh-fingerprint weight of 40 leaks 0 but challenges 46 % and refuses 10 % of real
-   users. A forged platform header buys the attacker nothing under v2 (236, as without the
-   header); under v1 the header is believed and the attacker lands in the app bucket, where
-   the static app cap holds it to 100 without touching web users.
-3. **Pumping on a few destination blocks is contained, the cost has a closed form, and the
-   test's memory is a trade-off, not a free parameter.** Against a carrier that never
-   verifies, the default leaks 88 of 600 (contained in 10 of 10 seeds, in 3.6 minutes); an
-   instant verifier 18. The closed-form model predicts leakage from the blocks a run touched
-   with a mean absolute error of 1 to 9 SMS (1 to 15 % relative) across the ten unsaturated
-   spread configurations, and overstates by up to 22 on average in the eight saturated ones
-   (section G, 18 configurations). A carrier that verifies 60 % of its codes with human-like
-   delay is the hard case, and the detector comparison at matched legitimate traffic
-   (section F2) says what each setting costs: the default (threshold 1000, one threshold of
-   credit) leaks 445 of 600 and produces 7 verdict events a day on 200 busy blocks at 65 %
-   conversion (40 requests hit, 17 never completed); no credit (Page's CUSUM) leaks 152 but
-   produces 151 events a day hitting 778 requests; unbounded credit leaks 556. A flat
-   counter of 5 to 20 sends per block per day leaks 14 to 58 against every carrier, but on
-   blocks that legitimately receive 144 sends a day it completes 2 to 21 % of real
-   registrations, whichever action it takes. Faked failed receipts leave the tests nothing
-   to judge (575 leaked without caps, 237 with); a carrier that builds trust first leaks 250
-   in its flood phase after 264 verified codes (82 after 162 under caps). What the
-   human-like carrier leaves behind is 268 verified codes per run, each of which the
-   registration flow would turn into an account.
+   CAPTCHA scores, fresh or pre-aged fingerprints, valid numbers) leaves nothing but rationing.
+   Against it v1 with static caps leaks 555 of about 590 and refuses 4.5 % of first-time users;
+   v2's adaptive cap leaks 229 and refuses 54 % of first-time users, so 45.5 % of all simulated
+   users complete instead of 79 %. That gain is rationing, and it depends on the controller's
+   cadence and phase (section B2): every 2 minutes it is nearly the same (276 leaked), every 5
+   minutes 386 or 533 depending on the tick phase, every 10 minutes 504 or 446, and an hourly
+   job sees a 20-minute attack as a static cap (533) and a 60-minute attack almost as one (91 to
+   96 % leaked). The deployed baseline job, learning from the pipeline's own counters, rations
+   like the oracle once it has history: 235 leaked with three closed hours, 193 with a weekly
+   profile of three previous weeks; with no closed hour it leaves the static cap (533). A
+   profile poisoned at the attack's hour every previous week costs 45 more leaked SMS [10, 77]
+   than a clean one; a stale profile whose legitimate rate has since halved, 106 more. Two
+   concurrent workers and a mid-attack restart change nothing. At 10 times the legitimate
+   volume for an hour, 70 % of the attack still leaks while 17 % of real users are challenged.
+   One sweep point does contain this attacker without the cap: a fresh-fingerprint weight of
+   40 leaks 0 but challenges 47 % and refuses 9 % of real users.
+3. **Pumping on a few destination blocks is contained when the carrier does not verify, the
+   human-like carrier is not, and the policy that stops it is a short-window send counter.**
+   Against a carrier that never verifies, the default sequential tests leak 89 (contained in
+   10 of 10 seeds, in 3.5 minutes); an instant verifier 17. The closed-form model predicts
+   leakage from the blocks a run touched with a mean absolute error of 1.2 to 10.7 SMS (1 to
+   14 %) in the ten unsaturated spread configurations and overstates by 4 to 22 on average in
+   the eight saturated ones. A carrier that verifies 60 % of its codes with human-like delay
+   leaks 405 against the default (contained in 2 of 10 seeds) and leaves 238 verified codes,
+   each of which the registration flow would turn into an account; over 60 minutes, 898.
+   Section F2 compares destination policies on the full pipeline, selected on tuning seeds
+   against a predeclared service target and evaluated on held-out seeds: a counter of SMS
+   *sends* per block over a short refilling window (4 per 10 minutes on 200 busy blocks; 1 per
+   10 minutes on uniform traffic) leaks 24 or 6 against every pumper, including the human-like
+   one, at a completion loss attributable to the policy of 0.06 and 0.15 % of users. The
+   sequential tests without credit (Page's CUSUM, threshold 300) leak 118 against it at 0.34 %
+   and 314 verdict events a day; at matched false-alarm burden, credit of two thresholds or
+   more leaks 538 to 560. The counter's service cost rides on the fallback channel: a daily
+   counter of 20 on busy blocks completes 27 % of real registrations with no WhatsApp
+   reachability, 53 % at the modelled 70 % and 64 % at 100 % (64 % without any policy). The
+   second-round README concluded the opposite (counters cost 2 to 21 % completion); that
+   comparison charged challenged attempts to the counter and, through a simulator regression,
+   never served anyone over WhatsApp.
 4. **What the block tests cost real users is measured, and it set the default.** Twenty-four
-   hours of legitimate traffic on 200 distinct busy blocks at 80 % conversion produce 0 to
-   1.4 verdict events a day; at 65 % (Twilio's global figure), 7 to 8 events on 7 blocks,
-   38 to 42 requests hit of about 29 000 and 16 to 18 that never complete, with completion
-   unchanged at 64 %. The per-block Monte Carlo at 30 sends and 65 % gives a 1.8 % chance of
-   a verdict per block per window (378 of 20 000 trials, interval 1.7 to 2.1 %). A 30-minute
-   carrier outage produces 0.1 verdict events when the provider reports failures and 0.9
-   when it is silent, against 1.9 send-clocked: reduced, not removed. A poisoner that floods
-   the blocks real users share earns 19 verdict events on 14 blocks, hits 100 requests (69
-   at stage 1, 31 at stage 2) of which 49 never complete, and its verdicts keep hitting
-   users for an hour after it stops (150 requests); the hard denylist would have lost all
-   119 it hit. Grading limits the damage, it does not cap it at a challenge.
+   hours of legitimate traffic on 200 distinct busy blocks at 80 % conversion produce 0.6 to
+   3.2 verdict events a day (OTP autofill 0 to 30 %); at 65 % (Twilio's global figure), 6.4 to
+   9.2 events, 31 to 42 requests hit of about 29 000; the completion loss attributable to the
+   default tests against no policy is 0.01 % of users. The per-block Monte Carlo at 30 sends
+   and 65 % gives a 1.9 % chance of a verdict per block per window (377 of 20 000 trials,
+   interval 1.7 to 2.1 %). A 30-minute carrier outage produces 0.6 verdict events when the
+   provider reports failures and 0.8 when it is silent, against 1.8 send-clocked. A poisoner
+   that floods the blocks real users share earns 16 verdict events on 13 blocks and hits 98
+   requests; the completion loss attributable to enforcing those verdicts, against the same
+   trace with verdicts recorded but not enforced, is 11.5 requests (2.8 % of users), 25.8
+   without a fallback channel and 97.7 (24 %) under the hard denylist. Verdicts outlive the
+   attack: a poisoner that stops after 10 minutes leaves verdicts that hit 406 more requests
+   over the next hour (attributable loss 47.6). Grading limits the damage, it does not cap it
+   at a challenge.
 
 ## Known weak spots
 
@@ -83,48 +91,52 @@ Each is quantified in [`results/evaluation.md`](results/evaluation.md) and discu
 [`docs/evaluation.md`](docs/evaluation.md).
 
 - **Dilution.** A residential attacker with human-like CAPTCHA scores was not separated by
-  any behavioural signal at any volume tested. Below about 1.8 times the legitimate
-  traffic on the shared country and prefix keys the conversion penalty does not fire; above
-  it, it fires on everyone sharing the key. It leaks 599 of 600 with caps lifted and
-  236 with adaptive caps at 42 % completion for real users (54 % of first-time users refused).
-- **Rationing depends on the controller's cadence and phase.** Section B2: 2-minute ticks
-  ration almost like 1-minute ones; 5- and 10-minute ticks ration or do not depending on
-  where the tick falls; hourly ticks do not for attacks under an hour. The worker's default
-  is one minute. The learned baseline needs one closed hour before it rations at all.
-- **The block tests are only as good as their calibration.** At a true conversion of 50 %
-  the per-block Monte Carlo flags 9 to 41 % of blocks with 10 to 100 sends a window; at
-  65 %, 1 to 3 %. `sprt_legit_conversion` and `sprt_legit_fast` must be set from measured
-  traffic and the Monte Carlo rerun.
-- **Memory is a trade-off.** Section F2 spans thresholds 100 to 10 000 and credit 0 to
-  unbounded: every setting that catches the human-like concentrated carrier (152 leaked or
-  less) flags a 65 %-converting legitimate block population 150 to 400 times a day; every
-  setting that keeps those false verdicts under 10 a day leaks 445 or more against it.
-  The default sits at the low-harm end; the choice belongs to the deployment.
-- **Faked receipts and bought trust defeat the block tests.** A carrier that reports every
-  delivery as failed feeds the tests nothing (575 leaked, 237 with caps, no verdict); a
-  pumper whose 500 identity/number pairs verify everything for ten minutes then flood leaks
-  250 (82 under caps) in the flood phase on top of 264 verified codes in preparation. Only
-  the caps and the spend ceiling bound either.
-- **The block key can be turned on real users.** Section D2: 19 verdict events on 14 shared
-  blocks per 20-minute poisoning run, 100 requests hit, 49 lost; hits continue for the
-  verdict's hour after the attack stops. The second stage moves first-time clients off SMS,
-  which 30 % of modelled users cannot use.
-- **The outage detector's conversion signal needs returning users.** It takes ten resolved
-  sends from clients with verified history to see a silent outage; the receipt signal is
-  faster and only as honest as the provider's reports. Residual verdicts: 0.1 to 0.9 per
-  outage.
+  any behavioural signal at any volume tested. Below about 1.8 times the legitimate traffic on
+  the shared country and prefix keys the conversion penalty does not fire; above it, it fires
+  on everyone sharing the key. It leaks 589 of 592 with caps lifted and 229 with adaptive caps
+  at 45.5 % completion for real users (54 % of first-time users refused).
+- **Rationing depends on the controller's cadence, phase and history.** Section B2: 2-minute
+  ticks ration almost like 1-minute ones; 5- and 10-minute ticks ration or do not depending on
+  where the tick falls; hourly ticks do not for attacks under an hour. The learned baseline
+  needs one closed hour before it rations at all, and a profile that is stale or poisoned on
+  schedule shifts the outcome (section B3).
+- **The block tests are only as good as their calibration.** At a true conversion of 50 % the
+  per-block Monte Carlo flags 9 to 41 % of blocks with 10 to 100 sends a window; at 65 %, 1 to
+  3 %. In the robustness study the false-alarm bound held at every point with conversion of
+  0.75 or more and at 8 of 18 cells below it. `sprt_legit_conversion` and `sprt_legit_fast`
+  must be set from measured traffic and the Monte Carlo rerun.
+- **The human-like carrier defeats the default tests.** 405 leaked and 238 verified codes per
+  20 minutes (section F); the short-window send counter stops it in this simulation (section
+  F2), and is not the default because its service cost depends on a fallback channel the
+  deployment may not have (section H4). The choice belongs to the deployment.
+- **Faked receipts, white-box carriers and bought trust defeat the block tests.** A carrier
+  that reports every delivery as failed feeds the tests nothing (560 leaked, 228 under caps); a
+  carrier that knows the deployed parameters and enters codes only when its block nears the
+  threshold leaks 560 with no verdict and enters 280 codes; a pumper whose 500 identity/number
+  pairs verify everything for ten minutes then floods leaks 253 in the flood phase after 263
+  verified codes. Two alternatives were tested (section D3): receipt-robust tests stop the
+  receipt faker (16 leaked) but produce 30 verdict events a day on 200 blocks with a poor
+  route, against 1; a trust budget trims the trust builders by 23 to 40 SMS. Neither touches the
+  white-box carrier. Only the caps and the spend ceiling bound these.
+- **The block key can be turned on real users.** Section D2: an attributable loss of 2.8 % of
+  users per 20-minute poisoning run with graded verdicts, 24 % under the hard denylist, and
+  hits for the verdict's hour after the attack stops. The second stage moves first-time clients
+  off SMS, which 30 % of modelled users cannot use.
+- **The outage detector's conversion signal needs returning users.** The receipt signal is
+  faster and only as honest as the provider's reports. Residual verdicts: 0.6 to 0.8 per outage.
 - **Pumper spread.** Block-level containment holds while the carrier's ranges fit inside
   10 000-number blocks; 100 000-number ranges or hundreds of ranges leak like the flooder.
 - **Bought challenge solutions.** A datacenter attacker that pays for interactive-challenge
-  solutions turns 0 leaked SMS into 54 to 57 per run; a pumper that solves its way past a
-  stage-1 block verdict leaks 101 against 88 under the hard denylist.
+  solutions turns 0 leaked SMS into 51 to 55 per run; a pumper that solves its way past a
+  stage-1 block verdict leaks 104 against 88 under the hard denylist.
 - **Carrier-grade NAT** delivers only 50 % of a normal sign-up flow until the carrier ASN is
   listed in `CGNAT_ASNS`.
 - **Campaign bursts** deliver 12.5 % under the default source caps until the cap is raised.
 - **VPN users are blocked** by policy, as the problem statement asked.
-- **Capacity.** With vendor calls that take 50 ms and the 400 ms floor on, four workers on
-  four vCPUs saturate near 130 requests/s; at concurrency 128 a quarter of requests exceed
-  the floor and leak timing, with admission still fair (`results/performance.md`).
+- **Capacity.** With vendor calls of a 50 ms median and the 400 ms floor on, four workers on
+  four vCPUs serve 136 requests/s at concurrency 128, with 30 % of requests over the floor and
+  leaking timing; under an adversarial mixture with heavy-tailed vendors and 1 % two-second
+  timeouts, 63 % exceed the floor at that concurrency (`results/performance.md`).
 
 ## Repository layout
 
@@ -222,71 +234,84 @@ Full detail, pseudocode and the reasoning behind every default: `docs/sms_valida
 ## Headline results
 
 From `results/evaluation.md`: 30 seeds per attacker with randomised pool size, attack rate and
-CAPTCHA class; 20 requests/min of legitimate traffic in the background; means with 95 %
-confidence intervals in the full tables. v1 is the original design run through the same code
-with the v2 layers switched off. "Caps lifted" removes the source caps; "with source caps"
-runs them at 3x the legitimate rate, static for v1 and adaptive (re-learned every minute, v2's
-Step 9) for v2. Refusal is reported for first-time users, the only group the caps touch;
-completion is over all simulated users (79 % with no attack, since 20 % never enter a code).
+CAPTCHA class; 20 requests/min of legitimate traffic in the background, identical across attack
+scenarios at a given seed; means with 95 % percentile-bootstrap intervals in the full tables.
+v1 is the original design run through the same code with the v2 layers switched off. "Caps
+lifted" removes the source caps; "with source caps" runs them at 3x the legitimate rate, static
+for v1 and adaptive (re-learned every minute, v2's Step 9) for v2. Refusal is reported for
+first-time users, the only group the caps touch; completion is over all simulated users (79 %
+with no attack, since 20 % never enter a code).
 
-| Attacker (600 requests over 20 min) | v1 leaked, caps lifted | v2 leaked, caps lifted | v1 with static caps: leaked / first-time refused | v2 with adaptive caps: leaked / first-time refused / all users completed |
+| Attacker (about 600 requests over 20 min) | v1 leaked, caps lifted | v2 leaked, caps lifted | v1 with static caps: leaked / first-time refused | v2 with adaptive caps: leaked / first-time refused / all users completed |
 |---|---:|---:|---:|---:|
-| One client, random numbers | 31 | 2 | 31 / 1 % | 2 / 1 % / 79 % |
-| Datacenter rotation, fresh fingerprints | 412 | 0 | 392 / 3 % | 0 / 1 % / 80 % |
-| Premium-prefix pumping | 591 | 0 | 558 / 4 % | 0 / 1 % / 79 % |
-| Spoofed platform header (valid host and session, forged header only) | 602 | 599 | 100 / 1 % | 236 / 54 % / 42 % |
-| Sequential numbers | 591 | 70 | 558 / 4 % | 63 / 3 % / 77 % |
-| Residential pool, reused browser profile | 599 | 124 | 562 / 4 % | 94 / 7 % / 75 % |
-| Residential pool, bot CAPTCHA scores | 210 | 210 | 210 / 1 % | 154 / 15 % / 69 % |
-| Residential pool, farmed CAPTCHA, fresh or pre-aged fingerprints | 599 | 599 | 562 / 4 % | 236 / 54 % / 42 % |
+| One client, random numbers | 30 | 2 | 30 / 1 % | 2 / 1 % / 79 % |
+| Datacenter rotation, fresh fingerprints | 412 | 0 | 392 / 3 % | 0 / 1 % / 79 % |
+| Premium-prefix pumping | 599 | 0 | 562 / 5 % | 0 / 1 % / 79 % |
+| Spoofed platform header (valid host and session, forged header only) | 592 | 589 | 100 / 1 % | 229 / 54 % / 46 % |
+| Sequential numbers | 599 | 69 | 562 / 5 % | 61 / 4 % / 78 % |
+| Residential pool, reused browser profile | 589 | 122 | 555 / 4 % | 88 / 9 % / 74 % |
+| Residential pool, bot CAPTCHA scores | 214 | 214 | 214 / 1 % | 153 / 16 % / 70 % |
+| Residential pool, farmed CAPTCHA, fresh or pre-aged fingerprints | 589 | 589 | 555 / 4 % | 229 / 54 % / 46 % |
 
-Section A also runs four reduced designs on the same seeds: a budget ceiling alone stops
-the single client (2 leaked); a limit of five sends per destination block per day alone
-stops the sequential walk and the premium pumper at 5 each, which the full v2 does not
-better (63 and 0); the conversion test alone equals v2 everywhere; the speed test alone
-differs only on the walk.
+Section A also runs four reduced designs on the same seeds: a budget ceiling alone stops the
+single client (2 leaked); a limit of five sends per destination block per day alone stops the
+sequential walk and the premium pumper at 5 each; the conversion test alone equals v2
+everywhere; the speed test alone differs only on the walk. These are component variants of one
+design, not independent detectors.
 
 ![leakage vs friction](results/tradeoff.png)
 
 Other things the evaluation established:
 
-- **Which layer stops what** (ablation, 10 seeds, paired per-seed differences on an
-  identical offered trace): removing the per-session cap adds 28 leaked SMS for the naive
-  client; the risk engine 86 for datacenter rotation and 174 for the sequential walk; number
-  intelligence 76 for premium pumping; the feedback loop 140 for the reused-profile attacker
-  and 152 for the walk; the block key 123 for the walk. Against the diluted residential
-  attackers only the adaptive cap changes anything (313 more without it), by refusing real
-  users. Removing attestation makes the spoofed-header attacker leak 0 instead of 233: the
-  believed header drops it into an app bucket with no legitimate traffic to hide in, a
-  property of this cap table, not a defence. Removing the circuit breaker now removes the
-  hard ceiling too (the earlier ablation kept it) and changes nothing at these volumes.
-- **Weights**: a fresh-fingerprint weight of 40 contains the farm attacker (0 leaked) at
-  46 % of real users challenged and 10 % refused; tier boundaries scaled to 0.6 cut its
-  leakage by a third for an 18 % challenge rate. The resolution timeout (60 s to 600 s)
-  does not move this attacker because the conversion signal never fires on shared keys.
-- **Delivery receipts**: a send counts as failed only after the carrier confirmed delivery
-  and two minutes passed; a send with no receipt, or a failed one, is undelivered and
-  feeds nothing. The receipt rules for duplicates, conflicts and late reports are defined
-  at the top of `src/otp_guard/feedback.py`. Post the provider's reports to
-  `POST /internal/delivery` (`docs/deployment.md`).
-- **Low-and-slow**: attacks under the dilution bound leak in full at their own rate (194 of
-  200 in 20 minutes).
-- **Economics** (retail-price revenue credited only to pumping attackers, a scenario
-  account, not measured profit): premium pumping is profitable under v1 and loses money
-  under v2 when the carrier verifies instantly; a concentrated pumper whose carrier verifies
-  with human-like delay stays profitable under both (11 to 30 USD per 20 minutes) and leaves
-  268 verified codes per run.
-- **Performance** (`results/performance.md`, real Redis, 4 uvicorn workers on 4 vCPUs,
-  vendors faked): a full send costs 12.6 ms p50 / 19.2 ms p99 in process with 48 Redis round
-  trips. Over HTTP at concurrency 32 the service serves 256 requests/s without the floor and
-  the floor-bounded 70 with it (bound 80). Timing, 6000 requests in five server-side outcome
-  classes (sent, challenged, no session, disallowed country, repeated number): with the
-  400 ms floor the Kolmogorov-Smirnov test finds no difference for any of the 10 pairs
-  (smallest p = 0.16) and TOST shows every pair's mean within 2 ms; that is a failure to
-  detect a difference with these tests at this sample size, not proof that a response time
-  carries no information. Without the floor 9 of 10 pairs are distinguishable. With 50 ms
-  vendor calls and the floor on, capacity is about 130 requests/s; at concurrency 128 a
-  quarter of requests exceed the floor.
+- **Which layer stops what** (ablation, 10 seeds, paired per-seed differences on an identical
+  offered trace): removing the per-session cap adds 29 leaked SMS for the naive client; the
+  risk engine 80 for datacenter rotation and 166 for the sequential walk; number intelligence
+  73 for premium pumping; the feedback loop 138 for the reused-profile attacker and 152 for the
+  walk; the block key 121 for the walk. Against the diluted residential attackers only the
+  adaptive cap changes anything (310 more without it), by refusing real users. Removing
+  attestation makes the spoofed-header attacker leak 0 instead of 223: the believed header
+  drops it into an app bucket with no legitimate traffic to hide in, a property of this cap
+  table, not a defence. One factor at a time; interactions are not estimated.
+- **Weights**: a fresh-fingerprint weight of 40 contains the farm attacker (0 leaked) at 47 %
+  of real users challenged and 9 % refused; tier boundaries scaled to 0.6 cut its leakage by a
+  third for an 18 % challenge rate. The resolution timeout (60 s to 600 s) does not move this
+  attacker because the conversion signal never fires on shared keys.
+- **Delivery receipts and state**: a send counts as failed only after the carrier confirmed
+  delivery and two minutes passed; a negative receipt resolves the send as undelivered in the
+  same atomic transition. Every compound transition (receipt, timeout, code entry) is one
+  compare-and-set, its effects are recorded in that write and applied exactly once, and a
+  recovery sweep finishes them after a crash; graded escalation and crash recovery are tested
+  across two instances on a real Redis (`docs/sms_validation_process.md`, "State machine").
+- **Containment is a property of a finite window**: a run counts as contained only if leakage
+  stays at or below 5 % of the attack rate to the end of the run for at least five minutes;
+  60-minute runs report survival curves (section F1) and time to first verdict is reported
+  beside containment.
+- **Low-and-slow**: attacks under the dilution bound leak in full at their own rate (203 of
+  about 204 in 20 minutes).
+- **Economics** (scenario accounting, not measured profit): instead of assuming a revenue
+  share, each row reports the share of the retail termination fee at which the pumper breaks
+  even on an event-level bill (tokens for every session attempt and request, paid challenge
+  solutions, proxy traffic; identity preparation, numbers and contracts excluded, so these are
+  lower bounds). Premium pumping breaks even under v1 at 4.3 %; under v2 a carrier that never
+  verifies needs 27 %, an instant verifier more than the whole fee (139 %), and the human-like
+  carrier only 5.9 %.
+- **Performance** (`results/performance.md`, real Redis, 4 uvicorn workers on 4 vCPUs, vendors
+  faked): a full send costs 13.9 ms p50 / 27.6 ms p99 in process with 49.5 Redis round trips.
+  Over HTTP at concurrency 32 the service serves 235 requests/s without the floor and the
+  floor-bounded 70 with it (bound 80). Timing, 6000 requests in five server-side outcome
+  classes: with the 400 ms floor the Kolmogorov-Smirnov test finds no difference for any of
+  the 10 pairs (smallest p = 0.32) and TOST shows every pair's mean within 2 ms; that is a
+  failure to detect a difference with these tests at this sample size, not proof that a
+  response time carries no information, and it does not cover requests that exceed the floor.
+  Without the floor 9 of 10 pairs are distinguishable. With vendor calls of a 50 ms median and
+  the floor on, four workers serve 68, 113 and 136 requests/s at concurrency 32, 64 and 128,
+  with 0, 7 and 30 % of requests over the floor. An adversarial mixture (55 % of requests
+  built to reach the SMS path, heavy-tailed vendors, 1 % two-second timeouts) serves 58 and
+  113 requests/s at concurrency 32 and 128 with 21 and 63 % over the floor, no server errors,
+  and every ordinary request still sent.
+- **App Attest enrolment** (`POST /attest/enroll`) follows Apple's published validation steps
+  (certificate chain to the App Attest root, nonce, key identifier, RP ID hash, counter, AAGUID);
+  it is tested against synthetic certificate chains only, not a real device.
 
 `results/analysis.md` is an earlier single-seed walkthrough without background traffic; it
 overstates containment for residential attackers and is kept for the use-case tables.
@@ -305,6 +330,21 @@ where they exist and to stated assumptions where they do not (`docs/evaluation.m
 The biggest single improvement available is to replay real logs through
 `scripts/replay_logs.py` under the schema in `docs/replay_schema.md`; that requires the
 approvals listed in `docs/privacy_and_ethics.md`.
+
+**Testing.** `make test` runs 353 tests (`results/test_report.txt`): unit tests of every
+step, the state machine's interleavings and crash points on the in-memory store and on
+fakeredis, simulator invariants, and the App Attest enrolment verifier against
+synthetic certificate chains. `tests/integration/test_real_redis.py` repeats the concurrency,
+graded-escalation and crash-recovery cases across two pipeline instances on a real
+`redis-server` when one is available (CI starts one). No test calls a real vendor.
+
+**Corrections.** Defects found by review are listed with their effect in
+`docs/evaluation.md` ("What changed after ..." sections) and `CHANGELOG.md`. The most
+consequential in the third round: from 2.6.0 until 2.7.0 the simulator never wrote the drawn
+WhatsApp reachability into the channel registry, so no downgraded user was served over
+WhatsApp and every service figure for a downgrading policy was too low; and legitimate traffic
+was drawn from the attacker's random stream, so cross-scenario service comparisons were
+unpaired (the first robustness run is kept in `results/robustness_first_run.md`).
 
 **Archiving.** `CITATION.cff` and `.zenodo.json` are in place; the author name is a
 placeholder until the author fills it in. Releases are tagged (`git tag`); to obtain a DOI,

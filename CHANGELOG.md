@@ -12,6 +12,15 @@ report"):
 - **Verdict estimands.** Incidence inside the observation window, exposure as the union of active
   intervals intersected with the window (inherited verdicts included, never negative) and
   eventual events including the drain are reported separately.
+- **Legitimate traffic is paired across scenarios.** Legitimate requests come from their own
+  random stream, independent of the attacker; previously an attack run and the no-attack run at
+  the same seed offered different users, which failed the predeclared robustness claim C1 on its
+  service clause in 32 of 108 cells (first run kept in `results/robustness_first_run.md`). All
+  studies were rerun; all five claims hold.
+- **Reversed finding.** With the counter charged per send and the fallback channel working, a
+  short-window send counter (for example 4 per 10 minutes on busy blocks) stops every pumper
+  tested, the human-like carrier included, at an attributable completion loss of 0.06 to 0.35 %
+  of users; the second-round conclusion that counters cost 2 to 21 % completion does not hold.
 - **Compound transitions are atomic, effects exactly once.** A negative receipt resolves
   undelivered in the same write; timeouts and code entries decide inside one compare-and-set;
   effects are recorded in that write and applied idempotently with a recovery sweep; the block
@@ -36,6 +45,8 @@ report"):
   variance decomposition; event-level attacker bill with break-even revenue shares.
 - App Attest enrolment endpoint to Apple's published steps (synthetic-chain tests).
 - Load test: heavy-tailed and timing-out vendors, adversarial mixture.
+- `scripts/run_evaluation.py --checkpoint` resumes an interrupted run; `--reuse` takes runs with
+  an identical spec hash and seed from an earlier run file.
 - Artifact: `results/study_specs.json` (every run's configuration and hash),
   `results/attacker_profiles.md`, manuscript figures without embedded titles, headline map.
 
