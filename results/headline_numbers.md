@@ -78,5 +78,5 @@ Every figure quoted in the README resolves to one entry here: the file under `re
 | Counter study E3: 360-min human-like carrier, default leaked per hour | `counter_study.json` | `E3 / concentrated_pumper_verifies_humanlike, 360 minutes / sequential T1000 c1 / leaked_per_hour` | seeds 300-309 | 789.45 |
 | Counter study E4: 8 sends/hot block/10 min, attack-free, counter loss among hot-block users (pp) | `counter_study.json` | `E4 / service / 8|0.7|benign|counter graded 4/10 min / attributable_loss_vs_none / hot_block / net_lost_pct_of_group` | seeds 300-304 | 5.54 [3.71, 6.94] (n=5) |
 | Robustness claims | `evaluation.json` | `robustness` | 12 points x 3 seeds | C1 holds (108/108); C2 holds (34/36); C3 holds (36/36); C4 holds (18/18); C5 holds (36/36) |
-| Performance: in-process send p50 ms | `performance.json` | `phase1_in_process / end_to_end_ms / sent / p50` | 3000 requests | 12.76 |
-| Performance: HTTP throughput without the floor (req/s) | `performance.json` | `phase2_http_floor_0 / throughput_rps` | 6000 requests, concurrency 32 | 238.97 |
+| Performance: in-process send p50 ms | `performance.json` | `phase1_in_process / end_to_end_ms / sent / p50` | 3000 requests | 13.83 |
+| Performance: HTTP throughput without the floor (req/s) | `performance.json` | `phase2_http_floor_0 / throughput_rps` | 6000 requests, concurrency 32 | 217.29 |

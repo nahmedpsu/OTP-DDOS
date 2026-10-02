@@ -133,7 +133,9 @@ Each is quantified in [`results/evaluation.md`](results/evaluation.md),
   listed in `CGNAT_ASNS`.
 - **Campaign bursts** deliver 12.5 % under the default source caps until the cap is raised.
 - **VPN users are blocked** by policy, as the problem statement asked.
-- **Capacity and timing under load** (`results/performance.md`): see "Performance" below.
+- **Capacity and timing under load.** Under an adversarial mixture at concurrency 128 the
+  400 ms floor no longer bounds 81 % of sends, and response time then separates a send from a
+  refusal for an observer (88 % best-threshold accuracy on a small sample); see "Performance".
 
 ## Repository layout
 
@@ -301,19 +303,22 @@ Other things the evaluation established:
   short-window counter (break-even above the whole fee); a pumper spreading over 300 blocks
   sustains about 1 900 an hour against either.
 - **Performance** (`results/performance.md`, real Redis, 4 uvicorn workers on 4 vCPUs, vendors
-  faked): a full send costs 13.9 ms p50 / 27.6 ms p99 in process with 49.5 Redis round trips.
-  Over HTTP at concurrency 32 the service serves 235 requests/s without the floor and the
-  floor-bounded 70 with it (bound 80). Timing, 6000 requests in five server-side outcome
-  classes: with the 400 ms floor the Kolmogorov-Smirnov test finds no difference for any of
-  the 10 pairs (smallest p = 0.32) and TOST shows every pair's mean within 2 ms; that is a
-  failure to detect a difference with these tests at this sample size, not proof that a
-  response time carries no information, and it does not cover requests that exceed the floor.
-  Without the floor 9 of 10 pairs are distinguishable. With vendor calls of a 50 ms median and
-  the floor on, four workers serve 68, 113 and 136 requests/s at concurrency 32, 64 and 128,
-  with 0, 7 and 30 % of requests over the floor. An adversarial mixture (55 % of requests
-  built to reach the SMS path, heavy-tailed vendors, 1 % two-second timeouts) serves 58 and
-  113 requests/s at concurrency 32 and 128 with 21 and 63 % over the floor, no server errors,
-  and every ordinary request still sent.
+  faked): a full send costs 13.8 ms p50 / 21.1 ms p99 in process with 49.5 Redis round trips.
+  Over HTTP at concurrency 32 the service serves 217 requests/s without the response floor and
+  the floor-bounded 70 with it (bound 80). Timing, 6000 requests in five server-side outcome
+  classes: with the 400 ms floor the Kolmogorov-Smirnov test finds no difference for any of the
+  10 pairs at 0.05 (smallest p = 0.051), every pair's mean is within 1.2 ms, and the best single
+  latency threshold tells no pair apart better than 53 % balanced accuracy; that is a failure to
+  detect a difference with these tests at this sample size, not proof that a response time
+  carries no information. Without the floor 9 of 10 pairs are distinguishable (up to 99 %
+  accuracy). With vendor calls of a 50 ms median and the floor on, four workers serve 67, 118
+  and 133 requests/s at concurrency 32, 64 and 128, with 0.1, 0.7 and 30 % of requests over the
+  floor. Under an adversarial mixture (55 % of requests built to reach the SMS path, heavy-tailed
+  vendors, 1 % two-second timeouts) the floor stops bounding the response time for 24 % of sends
+  at concurrency 32 and 81 % at 128; an observer who sees only response times then tells a send
+  from a hard-step refusal with a best single-threshold balanced accuracy of 62 % and 88 % (only
+  22 refusals in that mixture, so the estimate is rough and optimistic). No server errors, and
+  every ordinary request was still sent.
 - **App Attest enrolment** (`POST /attest/enroll`) follows Apple's published validation steps
   (certificate chain to the App Attest root, nonce, key identifier, RP ID hash, counter, AAGUID);
   it is tested against synthetic certificate chains only, not a real device.

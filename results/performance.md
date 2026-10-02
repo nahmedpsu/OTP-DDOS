@@ -8,79 +8,79 @@ Redis round trips per request: **49.5** (commands: 228.2; the 24 hourly reputati
 
 | Step | n | p50 (ms) | p95 (ms) | p99 (ms) |
 |---|---:|---:|---:|---:|
-| step0 | 3000 | 0.00 | 0.00 | 0.01 |
-| step1 | 3000 | 0.53 | 0.76 | 0.93 |
-| step10 | 1615 | 0.46 | 0.63 | 0.84 |
-| step11 | 1615 | 4.81 | 6.43 | 7.89 |
-| step2 | 2541 | 0.62 | 0.83 | 1.10 |
-| step3 | 2541 | 0.11 | 0.18 | 0.23 |
-| step4 | 2541 | 0.00 | 0.01 | 0.01 |
-| step5 | 2541 | 2.38 | 3.31 | 4.32 |
+| step0 | 3000 | 0.00 | 0.01 | 0.01 |
+| step1 | 3000 | 0.58 | 0.87 | 1.07 |
+| step10 | 1615 | 0.49 | 0.69 | 0.89 |
+| step11 | 1615 | 5.19 | 7.18 | 8.94 |
+| step2 | 2541 | 0.67 | 0.96 | 1.44 |
+| step3 | 2541 | 0.12 | 0.19 | 0.28 |
+| step4 | 2541 | 0.01 | 0.01 | 0.03 |
+| step5 | 2541 | 2.54 | 3.79 | 4.87 |
 | step6 | 2077 | 0.00 | 0.00 | 0.00 |
-| step7 | 2077 | 2.08 | 3.08 | 3.88 |
-| step8 | 2077 | 0.28 | 0.41 | 0.52 |
-| step9 | 1615 | 1.15 | 1.52 | 1.85 |
+| step7 | 2077 | 2.26 | 3.52 | 4.45 |
+| step8 | 2077 | 0.31 | 0.49 | 0.65 |
+| step9 | 1615 | 1.23 | 1.69 | 2.09 |
 
 | Outcome | n | p50 (ms) | p95 (ms) | p99 (ms) |
 |---|---:|---:|---:|---:|
-| sent | 1615 | 12.76 | 16.56 | 19.52 |
-| step1 | 459 | 0.01 | 0.01 | 0.02 |
-| step5 | 464 | 1.33 | 1.82 | 2.29 |
-| step8 | 462 | 5.96 | 8.00 | 9.38 |
+| sent | 1615 | 13.83 | 18.95 | 21.08 |
+| step1 | 459 | 0.01 | 0.02 | 0.04 |
+| step5 | 464 | 1.43 | 1.98 | 2.49 |
+| step8 | 462 | 6.43 | 9.41 | 11.95 |
 
 ## Phase 2: HTTP through uvicorn (4 worker processes), 6000 requests at concurrency 32, with the 400 ms response floor
 
-Throughput 69.6 requests/s over 86.2 s (bounded by concurrency / floor = 80.0 req/s, not server capacity). Pipeline processing exceeded the floor in 0.00 % of requests (those leak timing).
+Throughput 69.7 requests/s over 86.0 s (bounded by concurrency / floor = 80.0 req/s, not server capacity). Pipeline processing exceeded the floor in 0.00 % of requests (those leak timing).
 
 | Server-side outcome | n | p50 (ms) | p95 (ms) | p99 (ms) | mean (ms) |
 |---|---:|---:|---:|---:|---:|
-| challenge | 1044 | 443.9 | 448.6 | 451.9 | 444.7 |
-| sent | 2665 | 443.9 | 448.7 | 451.9 | 444.7 |
-| step1 | 788 | 443.9 | 448.4 | 458.0 | 444.8 |
-| step5 | 763 | 443.9 | 448.6 | 451.6 | 444.8 |
-| step8 | 740 | 443.9 | 448.7 | 451.2 | 444.7 |
+| challenge | 1044 | 444.0 | 449.8 | 469.6 | 446.0 |
+| sent | 2665 | 444.0 | 449.7 | 453.1 | 445.4 |
+| step1 | 788 | 444.0 | 450.3 | 454.0 | 445.6 |
+| step5 | 763 | 444.0 | 450.8 | 457.8 | 445.8 |
+| step8 | 740 | 444.0 | 449.1 | 452.2 | 444.9 |
 
 Two-sample Kolmogorov-Smirnov tests on client-observed latency (an attacker's view): a small p-value means the outcomes are distinguishable by timing. The TOST column is an equivalence test on the mean difference with a +/-2 ms margin: a small p-value there means the means are demonstrably within 2 ms of each other.
 
 | Pair | n | KS statistic | KS p-value | mean diff (ms) | TOST p (equivalent within 2 ms) | Best threshold accuracy |
 |---|---:|---:|---:|---:|---:|---:|
-| challenge vs sent | 1044 / 2665 | 0.024 | 7.83e-01 | -0.01 | 1.60e-29 | 0.512 |
-| challenge vs step1 | 1044 / 788 | 0.052 | 1.70e-01 | -0.13 | 1.33e-22 | 0.526 |
-| challenge vs step5 | 1044 / 763 | 0.069 | 2.96e-02 | -0.07 | 1.07e-12 | 0.534 |
-| challenge vs step8 | 1044 / 740 | 0.032 | 7.47e-01 | -0.05 | 4.30e-22 | 0.516 |
-| sent vs step1 | 2665 / 788 | 0.043 | 1.97e-01 | -0.13 | 1.74e-29 | 0.522 |
-| sent vs step5 | 2665 / 763 | 0.048 | 1.28e-01 | -0.07 | 7.11e-15 | 0.524 |
-| sent vs step8 | 2665 / 740 | 0.034 | 4.86e-01 | -0.05 | 2.64e-29 | 0.517 |
-| step1 vs step5 | 788 / 763 | 0.083 | 8.88e-03 | 0.06 | 3.01e-12 | 0.541 |
-| step1 vs step8 | 788 / 740 | 0.050 | 2.88e-01 | 0.08 | 4.22e-18 | 0.525 |
-| step5 vs step8 | 763 / 740 | 0.066 | 6.82e-02 | 0.02 | 5.04e-13 | 0.533 |
+| challenge vs sent | 1044 / 2665 | 0.027 | 6.25e-01 | 0.61 | 3.09e-03 | 0.514 |
+| challenge vs step1 | 1044 / 788 | 0.029 | 8.31e-01 | 0.46 | 3.56e-03 | 0.514 |
+| challenge vs step5 | 1044 / 763 | 0.027 | 8.82e-01 | 0.24 | 5.30e-04 | 0.514 |
+| challenge vs step8 | 1044 / 740 | 0.058 | 9.88e-02 | 1.18 | 5.02e-02 | 0.529 |
+| sent vs step1 | 2665 / 788 | 0.031 | 5.90e-01 | -0.14 | 8.55e-07 | 0.515 |
+| sent vs step5 | 2665 / 763 | 0.020 | 9.62e-01 | -0.37 | 6.89e-07 | 0.510 |
+| sent vs step8 | 2665 / 740 | 0.051 | 8.99e-02 | 0.58 | 6.28e-08 | 0.526 |
+| step1 vs step5 | 788 / 763 | 0.036 | 6.75e-01 | -0.23 | 1.56e-05 | 0.518 |
+| step1 vs step8 | 788 / 740 | 0.069 | 5.10e-02 | 0.72 | 3.03e-04 | 0.534 |
+| step5 vs step8 | 763 / 740 | 0.060 | 1.24e-01 | 0.95 | 5.08e-04 | 0.530 |
 
 ## Phase 2: HTTP through uvicorn (4 worker processes), 6000 requests at concurrency 32, floor disabled (control)
 
-Throughput 239.0 requests/s over 25.1 s (server capacity at this concurrency).
+Throughput 217.3 requests/s over 27.6 s (server capacity at this concurrency).
 
 | Server-side outcome | n | p50 (ms) | p95 (ms) | p99 (ms) | mean (ms) |
 |---|---:|---:|---:|---:|---:|
-| challenge | 1044 | 96.1 | 150.7 | 179.8 | 101.1 |
-| sent | 2664 | 157.7 | 259.0 | 312.9 | 167.1 |
-| step1 | 788 | 52.3 | 69.8 | 95.9 | 54.5 |
-| step5 | 763 | 63.2 | 94.2 | 130.4 | 66.8 |
-| step8 | 741 | 93.3 | 148.7 | 181.6 | 99.6 |
+| challenge | 1044 | 105.1 | 179.8 | 205.7 | 112.7 |
+| sent | 2664 | 174.3 | 309.2 | 352.4 | 189.8 |
+| step1 | 788 | 55.0 | 75.3 | 110.1 | 57.6 |
+| step5 | 763 | 67.7 | 101.7 | 132.0 | 71.8 |
+| step8 | 741 | 103.5 | 171.4 | 203.1 | 111.2 |
 
 Two-sample Kolmogorov-Smirnov tests on client-observed latency (an attacker's view): a small p-value means the outcomes are distinguishable by timing. The TOST column is an equivalence test on the mean difference with a +/-2 ms margin: a small p-value there means the means are demonstrably within 2 ms of each other.
 
 | Pair | n | KS statistic | KS p-value | mean diff (ms) | TOST p (equivalent within 2 ms) | Best threshold accuracy |
 |---|---:|---:|---:|---:|---:|---:|
-| challenge vs sent | 1044 / 2664 | 0.642 | 1.08e-293 | -66.01 | 1.00e+00 | 0.821 |
-| challenge vs step1 | 1044 / 788 | 0.889 | 7.91e-323 | 46.62 | 1.00e+00 | 0.945 |
-| challenge vs step5 | 1044 / 763 | 0.685 | 4.16e-198 | 34.29 | 1.00e+00 | 0.843 |
-| challenge vs step8 | 1044 / 741 | 0.077 | 1.15e-02 | 1.50 | 3.45e-01 | 0.538 |
-| sent vs step1 | 2664 / 788 | 0.978 | 0.00e+00 | 112.63 | 1.00e+00 | 0.989 |
-| sent vs step5 | 2664 / 763 | 0.927 | 1.58e-322 | 100.30 | 1.00e+00 | 0.964 |
-| sent vs step8 | 2664 / 741 | 0.641 | 4.75e-227 | 67.50 | 1.00e+00 | 0.821 |
-| step1 vs step5 | 788 / 763 | 0.478 | 1.18e-80 | -12.33 | 1.00e+00 | 0.739 |
-| step1 vs step8 | 788 / 741 | 0.875 | 3.20e-305 | -45.13 | 1.00e+00 | 0.937 |
-| step5 vs step8 | 763 / 741 | 0.644 | 2.93e-147 | -32.80 | 1.00e+00 | 0.822 |
+| challenge vs sent | 1044 / 2664 | 0.613 | 8.23e-265 | -77.03 | 1.00e+00 | 0.806 |
+| challenge vs step1 | 1044 / 788 | 0.888 | 8.89e-323 | 55.10 | 1.00e+00 | 0.944 |
+| challenge vs step5 | 1044 / 763 | 0.636 | 4.62e-168 | 40.95 | 1.00e+00 | 0.818 |
+| challenge vs step8 | 1044 / 741 | 0.032 | 7.39e-01 | 1.55 | 3.86e-01 | 0.516 |
+| sent vs step1 | 2664 / 788 | 0.972 | 0.00e+00 | 132.13 | 1.00e+00 | 0.986 |
+| sent vs step5 | 2664 / 763 | 0.931 | 1.38e-322 | 117.97 | 1.00e+00 | 0.966 |
+| sent vs step8 | 2664 / 741 | 0.624 | 3.57e-214 | 78.58 | 1.00e+00 | 0.812 |
+| step1 vs step5 | 788 / 763 | 0.471 | 3.11e-78 | -14.16 | 1.00e+00 | 0.735 |
+| step1 vs step8 | 788 / 741 | 0.884 | 3.63e-313 | -53.55 | 1.00e+00 | 0.942 |
+| step5 vs step8 | 763 / 741 | 0.641 | 4.53e-146 | -39.39 | 1.00e+00 | 0.821 |
 
 ## Phase 3: capacity as deployed, 3000 requests per row
 
@@ -88,9 +88,9 @@ The 400 ms floor on, and every fake vendor call (reCAPTCHA, HLR, the SMS provide
 
 | Concurrency | Throughput (req/s) | Bound (concurrency / floor) | Sent p50 / p95 / p99 (ms) | Over floor | Happy path sent | Server errors |
 |---:|---:|---:|---:|---:|---:|---:|
-| 32 | 67.5 | 80 | 444 / 450 / 453 | 0.0 % | 99.9 % | 0 |
-| 64 | 117.8 | 160 | 447 / 456 / 519 | 0.5 % | 99.9 % | 0 |
-| 128 | 129.5 | 320 | 469 / 968 / 1086 | 22.8 % | 99.9 % | 0 |
+| 32 | 67.1 | 80 | 444 / 451 / 454 | 0.1 % | 99.9 % | 0 |
+| 64 | 117.5 | 160 | 447 / 455 / 517 | 0.7 % | 99.9 % | 0 |
+| 128 | 132.7 | 320 | 540 / 1034 / 1383 | 30.0 % | 99.9 % | 0 |
 
 ## Phase 4: adversarial mixture, heavy-tailed vendors, 3000 requests per row
 
@@ -98,35 +98,35 @@ The 400 ms floor on, and every fake vendor call (reCAPTCHA, HLR, the SMS provide
 
 | Concurrency | Throughput (req/s) | Over floor | Ordinary requests sent | Sent p50 / p95 / p99 (ms) | Challenge p50 / p99 (ms) | 403 p50 (ms) | Server errors |
 |---:|---:|---:|---:|---:|---:|---:|---:|
-| 32 | 58.8 | 21.1 % | 100.0 % | 445 / 1127 / 2283 | 444 / 2098 | 47 | 0 |
-| 128 | 108.8 | 66.0 % | 100.0 % | 618 / 1726 / 2691 | 455 / 2278 | 61 | 0 |
+| 32 | 57.7 | 21.0 % | 100.0 % | 445 / 1219 / 2319 | 445 / 1862 | 47 | 0 |
+| 128 | 109.1 | 68.8 % | 100.0 % | 659 / 1583 / 2641 | 458 / 2314 | 64 | 0 |
 
-Timing by outcome under this mixture. Observer model: a remote client that sees only the response times of its own requests and wants to tell two server-side outcomes apart whose responses are otherwise identical (same status and body: an SMS sent, or a refusal at a hard step), with the two equally likely. *Over floor (client)*: share of the class whose observed time exceeded the floor by more than 25 ms. *Best threshold accuracy*: the balanced accuracy of the best single latency threshold between the two classes on these samples (0.5 = no information; optimistic, since the threshold is chosen on the same data). A KS p-value above 0.05 is a failure to detect a difference, not evidence of none.
+Timing by outcome under this mixture. Observer model: a remote client that sees only the response times of its own requests and wants to tell two server-side outcomes apart whose responses are otherwise identical (same status and body: an SMS sent, or a refusal at a hard step), with the two equally likely. *Over floor*: share of the class whose server-side pipeline time exceeded the floor, so its response could not be padded to it. *Best threshold accuracy*: the balanced accuracy of the best single latency threshold between the two classes on these samples (0.5 = no information; optimistic, since the threshold is chosen on the same data). A KS p-value above 0.05 is a failure to detect a difference, not evidence of none.
 
 Concurrency 32:
 
-| Outcome | n | p50 / p95 / p99 (ms) | Over floor (client) |
+| Outcome | n | Client p50 / p95 / p99 (ms) | Over floor (server time) |
 |---|---:|---:|---:|
-| challenge | 148 | 444 / 988 / 2098 | 99.3 % |
-| sent | 2514 | 445 / 1127 / 2283 | 99.6 % |
-| step0 | 316 | 47 / 52 / 67 | 0.0 % |
-| step1 | 22 | 444 / 448 / 449 | 100.0 % |
+| challenge | 150 | 445 / 816 / 1862 | 18.7 % |
+| sent | 2512 | 445 / 1219 / 2319 | 24.0 % |
+| step0 | 316 | 47 / 52 / 56 | 0.0 % |
+| step1 | 22 | 444 / 449 / 451 | 0.0 % |
 
 | Uniform-body pair | n | KS p-value | Best threshold accuracy |
 |---|---:|---:|---:|
-| sent vs step1 | 2514 / 22 | 0.024 | 0.655 |
+| sent vs step1 | 2512 / 22 | 0.11 | 0.624 |
 
 Concurrency 128:
 
-| Outcome | n | p50 / p95 / p99 (ms) | Over floor (client) |
+| Outcome | n | Client p50 / p95 / p99 (ms) | Over floor (server time) |
 |---|---:|---:|---:|
-| challenge | 166 | 455 / 939 / 2278 | 100.0 % |
-| sent | 2496 | 618 / 1726 / 2691 | 99.8 % |
-| step0 | 316 | 61 / 172 / 466 | 1.3 % |
-| step1 | 22 | 454 / 474 / 476 | 100.0 % |
+| challenge | 165 | 458 / 989 / 2314 | 27.3 % |
+| sent | 2497 | 659 / 1583 / 2641 | 80.9 % |
+| step0 | 316 | 64 / 159 / 254 | 0.0 % |
+| step1 | 22 | 453 / 472 / 577 | 0.0 % |
 
 | Uniform-body pair | n | KS p-value | Best threshold accuracy |
 |---|---:|---:|---:|
-| sent vs step1 | 2496 / 22 | 1.5e-13 | 0.879 |
+| sent vs step1 | 2497 / 22 | 1.2e-13 | 0.881 |
 
 Exceeding the floor removes the guarantee of equal completion times for those requests; how much it reveals about the protected outcome is the accuracy column, under the observer model stated, not a general side-channel bound.
