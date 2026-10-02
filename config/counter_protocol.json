@@ -1,0 +1,89 @@
+{
+  "_comment": "Fourth-round review (M1-M4, M7-M9, M13, M16). A fresh protocol for the destination-counter extension, committed and pushed on its own before any run that uses it. It is not part of config/evaluation_protocol.json and does not relabel that study. scripts/run_counter_study.py reads it unchanged and records its SHA-256 in results/counter_study.json.",
+  "version": 1,
+  "chronology": "Written after the 2.7.0 results were known: the policies below were selected by the 2.7.0 matched comparison (config/evaluation_protocol.json) on tuning seeds 100-102 and evaluated on seeds 0-9. This protocol freezes them and tests them on seeds and workloads that the selection never saw. The research process as a whole (generator, attackers, the earlier seeds) is not independent of earlier revisions; only the seeds and the shifted workloads named here are new.",
+  "seeds": {
+    "fresh_evaluation": [300, 301, 302, 303, 304, 305, 306, 307, 308, 309],
+    "held_out_family": "6000 + 100 x point + seed index (3 per point)",
+    "density_selection_tuning": [100, 101, 102],
+    "note": "Seeds 300-309 and 6000+ were never used before this protocol."
+  },
+  "frozen_policies": {
+    "none": "no destination policy",
+    "sequential T1000 c1": "the default sequential tests (threshold 1000, credit 1)",
+    "sequential T300 c0": "best sequential setting at the service target at density 200 in 2.7.0 (Page's CUSUM, threshold 300)",
+    "counter graded 4/10 min": "selected short-window counter at density 200 in 2.7.0",
+    "counter graded 1/10 min": "selected short-window counter at uniform density in 2.7.0",
+    "counter graded 3/60 min": "selected short-window counter at density 1000 in 2.7.0"
+  },
+  "principal_counter": "counter graded 4/10 min",
+  "density_counters": {"200": "counter graded 4/10 min", "1000": "counter graded 3/60 min", "uniform": "counter graded 1/10 min"},
+  "exploratory_alternatives": {
+    "_note": "Reported, not judged: competing designs from the review's related-work section, not selected by any protocol.",
+    "token bucket 4/10 min burst 4": "continuous refill at 4 tokens per 10 minutes, capacity 4 (rate and burst equal)",
+    "token bucket 4/10 min burst 12": "the same rate, burst 12 (tolerates a legitimate burst of 12)",
+    "counter 4/10 min + sequential": "the principal counter and the default sequential tests together",
+    "counter 4/10 min + trust budget": "the principal counter with known_good_budget_per_min = 8 (bounded exemption for verified history)"
+  },
+  "pipeline": "every arm runs ALL_FEATURES with source caps lifted; only the destination policy differs (as in the 2.7.0 matched comparison); legitimate WhatsApp reachability is a stable property of the number; returning account holders carry verified fingerprint history",
+  "pass_rule": "a claim holds if it is true in at least 90 % of its cells; every failing cell is listed",
+  "claims": {
+    "K1": "Security on the held-out family: the principal counter leaks at most 10 % of attack requests against each of the four concentrated pumpers (held-out attack rates and pools, 12 shifted points x 3 seeds x 4 pumpers = 144 cells).",
+    "K2": "Benign service on the held-out family: the principal counter's net attributable completion loss against 'none' on the same 6-hour attack-free trace at 200 blocks is at most 0.5 percentage points of offered users (36 cells).",
+    "K3": "Service under attack on the held-out family: with a pumper on 3 blocks that real users also use, the principal counter's net attributable completion loss against 'none' on the same attacked trace is at most 0.5 percentage points of offered users (144 cells).",
+    "K4": "Relative security on the held-out family: the principal counter leaks no more than the default sequential tests on the same cell (144 cells).",
+    "K5": "Relative service under attack on the held-out family: the principal counter's attributable loss is at most the default sequential tests' plus 0.25 percentage points on the same attacked cell (144 cells)."
+  },
+  "experiments": {
+    "E1_attacked_service": {
+      "question": "M2: leakage and service on the same attacked legitimate trace, competitors side by side",
+      "conditions": {"200 independent": "legit on 200 blocks; pumper on 3 other blocks",
+                     "200 shared": "legit on 200 blocks; pumper on 3 of them",
+                     "1000 independent": "legit on 1000 blocks; pumper on 3 other blocks",
+                     "1000 shared": "legit on 1000 blocks; pumper on 3 of them",
+                     "uniform independent": "legit uniform; pumper on 3 blocks"},
+      "attackers": ["concentrated_pumper_no_verify", "concentrated_pumper_verifies_instantly",
+                    "concentrated_pumper_verifies_humanlike", "concentrated_pumper_solves_challenges", "block_poisoner"],
+      "arms": "none, the default, sequential T300 c0, the density's counter, and the four exploratory alternatives",
+      "run": {"warmup_minutes": 30, "attack_minutes": 60, "conversion": 0.65, "autofill": 0.2, "whatsapp_fraction": 0.7},
+      "seeds": "fresh_evaluation",
+      "reported": "leakage; net attributable loss against 'none' (all users, first-time, returning, users of attacked blocks); gross losses and gains; completion; the benign service target of the 2.7.0 protocol, labelled as benign"
+    },
+    "E2_held_out_family": {
+      "question": "M1: the frozen policies on the held-out family of config/evaluation_protocol.json (the same 12 Latin-hypercube points and held-out attack rates and pools), judged by K1-K5",
+      "arms": ["none", "sequential T1000 c1", "counter graded 4/10 min", "counter graded 1/10 min", "counter graded 3/60 min"],
+      "attack_runs": {"warmup_minutes": 30, "attack_minutes": 20, "legit_blocks": 200, "shared_blocks": true},
+      "benign_runs": {"minutes": 360, "legit_blocks": 200}
+    },
+    "E3_adaptive_family": {
+      "question": "M4, M16: the counter against the attacks used to expose the sequential tests, spreading, quota-aware scheduling, trust-pool reuse and long horizons",
+      "attackers": ["threshold_aware_carrier", "receipt_faking_carrier", "trust_building_pumper", "trust_building_concentrated",
+                    "trust_building_long", "spread 3/30/300 blocks (carrier never verifies; verifies 60 % human-like)",
+                    "quota-aware on 30 and 300 blocks (4 per block per 10 minutes)", "360-minute attacks (never verifies; human-like)"],
+      "arms": ["none", "sequential T1000 c1", "counter graded 4/10 min", "token bucket 4/10 min burst 12",
+               "counter 4/10 min + sequential", "counter 4/10 min + trust budget"],
+      "seeds": "fresh_evaluation",
+      "reported": "leakage, codes entered, legitimate completion; sustained leakage per hour for long attacks and the break-even revenue share"
+    },
+    "E4_operating_boundary": {
+      "question": "M3, M13: where the counter stops meeting the service target and where it stops limiting leakage",
+      "service_map": {"hot_blocks": 3, "legit_rate_per_hot_block_per_10min": [0.5, 1, 2, 4, 8],
+                      "whatsapp_fraction": [0.0, 0.7, 1.0], "condition": ["benign", "attacked: pumper on the 3 hot blocks"],
+                      "arms": ["none", "sequential T1000 c1", "counter graded 4/10 min"], "run": {"warmup_minutes": 30, "minutes": 60},
+                      "seeds": [300, 301, 302, 303, 304]},
+      "security_map": {"attacker_blocks": [3, 10, 30, 100, 300], "pumper": ["spreading, never verifies", "quota-aware"],
+                       "attack_minutes": [20, 60], "arms": ["none", "sequential T1000 c1", "counter graded 4/10 min"],
+                       "seeds": [300, 301, 302, 303, 304]},
+      "stress": {"product launch": "30 minutes at 3x the legitimate rate, all first-time users with fresh fingerprints, on the hot blocks",
+                 "correlated fallback": "users without WhatsApp solve challenges with probability 0.5 instead of 0.9",
+                 "poor route": "the hot blocks lose 50 % of messages"},
+      "service_target_here": "net attributable loss against 'none' at most 0.5 percentage points of offered users, and also reported among users of the hot blocks"
+    },
+    "E5_density_complete": {
+      "question": "M7, M8, M9: the 2.7.0 selection rule applied with the full sequential grid at every density and with attack runs whose legitimate background is at that density; evaluated on fresh seeds with leakage and service from the same attacked runs as well as from 24-hour benign runs",
+      "grids": "those of config/evaluation_protocol.json",
+      "selection_rule": "that of config/evaluation_protocol.json, per density",
+      "reported": "per-attacker paired differences; the preferred policy under mean leakage, worst-case leakage and a first-time-user loss constraint; sensitivity to attacker mix; the service target, each selected policy's margin to it and the fraction of evaluation cells (seed x conversion) that violate it; per-seed outcomes as CSV"
+    }
+  }
+}
