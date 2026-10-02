@@ -16,19 +16,29 @@ so a decision and the state it depends on cannot be separated by another worker:
     verify      attempts + 1, and in the same transition: correct code -> done (verified);
                 attempts exhausted -> done (failed, unless already resolved)
 
-Effects, exactly once
----------------------
+Effects, at most once, and once unless abandoned
+-----------------------------------------------
 A transition does not apply its effects directly. It records them in the entry, in the same
-compare-and-set, as a batch with a sequence number; the caller then applies the batch and removes
-it. Applying is idempotent: the reputation increments of a batch are one exactly-once script
-(store.hincrby_batch_once, keyed by log id and batch number), block-test events carry an event id
-the block document remembers, and the remaining effects (outage records, the trusted-number set,
-timeout scheduling, denylist checks) are idempotent by construction. Before a transition the caller
-writes a write-ahead intent (otp:intents); run_due_timeouts() sweeps intents older than
-RECOVER_AFTER_S and applies whatever batches are still recorded. So a process that dies between
-the compare-and-set and the end of its effects leaves work a later sweep completes, and a
-duplicate or replayed callback cannot apply a batch twice. Out of scope: an entry that expires
-(2 x otp_ttl) before the sweep reaches it, and Redis Cluster (the scripts assume one shard).
+compare-and-set, as a batch with a sequence number and a timestamp; the caller then applies the
+batch and removes it. Before a transition the caller writes a write-ahead intent (otp:intents);
+run_due_timeouts() sweeps intents older than RECOVER_AFTER_S and applies whatever batches are still
+recorded, so a process that dies between the compare-and-set and the end of its effects leaves work
+a later sweep completes.
+
+Applying is idempotent within a replay horizon H = replay_horizon_s() (the entry's lifetime,
+2 x otp_ttl): the reputation increments of a batch are one exactly-once script
+(store.hincrby_batch_once, keyed by log id and batch number, marker kept H + 1 h), and block-test
+events carry an event id the block document remembers for H + 60 s. Identifiers are kept by age,
+not by count, so no volume of later events can push one out early (an earlier version kept the
+last 256 and could count a replayed failure twice). A batch is applied only while it is younger than
+H; an older one (possible only if its entry was kept alive by later writes and no sweep ran for
+H) has its counting effects skipped and counted in otp:fx:abandoned, never applied twice. The
+remaining effects (outage records, the trusted-number set, timeout scheduling, denylist checks)
+are idempotent by construction. So: every recorded effect is applied at most once, and exactly once
+if a sweep runs within H of the transition. Out of scope: an entry that expires before a sweep
+reaches it (its effects are lost, not doubled), and Redis Cluster (the scripts assume one shard).
+The size of a block document grows with the events it receives within H, which the hourly SMS
+ceiling bounds.
 
 Step 11 is not one transaction (budget reservation, audit record, `sent` counters, OTP entry,
 enqueue). Its crash semantics: a crash before on_sent leaves a reserved budget unit and possibly
@@ -62,7 +72,8 @@ class FeedbackLoop:
     INTENTS = "otp:intents"           # write-ahead intents: "<log_id>:<token>" scored by time
     BLOCK = "blocktest:"              # per-block sequential-test state, current verdict and verdict history
     RECOVER_AFTER_S = 30
-    SEEN_EVENTS = 256                 # block-event ids a block document remembers (idempotent replay)
+    SEEN_MARGIN_S = 60                # identifiers outlive the replay horizon by this (clock skew between workers)
+    ABANDONED = "otp:fx:abandoned"    # batches too old to replay safely (counting effects skipped)
 
     def __init__(self, pipeline):
         self.p = pipeline
@@ -72,6 +83,10 @@ class FeedbackLoop:
 
     def _ttl(self):
         return self.p.cfg.otp_ttl * 2
+
+    def replay_horizon_s(self):
+        """How long after a transition its recorded effects may still be applied (see the module notes)."""
+        return self._ttl()
 
     # ---------------------------------------------------------------- send side
     @staticmethod
@@ -115,7 +130,7 @@ class FeedbackLoop:
                 return None
             if effects:
                 tseq = new.get("tseq", 0) + 1
-                batch = {"tseq": tseq, "effects": effects}
+                batch = {"tseq": tseq, "at": now, "effects": effects}
                 new["tseq"] = tseq
                 new["pending"] = list(new.get("pending") or []) + [batch]
                 out["batch"] = batch
@@ -134,8 +149,13 @@ class FeedbackLoop:
         tseq = batch["tseq"]
         now = self.p.clock.now()
         suspended = None
+        stale = now - batch.get("at", now) > self.replay_horizon_s()
+        if stale:
+            self.p.store.incr(self.ABANDONED)
         for eff in batch["effects"]:
             kind = eff[0]
+            if stale and kind in ("rep", "block", "block_unfail"):
+                continue                                     # identifiers may be gone: never risk a second application
             if kind == "outage":
                 self._outage_record(rec, eff[1], now)
             elif kind == "rep":
@@ -430,7 +450,7 @@ class FeedbackLoop:
     @staticmethod
     def _empty_block_state(verdicts=0):
         return {"v": 0, "f": 0, "fv": 0, "conv": 0.0, "speed": 0.0, "verdicts": verdicts,
-                "verdict": None, "history": [], "seen": []}
+                "verdict": None, "history": [], "seen": {}}
 
     def _block_event(self, key, verified, fast=False, undo=False, event_id=None, undo_fail_only=False):
         """One resolved send on a destination block. Counts, statistics, the current verdict and the
@@ -451,9 +471,15 @@ class FeedbackLoop:
         def fn(cur):
             out.clear()
             st = dict(cur) if cur else self._empty_block_state()
-            st.setdefault("seen", []); st.setdefault("history", []); st.setdefault("verdict", None)
-            if event_id is not None and event_id in st["seen"]:
+            st.setdefault("history", []); st.setdefault("verdict", None)
+            seen = st.get("seen") or {}
+            if isinstance(seen, list):                       # documents written before identifiers carried a time
+                seen = {i: now for i in seen}
+            keep_after = now - self.replay_horizon_s() - self.SEEN_MARGIN_S
+            seen = {i: t for i, t in seen.items() if t > keep_after}
+            if event_id is not None and event_id in seen:
                 return None                                  # already applied
+            st["seen"] = seen
             if undo_fail_only:
                 st["f"] = max(0, st["f"] - 1)
                 st["conv"] -= inc["fail"]
@@ -473,7 +499,7 @@ class FeedbackLoop:
                 st["conv"] += inc["fail"]
             st["conv"], st["speed"] = max(floor, st["conv"]), max(floor, st["speed"])
             if event_id is not None:
-                st["seen"] = (st["seen"] + [event_id])[-self.SEEN_EVENTS:]
+                st["seen"] = dict(seen, **{event_id: now})
             conv_hit = "conversion" in cfg.block_tests and st["v"] + st["f"] >= cfg.sprt_min_events and st["conv"] > thr
             speed_hit = "speed" in cfg.block_tests and st["v"] >= cfg.sprt_min_events and st["speed"] > thr
             if not (conv_hit or speed_hit):

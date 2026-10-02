@@ -82,7 +82,9 @@ Apple-issued attestation from a real device has been run through it.
 ## Feedback recovery, trust budget and receipt policy
 
 The worker's minute tick also runs the feedback recovery sweep: an effect batch whose
-process died is completed after 30 s, exactly once. Run at least one worker.
+process died is completed after 30 s. Effects are applied at most once, and exactly once
+if the sweep runs within the 20-minute replay horizon; a batch found older than that is
+skipped and counted in `otp:fx:abandoned` (alert on any increase). Run at least one worker.
 `known_good_budget_per_min` (default off) bounds how many requests per minute per (source,
 country) are granted the verified-history exemption; set it to about twice the measured
 returning-user rate. `receipt_policy = "robust"` (default `standard`) counts a failed

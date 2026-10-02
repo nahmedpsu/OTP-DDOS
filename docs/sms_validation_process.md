@@ -808,10 +808,16 @@ undelivered in the same write; a timeout decides between undelivered, not yet du
 failed against the entry as it is at that moment; a code entry counts the attempt and
 closes the send in the same write. The transition records the effects it implies
 (reputation increments, block-test events, the trusted-number set, outage records, the
-next timeout) in the entry in that same write; they are then applied idempotently (the
-reputation increments of a transition are one exactly-once script, block-test events carry
-an id the block remembers) and the record is removed. A process that dies in between
-leaves a write-ahead intent that the worker's recovery sweep completes, once. The verdict
+next timeout) in the entry in that same write; they are then applied idempotently within
+a replay horizon of 20 minutes (the reputation increments of a transition are one
+once-only script whose marker outlives the horizon, and block-test events carry an id the
+block remembers for the horizon, by age rather than by count) and the record is removed. A
+process that dies in between leaves a write-ahead intent that the worker's recovery sweep
+completes. The guarantee is conditional on that horizon: every effect is applied at most
+once, and exactly once if a sweep runs within 20 minutes of the transition; a batch older
+than the horizon has its counting effects skipped and counted (`otp:fx:abandoned`), never
+applied twice. (Up to 2.7.0 a block remembered only its last 256 event ids, so a replay
+after 256 later events on the same block counted a failure twice; fourth-round review.) The verdict
 of a destination block (stage, reason, until) lives in the block's own document and is
 decided in the compare-and-set that crosses the threshold, so a second crossing while a
 verdict is active is stage 2 whichever worker processed it. Rules: the top of

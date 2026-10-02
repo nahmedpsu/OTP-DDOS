@@ -279,8 +279,9 @@ Other things the evaluation established:
 - **Delivery receipts and state**: a send counts as failed only after the carrier confirmed
   delivery and two minutes passed; a negative receipt resolves the send as undelivered in the
   same atomic transition. Every compound transition (receipt, timeout, code entry) is one
-  compare-and-set, its effects are recorded in that write and applied exactly once, and a
-  recovery sweep finishes them after a crash; graded escalation and crash recovery are tested
+  compare-and-set, its effects are recorded in that write and applied at most once (exactly
+  once if the recovery sweep runs within a 20-minute replay horizon), and the sweep finishes
+  them after a crash; graded escalation and crash recovery are tested
   across two instances on a real Redis (`docs/sms_validation_process.md`, "State machine").
 - **Containment is a property of a finite window**: a run counts as contained only if leakage
   stays at or below 5 % of the attack rate to the end of the run for at least five minutes;

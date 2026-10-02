@@ -103,3 +103,84 @@ def test_counter_challenged_request_releases_its_number_claim(h):
     i = ch[0]
     r = h.send(_req(h, i, challenge_proof="challenge-ok"))
     assert r.rejected_at is None and r.channel == "sms"
+
+
+# ---------------- M6: replay after the block's identifier memory has moved on ----------------
+
+class Crash(Exception):
+    pass
+
+
+def _open(h):
+    h.lift_source_caps(); h.cfg.asn_limit_default = 10**9; h.cfg.ip_limit = (10**9, 60)
+    h.svc.sender.instant_receipts = False
+    h.cfg.block_tests = ()               # isolate accounting from verdict issuance, as the reviewer did
+    return h
+
+
+def _crash_after_block_event(fb):
+    """The next _block_event is applied, then the process dies before the batch is cleared."""
+    orig = fb._block_event
+    def dying(*a, **k):
+        fb._block_event = orig
+        orig(*a, **k)
+        raise Crash()
+    fb._block_event = dying
+
+
+def test_block_effect_is_not_replayed_after_many_later_events(h):
+    """The reviewer's counterexample: a failure's block effect is applied, the process dies before
+    clearing its batch, 256 later events reach the same block, and recovery runs while the entry is
+    alive. The failure must be counted once (257, not 258)."""
+    _open(h)
+    fb = h.p.feedback
+    r = h.send(_req(h, 1, block="96650777"))
+    fb.on_delivery(r.log_id, True)
+    h.clock.advance(h.cfg.resolution_timeout_s + 1)
+    _crash_after_block_event(fb)
+    with pytest.raises(Crash):
+        fb.run_due_timeouts()
+    entry = h.p.store.get(f"otp:code:{r.log_id}")
+    assert entry is not None and entry["pending"]                       # a replayable batch is left
+    for i in range(256):                                                # the old fixed memory
+        fb._block_event("block:96650777", verified=False, event_id=f"synthetic:{i}")
+    assert fb.block_llr("block:96650777")[2][1] == 257
+    h.clock.advance(fb.RECOVER_AFTER_S + 1)
+    fb.recover()
+    assert not (h.p.store.get(f"otp:code:{r.log_id}") or {}).get("pending")
+    assert fb.block_llr("block:96650777")[2][1] == 257
+
+
+def test_event_identifiers_are_kept_for_the_replay_horizon(h):
+    """Identifiers are retained by age, not by count: any number of events inside the horizon are
+    remembered, and an identifier is dropped only after the horizon has passed."""
+    _open(h)
+    fb = h.p.feedback
+    for i in range(2000):
+        fb._block_event("block:96650778", verified=False, event_id=f"e{i}")
+    fb._block_event("block:96650778", verified=False, event_id="e0")       # a replay inside the horizon
+    assert fb.block_llr("block:96650778")[2][1] == 2000
+    h.clock.advance(fb.replay_horizon_s() + 61)
+    fb._block_event("block:96650778", verified=False, event_id="late")
+    st = h.p.store.get("blocktest:block:96650778")
+    assert len(st["seen"]) == 1                                            # the old identifiers are gone
+
+
+def test_a_batch_older_than_the_replay_horizon_is_abandoned_not_replayed(h):
+    """Past the horizon an identifier may be gone, so a batch that old is not applied again: its
+    counting effects are skipped (and counted as abandoned) rather than possibly applied twice."""
+    _open(h)
+    fb = h.p.feedback
+    r = h.send(_req(h, 2, block="96650779"))
+    fb.on_delivery(r.log_id, True)
+    h.clock.advance(h.cfg.resolution_timeout_s + 1)
+    _crash_after_block_event(fb)
+    with pytest.raises(Crash):
+        fb.run_due_timeouts()
+    rec = h.p.sms_history.get(r.log_id)
+    batch = h.p.store.get(f"otp:code:{r.log_id}")["pending"][0]
+    h.clock.advance(fb.replay_horizon_s() + 61)
+    fb._block_event("block:96650779", verified=False, event_id="after")   # prunes the old identifier
+    fb._apply(r.log_id, rec, batch)                                       # a very late replay
+    assert fb.block_llr("block:96650779")[2][1] == 2
+    assert int(h.p.store.get("otp:fx:abandoned") or 0) == 1
