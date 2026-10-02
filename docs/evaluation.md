@@ -201,6 +201,47 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
   (`tests/integration/test_real_redis.py`), which is the only place those properties are
   established; vendors remain untested live.
 
+## What changed after the fourth-round report
+
+- **Concurrent counter semantics (M5).** The graded counter's first boundary was read at Step 5
+  and not re-decided at the Step 11 reservation; under concurrency requests could fill the second
+  tier without a challenge. The reservation now decides the stage atomically (a two-tier Lua
+  reservation on Redis, a lock in memory; the token bucket by compare-and-set). The simulation is
+  single-threaded, so this fix does not move any simulated number; it makes the deployed policy
+  the one that was evaluated.
+- **Replay horizon (M6) and reversal ordering (M15).** Block-event ids are kept by age for the
+  replay horizon rather than the last 256; a batch older than the horizon is skipped and counted,
+  never applied twice; a reversal reaching a block before the failure it reverses leaves a
+  tombstone. The guarantee is at most once, and exactly once if the sweep runs within the horizon.
+- **The counter study (M1-M4, M7-M9, M13, M16)** follows `config/counter_protocol.json`, a fresh
+  protocol committed and pushed before its runs. It freezes the policies the 2.7.0 comparison
+  selected and does not relabel the earlier predeclared study. Chronology: written after the 2.7.0
+  results were known; only the seeds (300-309, 6000+) and the shifted workloads it names are new,
+  and the generator and attacker family are those developed over the earlier revisions.
+  Results: `results/counter_study.md`.
+- **Simulator realism (M13).** WhatsApp reachability is a stable property of the number (a hash
+  of seed and number) instead of a per-request draw; returning account holders carry verified
+  fingerprint history as well as a trusted number; the counter study adds hot blocks, a product
+  launch, correlated challenge failure for users without a fallback, and poor routes on the hot
+  blocks. Every study was rerun with these defaults.
+- **Variance (M12).** The fixed-versus-randomised comparison is named a fixed-parameter
+  sensitivity comparison; a nested design (10 attacker configurations x 3 simulation seeds)
+  estimates between- and within-configuration variance components.
+- **Ablation (M14).** Four selected two-layer removals with paired interaction contrasts; the
+  matrix is described as conditional effects that do not add up.
+- **Attributable loss** now reports gross losses and gains, first-time and returning users,
+  users of the attacked blocks, and (for the recovery variant) the window after the attack
+  stopped separately from the whole run (Q7).
+- **Provenance (M18).** Every checkpointed or reused run carries a hash of the source and
+  configuration; rows from other code are rejected; results state the code hash, the environment
+  and whether the invocation was clean or resumed.
+- **Timing (M17).** Under the adversarial load mixture, timing by outcome class, the share of each
+  class over the floor, and an explicit observer model (best single-threshold balanced accuracy
+  between outcome classes whose responses are otherwise identical).
+- **Figures.** Larger labels and direct labels (Figures 1-6), the benign service target and the
+  provenance of each axis on Figure 6 with a paired-difference panel, separate families in Figure
+  4, a key-effects table for Figure 2, and Figure 7 for the counter's boundary.
+
 ## What changed after the third-round report
 
 - **Fallback.** The simulator drew each request's WhatsApp reachability, stored it and hashed it,

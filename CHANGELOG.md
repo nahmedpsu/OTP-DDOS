@@ -1,6 +1,41 @@
 # Changelog
 
-## 2.7.0 (unreleased)
+## 2.8.0 (unreleased)
+
+Repairs and studies from the fourth-round review (`docs/evaluation.md`, "What changed after the
+fourth-round report"):
+
+- **The graded destination counter enforces its first boundary under concurrency.** Step 5 read
+  the count; Step 11 reserved against twice the limit, so requests that all read a count below the
+  limit could fill the second tier without a challenge (eight concurrent requests: eight sends, no
+  challenge, against four and four serially). The stage is now decided atomically on the count the
+  reservation changes; regression tests on both backends and across two instances on a real Redis.
+- **Replay after many later block events.** A block remembered only its last 256 event ids, so a
+  recovered failure could be counted twice. Ids are now kept for the replay horizon by age, and a
+  batch older than the horizon is skipped (and counted) rather than applied twice. The guarantee is
+  stated as at most once, and exactly once if the sweep runs within the horizon.
+- **Reversal before failure.** A late verification (or a corrected receipt) that reached a block
+  before the failure it reverses left the failure counted; reversals now name the failure and
+  leave a tombstone, so the order no longer matters.
+- **Token-bucket destination limiter** (rate and burst separate), an exploratory alternative.
+- **Counter study** under a fresh protocol committed before its runs (`config/counter_protocol.json`):
+  claims K1-K5 on the held-out family, service and leakage on the same attacked traces, the
+  adaptive family (white-box, receipt-faking, trust-building, spreading, quota-aware, 360-minute),
+  the operating boundary with stress rows, and the selection rule at every density with
+  density-specific attack runs (`results/counter_study.md`).
+- **Simulator realism**: WhatsApp reachability stable per number; returning account holders carry
+  verified fingerprint history; hot blocks, a product launch, correlated challenge failure, poor
+  routes on hot blocks; shared-block and quota-aware pumpers.
+- **Statistics**: a nested variance design beside the fixed-parameter comparison (now named as
+  such), selected two-layer interactions, attributable loss with gross losses and gains by cohort,
+  for attacked-block users and after the attack stopped.
+- **Provenance**: checkpointed and reused runs carry a code hash and are rejected when it differs;
+  results record the environment and whether the invocation was clean or resumed.
+- **Timing**: per-outcome distributions under the adversarial load mixture with a stated observer
+  model and threshold-classifier accuracy.
+- **Figures** redrawn for legibility; Figure 7 (counter boundary); Figure 2 key-effects table.
+
+## 2.7.0
 
 Repairs from the third-round review (`docs/evaluation.md`, "What changed after the third-round
 report"):

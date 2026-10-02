@@ -9,9 +9,10 @@
 | 3. Dilution: leaked share and legitimate harm against the attack-to-legitimate ratio | `dilution` | `paper/figures/fig3_dilution.{png,svg}` |
 | 4. Leakage against legitimate refusal and challenge, every sweep point, with completion | `cap_sweep`, `weight_sweep` | `paper/figures/fig4_tradeoff.{png,svg}` |
 | 5. Pumper spread: measured leakage, model, and residuals | `spread` | `paper/figures/fig5_spread.{png,svg}` |
-| 6. Destination policies on a common pipeline: every setting on the tuning seeds (completion against leakage), the selected settings on the held-out seeds | `matched` | `paper/figures/fig6_matched.{png,svg}` |
+| 6. Destination policies on a common pipeline at 200 blocks, evaluation seeds: (a) benign completion (separate 24-hour attack-free runs) against leakage summed over four attack-profile means (separate attack runs), with the benign service target; (b) per-attacker leakage differences to the default, paired per seed | `matched` | `paper/figures/fig6_matched.{png,svg}` |
+| 7. The destination counter's operating boundary: loss among hot-block users against the legitimate rate on those blocks, and leakage against the pumper's spread | `results/counter_study.json` → `E4` | `paper/figures/fig7_counter_boundary.{png,svg}` |
 
-Figure 2's numbers are also written to `paper/figures/fig2_ablation_matrix.csv`. The figures carry no embedded titles; captions belong in the manuscript.
+Figure 2's numbers are also written to `paper/figures/fig2_ablation_matrix.csv`, and its large effects (interval excluding zero, at least 10 SMS) to `paper/figures/fig2_key_effects.md`. The figures carry no embedded titles; captions belong in the manuscript.
 
 Regenerate with `python3 paper/figures.py` (after `make evaluation`); `--results` and `--out`
 override the directories. Every number printed in the manuscript's tables comes from

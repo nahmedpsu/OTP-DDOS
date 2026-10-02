@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this software or its evaluation, please cite it as below."
 title: "OTP Guard: a layered SMS validation, risk-scoring and rate-limiting pipeline against OTP flood abuse"
-version: 2.7.0
+version: 2.8.0
 date-released: 2026-10-01
 license: MIT
 repository-code: "https://github.com/nahmedpsu/OTP-DDOS"
