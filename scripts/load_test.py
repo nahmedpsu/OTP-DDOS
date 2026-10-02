@@ -235,7 +235,10 @@ def phase2(n, concurrency, floor_ms, redis_client, latency_ms=0, mix="default", 
                                          "tost_2ms": tost_mean_diff(by_outcome[a], by_outcome[b], margin=2.0),
                                          "uniform_body_pair": a not in UNIFORM_EXCLUDED and b not in UNIFORM_EXCLUDED,
                                          "threshold_balanced_accuracy": threshold_accuracy(by_outcome[a], by_outcome[b])}
-        over_by_outcome = {k: sum(1 for v in vs if v > floor_ms + 25) / len(vs) for k, vs in by_outcome.items()} if floor_ms else None
+        srv = collections.defaultdict(list)
+        for kind, outcome, dt, timings in out:
+            srv[outcome].append(sum(timings.values()))
+        over_by_outcome = {k: sum(1 for v in vs if v > floor_ms) / len(vs) for k, vs in srv.items()} if floor_ms else None
         return {"requests": n, "concurrency": concurrency, "workers": int(os.environ.get("LOAD_TEST_WORKERS", "4")),
                 "floor_ms": floor_ms, "vendor_latency_ms": latency_ms, "mix": mix, "vendor_sigma": sigma,
                 "vendor_timeout_prob": timeout_prob, "wall_s": wall, "throughput_rps": n / wall,
@@ -354,15 +357,15 @@ def write_md(R, path):
                      f"{chal['p50']:.0f} / {chal['p99']:.0f} | {s0['p50']:.0f} | {errs} |")
         L += ["", "Timing by outcome under this mixture. Observer model: a remote client that sees only the response times of its own "
               "requests and wants to tell two server-side outcomes apart whose responses are otherwise identical (same status and "
-              "body: an SMS sent, or a refusal at a hard step), with the two equally likely. *Over floor (client)*: share of the "
-              "class whose observed time exceeded the floor by more than 25 ms. *Best threshold accuracy*: the balanced accuracy of "
+              "body: an SMS sent, or a refusal at a hard step), with the two equally likely. *Over floor*: share of the class whose "
+              "server-side pipeline time exceeded the floor, so its response could not be padded to it. *Best threshold accuracy*: the balanced accuracy of "
               "the best single latency threshold between the two classes on these samples (0.5 = no information; optimistic, since "
               "the threshold is chosen on the same data). A KS p-value above 0.05 is a failure to detect a difference, not evidence "
               "of none.", ""]
         for p in p4:
             lat = p["latency_by_outcome_ms"]
             ob = p.get("client_over_floor_by_outcome") or {}
-            L += [f"Concurrency {p['concurrency']}:", "", "| Outcome | n | p50 / p95 / p99 (ms) | Over floor (client) |", "|---|---:|---:|---:|"]
+            L += [f"Concurrency {p['concurrency']}:", "", "| Outcome | n | Client p50 / p95 / p99 (ms) | Over floor (server time) |", "|---|---:|---:|---:|"]
             for k in sorted(lat):
                 v = lat[k]
                 L.append(f"| {k} | {v['n']} | {v['p50']:.0f} / {v['p95']:.0f} / {v['p99']:.0f} | {100 * ob.get(k, 0):.1f} % |")

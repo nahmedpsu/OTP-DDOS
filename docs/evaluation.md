@@ -44,14 +44,14 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
    and the closed form is a consistency check, not a forecast.** Leakage is about
    5 B + rate x 2.5 min for a carrier that never verifies and 5 B for one that verifies
    within a second, with B the 8-digit blocks a run actually touched. Over the eighteen
-   spread configurations the model's mean absolute error is 1.2 to 10.7 SMS (1 to 14 %) in
-   the ten unsaturated ones and it overstates by 4 to 22 on average in the eight saturated
-   ones, where it predicts that every request leaks (section G, per-run residuals). Three
-   blocks cost 88 and 17 SMS; 300 blocks leak like the flooder. **A colluding carrier that
-   verifies 60 % of its codes with human-like delay** leaks 405 of about 560 under the
-   default (contained in 2 of 10 seeds) and leaves 238 verified codes per run (not distinct
-   accounts; no account system is modelled); over 60 minutes it leaks 898 and 7 of 10 seeds
-   are never contained (section F1).
+   spread configurations the model's mean absolute error is 1.6 to 7.9 SMS (1 to 13 %) in
+   the ten unsaturated ones and it overstates by 3 to 19 on average in the eight saturated
+   ones, where it predicts that every request leaks (section G, per-run residuals); it uses
+   each run's observed blocks, so it is a mechanism check, not a forecast. 300 blocks leak like
+   the flooder. **A colluding carrier that verifies 60 % of its codes with human-like delay**
+   leaks 452 of about 560 under the default (contained in 0 of 10 seeds) and leaves 272
+   verified codes per run (not distinct accounts; no account system is modelled); over 60
+   minutes it leaks 1 067 and 8 of 10 seeds are never contained (section F1).
 7b. **The block tests are calibrated, and a wrong calibration costs real users.** They
    assume 80 % legitimate conversion and 20 % of verifications within 5 s of delivery.
    Section H1 (per block, empty history, a fixed number of sends; counts with Wilson
@@ -66,14 +66,26 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
    otherwise.** Section H3: send-clocked, a 30-minute outage on one prefix produced 1.8
    verdict events touching 5.0 requests; with receipts gating the tests and the detector,
    0.6 (reported failures) and 0.8 (silent outage). Reduced, not removed.
-7d. **Destination policies on a common pipeline (section F2).** Every row runs the full
-   pipeline; only the destination policy differs. Settings were selected on tuning seeds
-   against a predeclared service target (the default's completion minus 0.5 points) and
-   evaluated on held-out seeds at three legitimate densities. A counter of SMS sends per
-   block over a short refilling window stops every pumper tested, including the human-like
-   carrier: 4 per 10 minutes on 200 busy blocks leaks 24 at an attributable loss of 0.06 %
-   of users; 1 per 10 minutes on uniform traffic leaks 6 at 0.15 %; 3 per hour at 29 sends a
-   block a day leaks 9 at 0.35 %. The sequential tests without credit (threshold 300) leak 118
+7d. **Destination policies on a common pipeline (section F2) and the counter study.** Every
+   row runs the full pipeline; only the destination policy differs. Settings were selected on
+   tuning seeds against a benign service target (the default's completion minus 0.5 points on
+   attack-free tuning runs) and evaluated on held-out seeds at three service-calibration
+   settings (legitimate densities); in the predeclared 2.7.0 study only density 200 had the full
+   sequential grid and attack runs were shared across densities, a gap the counter study's E5
+   closes (full grid and density-specific attack runs everywhere; the same counters are selected).
+   Across the four concentrated 20-minute pumping profiles, the selected short-window counters
+   leaked 24 (4 per 10 minutes, 200 busy blocks), 6 (1 per 10 minutes, uniform) and 9 (3 per
+   hour, 29 sends a block a day), and in separate 24-hour attack-free runs their net
+   attributable completion loss was 0.06, 0.15 and 0.35 points of offered users. Under the
+   counter protocol (`results/counter_study.md`) the principal counter held its security and
+   benign-service claims on the held-out family (K1, K2, K4) and failed both service-under-
+   attack claims (K3: 127 of 144 cells; K5: 93 of 144); E3 and E4 map where it loses (spreading
+   over 30 or more blocks, quota-aware pacing, trust-building pumpers on random numbers, a
+   poisoner spread over the shared blocks, legitimate rates near its quota, product launches).
+   The comparison scores leakage summed over four scripted pumpers: a declared experimental
+   score, not a utility; under worst-case leakage, a first-time-user loss constraint, each
+   single pumper and random attacker mixes the same counter is preferred at each density (E5),
+   which says nothing about attackers outside the four. The sequential tests without credit (threshold 300) leak 118
    against the human-like carrier at 0.34 % and 314 verdict events a day; at matched
    false-alarm burden, credit of two thresholds or more leaks 538 to 560. A credit floor of
    -c x log(threshold) is a zero-floor CUSUM with threshold (1 + c) x log(threshold) and
@@ -84,10 +96,12 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
    fallback regression described below; its conclusion (counters cost 2 to 21 % completion)
    does not survive.
 7e. **Faked receipts, white-box carriers and bought trust defeat the block tests.** A carrier
-   that reports every delivery as failed feeds the tests nothing: 560 leaked without caps,
-   228 with, no verdict ever. A threshold-aware carrier that replays its own pending
-   outcomes in the deployed order and enters a code only when its block nears the threshold
-   leaks 560 with no verdict and 280 codes entered. A pumper whose 500 identity/number pairs
+   that reports every delivery as failed feeds the tests nothing: 570 leaked without caps,
+   no verdict ever. A threshold-aware carrier that replays its own pending outcomes in the
+   deployed order and enters a code only when its block nears the threshold leaks 570 with no
+   verdict and 286 codes entered. The short-window counter holds both to 24 on concentrated
+   blocks (counter study E3), and does nothing against a trust-building pumper on random
+   numbers (577, as with no policy). A pumper whose 500 identity/number pairs
    verify everything for ten minutes and then flood leaks 253 in its flood phase (81 under
    caps) after 263 verified codes in preparation; over 30 + 30 minutes, 628 after 763.
    Receipt-robust tests stop the receipt faker (16 leaked) at 30 false verdict events a day
@@ -98,10 +112,11 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
    capping it at a challenge.** Section D2: a poisoner on the 20 blocks real users share
    earns 16 verdict events on 13 blocks and hits 98 requests (stage 1 and stage 2, where
    first-time clients are moved off SMS). Against the observe-only counterfactual on the same
-   trace, the loss attributable to enforcement is 11.5 requests (2.8 % of users) at 70 %
+   trace, the loss attributable to enforcement is 12.7 requests (3.1 % of users) at 70 %
    WhatsApp reachability, 25.8 (6.3 %) at none, 6.4 (1.6 %) at full, and 97.7 (24 %) under
-   the hard denylist. A poisoner that stops after 10 minutes leaves verdicts that hit 406
-   more requests over the next hour (attributable loss 47.6).
+   the hard denylist. In a 70-minute run whose poisoner stops after 10 minutes, verdicts hit
+   406 requests after it stopped; the loss attributable to enforcement among requests after
+   the stop is 46.2, and 48.2 over the whole run (two windows, reported separately).
 8. **A challenge solver who buys interactive-challenge solutions receives the -20
    `challenge_passed` credit** and can move from `challenge` back to `delay`; a datacenter
    attacker that does so turns 0 leaked SMS into 51 to 55 per run (section D). A pumper
