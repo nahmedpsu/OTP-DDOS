@@ -1,6 +1,6 @@
 # Reproduction check (2026-10-03)
 
-102 recorded runs, 3 per study (stratified, seed 20261003; runs longer than 100000 simulated minutes skipped), replayed with the current code (code hash `b54e79ea95f0e996...`) against the records produced by `ec40cf344a57`, `fbf12e7f5075...`. Every recorded field is compared except code_hash, index, spec_hash, study, wall_s. **102 of 102 identical.** Wall time 282 s.
+102 recorded runs, 3 per study (stratified, seed 20261003; runs longer than 100000 simulated minutes skipped), replayed with the current code (code hash `e6d0142f88e8b322...`) against the records produced by `ec40cf344a57`, `fbf12e7f5075...`. Every recorded field is compared except code_hash, index, spec_hash, study, wall_s. **102 of 102 identical.** Wall time 311 s.
 
 | Results file | Study | Spec hash | Seed | Outcome |
 |---|---|---|---:|---|

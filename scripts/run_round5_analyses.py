@@ -12,12 +12,20 @@ runs. Nothing here changes a recorded result.
      against the attacked 'none' arm (all, first-time, returning, attacked-block users; gross lost
      and gained); and, from new attack-free runs on the same legitimate traces, degradation against
      attack-free operation under the same policy, and the benign cost against attack-free 'none'.
-  D  (M5) The operating condition: the counter's leakage envelope q * B * w (q sends per block per
-     window, B blocks, w windows touched; twice that for a pumper that solves challenges) against the
-     sequential tests' estimate k * B + lambda * tau (Equation 1), checked on the E3/E4 runs; and the
-     attack-free cost to a block's users against the share of its sends beyond the quota.
+  D  (M5; sixth round M2, M3) The operating condition as a heuristic comparison of two simplified
+     estimates on the E4 security map: the counter's allowance q * B * w over the attack's w windows
+     (q sends per block per window, B blocks; twice that for a pumper that solves challenges), capped at
+     the volume N the pumper offered; and the sequential tests' leakage before their first verdict,
+     k * B + lambda * tau (Equation 2), whose intercept lambda * tau is FITTED on the 3-block, 60-minute
+     never-verifying cell and only checked elsewhere. The two estimates have different horizons (the
+     whole attack against the time to the first verdict), so the table is a check of where they
+     cross, not a derivation. The service model gives the share of a block's sends beyond the quota
+     under two window models: exogenous 10-minute windows (Poisson count n) and the implemented
+     arrival-anchored window, which opens at the block's first accepted send and holds that send plus
+     a Poisson count: E[(1 + X - q)+] / (1 + m).
 
     python3 scripts/run_round5_analyses.py [--procs 2]
+    python3 scripts/run_round5_analyses.py --refresh-d     # recompute part D only, from the recorded files
 
 Writes results/round5_analyses.md and results/round5_analyses.json, and the new attack-free runs to
 results/round5_attack_free_runs.jsonl.gz."""
@@ -232,7 +240,8 @@ def analysis_c(e1_runs, free_runs, condition="200 shared"):
 
 # ---------------------------------------------------------------- D: the operating condition
 def poisson_excess(mean, q):
-    """E[(N - q)+] / mean for N ~ Poisson(mean): the share of a block's sends in a window beyond its quota."""
+    """E[(N - q)+] / mean for N ~ Poisson(mean): the share of a block's sends in an exogenous window
+    (one that is open whether or not anything arrives) beyond its quota."""
     if mean <= 0:
         return 0.0
     p, cdf_part, tail = math.exp(-mean), 0.0, 0.0
@@ -245,13 +254,68 @@ def poisson_excess(mean, q):
     return (mean - e_min) / mean
 
 
+def anchored_excess(mean, q):
+    """The implemented window: it opens at the block's first accepted send and lasts the window length, so
+    one reset cycle holds 1 + X sends, X ~ Poisson(mean) (homogeneous arrivals, every request reaching the
+    counter, no exemptions). The share beyond the quota is E[(1 + X - q)+] / (1 + mean) =
+    (mean - E[min(X, q - 1)]) / (1 + mean). At q = 4: 7.27 % at mean 2 and 26.96 % at mean 4, against
+    3.76 % and 19.54 % for the exogenous window (sixth-round review, M3)."""
+    if mean <= 0:
+        return 0.0
+    return poisson_excess(mean, q - 1) * mean / (1 + mean)
+
+
+K_PER_BLOCK = 5            # Equation 2's per-block term (sends before a block's first verdict)
+FIT_CELL = (3, "spreading, never verifies", 60)
+
+
+def analysis_d(cs, q=4):
+    """Part D from the recorded counter study (E4 security map): no simulation runs."""
+    grid, offered = {}, {}
+    for key, v in cs["E4"]["security"].items():
+        nb, kind, mins, pol = key.split("|")
+        cell = (int(nb), kind, int(mins))
+        grid.setdefault(cell, {})[pol] = v["leaked_total"][0]
+        offered.setdefault(cell, {})[pol] = v["requests"][0]
+    fit_seq = grid[FIT_CELL]["sequential T1000 c1"]
+    intercept = fit_seq - K_PER_BLOCK * FIT_CELL[0]                       # lambda x tau, fitted on one cell
+    env = []
+    for (nb, kind, mins), pols in sorted(grid.items()):
+        w = mins // 10
+        n_counter, n_seq = offered[(nb, kind, mins)]["counter graded 4/10 min"], offered[(nb, kind, mins)]["sequential T1000 c1"]
+        env.append({"blocks": nb, "pumper": kind, "minutes": mins, **pols,
+                    "offered_counter_arm": n_counter, "offered_sequential_arm": n_seq,
+                    "counter_allowance": q * nb * w, "counter_envelope": min(n_counter, q * nb * w),
+                    "envelope_capped_by_offered": q * nb * w > n_counter,
+                    "sequential_first_verdict_estimate": min(n_seq, K_PER_BLOCK * nb + intercept),
+                    "role": "fit" if (nb, kind, mins) == FIT_CELL else "check"})
+    service = []
+    for rate in (0.5, 1, 2, 4, 8):
+        service.append({"legit_per_window": rate,
+                        "share_beyond_quota": poisson_excess(rate, q), "share_beyond_twice_quota": poisson_excess(rate, 2 * q),
+                        "anchored_share_beyond_quota": anchored_excess(rate, q),
+                        "anchored_share_beyond_twice_quota": anchored_excess(rate, 2 * q)})
+    return {"D_fit": {"k_per_block": K_PER_BLOCK, "intercept_lambda_tau": intercept, "fitted_on": list(FIT_CELL),
+                      "fitted_on_sequential_leakage": fit_seq, "q": q},
+            "D_security_map": env, "D_service_model": service}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--procs", type=int, default=2)
     ap.add_argument("--checkpoint", default=None)
+    ap.add_argument("--refresh-d", action="store_true", help="recompute part D from the recorded files and rewrite the reports")
     a = ap.parse_args()
     t0 = time.time()
     cs = json.loads((ROOT / "results" / "counter_study.json").read_text())
+    if a.refresh_d:
+        out = json.loads((ROOT / "results" / "round5_analyses.json").read_text())
+        out.update(analysis_d(cs))
+        out["meta"]["part_d_refreshed"] = "2.8.2: envelope capped at the offered volume, fitted intercept labelled, arrival-anchored service model"
+        (ROOT / "results" / "round5_analyses.json").write_text(json.dumps(out, indent=1, default=str))
+        write_md(out, ROOT / "results" / "round5_analyses.md")
+        print("part D refreshed")
+        return
     runs = load_runs(ROOT / "results" / "counter_study_runs.jsonl.gz", {"E5_tuning", "E5_eval", "E1", "E3", "E4"})
     tuning = [r for r in runs if r["study"] == "E5_tuning"]
     evaluation = [r for r in runs if r["study"] == "E5_eval"]
@@ -274,25 +338,11 @@ def main():
             f.write(json.dumps(dict(r, index=list(i), code_hash=runner.code), default=str) + "\n")
     attacked = {c: analysis_c(e1, list(zip(index, free)), c) for c in ("200 shared", "200 independent")}
 
-    # D: envelope against the measured security map (E4) and the service map
-    q = 4
-    grid = {}
-    for key, v in cs["E4"]["security"].items():
-        nb, kind, mins, pol = key.split("|")
-        grid.setdefault((int(nb), kind, int(mins)), {})[pol] = v["leaked_total"][0]
-    env = []
-    for (nb, kind, mins), pols in sorted(grid.items()):
-        w = mins // 10
-        env.append({"blocks": nb, "pumper": kind, "minutes": mins, **pols,
-                    "counter_envelope": min(pols["none"], q * nb * w), "sequential_estimate": 5 * nb + 95})
-    service = []
-    for rate in (0.5, 1, 2, 4, 8):
-        service.append({"legit_per_window": rate, "share_beyond_quota": poisson_excess(rate, q),
-                        "share_beyond_twice_quota": poisson_excess(rate, 2 * q)})
+    # D: the two estimates against the measured security map (E4), and the service model
     out = {"meta": {"code_hash": runner.code, "environment": environment(), "new_runs": len(specs) + len(mspecs),
                     "new_attack_free_runs": len(specs), "new_union_eval_runs": len(mspecs), "wall_s": time.time() - t0},
            "A_selection": sel, "A_evaluation_in_union": union_eval, "B_claims_by_attacker": claims,
-           "C_attacked_service": attacked, "D_security_map": env, "D_service_model": service}
+           "C_attacked_service": attacked, **analysis_d(cs)}
     (ROOT / "results" / "round5_analyses.json").write_text(json.dumps(out, indent=1, default=str))
     write_md(out, ROOT / "results" / "round5_analyses.md")
     print(f"done in {time.time() - t0:.0f}s")
@@ -304,7 +354,8 @@ def write_md(o, path):
          f"and {o['meta']['new_runs']} new runs ({o['meta']['new_attack_free_runs']} attack-free, `results/round5_attack_free_runs.jsonl.gz`; "
          f"{o['meta']['new_union_eval_runs']} evaluating winners outside the original shortlist, `results/round5_union_eval_runs.jsonl.gz`; code hash "
          f"`{o['meta']['code_hash'][:16]}...`; `results/reproduction_check.md` shows the current code reproduces recorded runs exactly). "
-         "Means over ten seeds with 95 % percentile-bootstrap intervals where shown.", "",
+         "Means over ten seeds with 95 % percentile-bootstrap intervals where shown."
+         + (f" Part D was recomputed from the recorded files without new runs ({o['meta']['part_d_refreshed']})." if o["meta"].get("part_d_refreshed") else ""), "",
          "## A. Selection repeated under each objective (M1)", "",
          "Every setting meeting the service target on the E5 tuning runs is a candidate (not only the original shortlist); "
          "each objective selects on tuning data, with the original rule's tie-break (lower leakage, then higher completion). "
@@ -359,20 +410,40 @@ def write_md(o, path):
                          f"{f(v1['attacked_block']['net_pct'])} ({v1['all']['gross_lost'][0]:.1f}/{v1['all']['gross_gained'][0]:.1f}) | "
                          f"{f(v2['all']['net_pct'])} / {f(v2['attacked_block']['net_pct'])} | {f(v3['all']['net_pct'])} |")
         L.append("")
-    L += ["## D. Operating condition (M5)", "",
-          "Security map (E4, leaked SMS, means): the counter's envelope is q x B x w with q = 4 sends per block per 10-minute "
-          "window, B blocks and w windows (2 in 20 minutes, 6 in 60), capped by what the pumper sends; the sequential tests' "
-          "estimate (Equation 1) is k x B + lambda x tau with k = 5.", "",
-          "| Blocks, pumper, minutes | none | sequential default | counter | envelope q B w (capped by none) | k B + intercept |",
-          "|---|---:|---:|---:|---:|---:|"]
+    fit = o["D_fit"]
+    L += ["## D. Operating condition: a heuristic comparison of two simplified estimates (M5; sixth round M2, M3)", "",
+          f"Security map (E4, leaked SMS, means over 5 seeds). Two estimates with different horizons are set beside the measured "
+          f"leakage. The counter's allowance is q x B x w over the whole attack (q = {fit['q']} sends per block per 10-minute window, "
+          f"B blocks, w windows: 2 in 20 minutes, 6 in 60), capped at N, the volume the pumper offered in the counter arm (a "
+          f"quota-aware pumper offers about the allowance, so its cap binds); the envelope is an upper bound on what the counter can "
+          f"let through, not a prediction, and it assumes the pumper stays subject to the quota (no verified-history exemption). "
+          f"The sequential tests' figure is Equation 2's leakage before the first verdict, k x B + lambda x tau with k = {fit['k_per_block']}, "
+          f"capped at N in the sequential arm; it does not describe containment, what happens after a verdict expires, or a campaign "
+          f"that continues after it. Its intercept lambda x tau = {fit['intercept_lambda_tau']:.0f} is FITTED on one cell "
+          f"({fit['fitted_on'][0]} blocks, {fit['fitted_on'][1]}, {fit['fitted_on'][2]} minutes: {fit['fitted_on_sequential_leakage']:.0f} "
+          f"leaked minus k x {fit['fitted_on'][0]}); agreement on that row is imposed, every other row is a check. The five sampled "
+          f"spreads bracket the crossing between 3 and 10 blocks for a 60-minute campaign and do not locate it more precisely.", "",
+          "| Blocks, pumper, minutes | none | sequential default | counter | offered N (counter arm) | allowance q B w | envelope min(N, q B w) | "
+          "first-verdict estimate min(N, k B + lambda tau) | row |",
+          "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
     for row in o["D_security_map"]:
         L.append(f"| {row['blocks']}, {row['pumper']}, {row['minutes']} | {row['none']:.0f} | {row['sequential T1000 c1']:.0f} | "
-                 f"{row['counter graded 4/10 min']:.0f} | {row['counter_envelope']:.0f} | {row['sequential_estimate']:.0f} |")
-    L += ["", "Service model: share of a block's sends in a 10-minute window beyond the quota (Poisson arrivals at the stated "
-          "mean), the requests a graded counter challenges (beyond q) or moves off SMS (beyond 2q):", "",
-          "| Legitimate sends per block per window | Beyond q = 4 | Beyond 2q = 8 |", "|---:|---:|---:|"]
+                 f"{row['counter graded 4/10 min']:.0f} | {row['offered_counter_arm']:.0f} | {row['counter_allowance']:.0f} | "
+                 f"{row['counter_envelope']:.0f}{' (capped)' if row['envelope_capped_by_offered'] else ''} | "
+                 f"{row['sequential_first_verdict_estimate']:.0f} | {row['role']} |")
+    L += ["", "Service model: share of a block's sends beyond the quota, the requests a graded counter challenges (beyond q) or "
+          "moves off SMS (beyond 2q), under two window models. *Exogenous*: fixed 10-minute windows open whether or not anything "
+          "arrives, n ~ Poisson(m) sends per window, share E[(n - q)+] / m. *Arrival-anchored* (the implementation: "
+          "`try_reserve_tiered` sets the window's TTL on the first accepted reservation and later reservations do not restart it): "
+          "a reset cycle holds the send that opened it plus X ~ Poisson(m) sends in its duration, share E[(1 + X - q)+] / (1 + m). "
+          "Both are idealised diagnostics (homogeneous arrivals, every request reaching the counter, no exemptions, no earlier gates "
+          "or challenge failures), not measurements of the simulator; the arrival-anchored column is the one the deployed counter "
+          "corresponds to.", "",
+          "| Legitimate sends per block per window m | Exogenous: beyond q = 4 | Exogenous: beyond 2q = 8 | "
+          "Arrival-anchored: beyond q = 4 | Arrival-anchored: beyond 2q = 8 |", "|---:|---:|---:|---:|---:|"]
     for s in o["D_service_model"]:
-        L.append(f"| {s['legit_per_window']} | {100 * s['share_beyond_quota']:.2f} % | {100 * s['share_beyond_twice_quota']:.3f} % |")
+        L.append(f"| {s['legit_per_window']} | {100 * s['share_beyond_quota']:.2f} % | {100 * s['share_beyond_twice_quota']:.3f} % | "
+                 f"{100 * s['anchored_share_beyond_quota']:.2f} % | {100 * s['anchored_share_beyond_twice_quota']:.3f} % |")
     path.write_text("\n".join(L) + "\n")
 
 

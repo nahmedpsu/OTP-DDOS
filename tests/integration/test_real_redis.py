@@ -400,3 +400,66 @@ def test_late_reversal_after_thirteen_minutes_across_instances(redis_url):
     h.clock.advance(14 * 60)
     fb1.recover()
     assert fb1.block_llr("block:96650450")[2][:2] == (1, 0)
+
+
+def test_replayed_older_failure_keeps_the_block_newest_time_across_instances(redis_url):
+    """Sixth-round M4: instance 0 records a negative receipt in the outage detector at t0 and dies
+    before clearing the batch; at t0 + 900 instance 1 records another on the same block; instance 1's
+    sweep then replays the old batch. The block's score must stay t0 + 900 (zadd_max script)."""
+    h, pipes = two_instances(redis_url)
+    h.cfg.block_tests = ()
+    fb0, fb1 = pipes[0].feedback, pipes[1].feedback
+    r1 = pipes[0].process(_req(h, 21, block="96650460"))
+    orig = fb0._outage_record
+    def dying(*a, **k):
+        fb0._outage_record = orig
+        orig(*a, **k)
+        raise _Crash()
+    fb0._outage_record = dying
+    with pytest.raises(_Crash):
+        fb0.on_delivery(r1.log_id, False)
+    t0 = h.clock.now()
+    h.clock.advance(900)
+    r2 = pipes[1].process(_req(h, 22, block="96650460"))
+    assert fb1.on_delivery(r2.log_id, False) == "failed"
+    rec = pipes[1].sms_history.get(r2.log_id)
+    key = f"outage:blocks:{fb1._carrier(rec)}"
+    member = rec["phone_number"][:h.cfg.destination_block_digits]
+    assert fb1.recover() >= 1
+    assert pipes[1].store.zscore(key, member) == t0 + 900
+    h.clock.advance(901)
+    now = h.clock.now()
+    assert pipes[1].store.zcount_many([key], now - h.cfg.outage_kg_window_s, now) == [1]
+
+
+def test_replayed_crossing_is_dated_at_its_transition_across_instances(redis_url):
+    """Sixth-round M5: four failures through instance 0; the fifth's transition is recorded on instance 0,
+    which dies before applying it; 600 s later instance 1's sweep replays it. The verdict is dated at
+    the transition, not at the recovery."""
+    h, pipes = two_instances(redis_url)
+    fb0, fb1 = pipes[0].feedback, pipes[1].feedback
+    key = "block:96650461"
+
+    def fail(i):
+        r = pipes[0].process(_req(h, i, block="96650461"))
+        fb0.on_delivery(r.log_id, True)
+        h.clock.advance(h.cfg.resolution_timeout_s + 1)
+        return r
+    for i in range(31, 35):
+        fail(i)
+        fb0.run_due_timeouts()
+    assert fb0.block_verdict(key) is None
+    fail(35)
+    orig = fb0._apply
+    def dying(log_id, rec, batch):
+        fb0._apply = orig
+        raise _Crash()
+    fb0._apply = dying
+    with pytest.raises(_Crash):
+        fb0.run_due_timeouts()
+    t_fail = h.clock.now()
+    h.clock.advance(600)
+    assert fb1.recover() >= 1
+    v = fb1.block_verdict(key)
+    assert v is not None and v["stage"] == 1
+    assert v["at"] == t_fail and v["until"] == t_fail + h.cfg.block_verdict_ttl

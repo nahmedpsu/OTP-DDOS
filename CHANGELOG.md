@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.8.2 (2026-10-03)
+
+Repository items of the sixth-round review. No simulation run changed: the two repairs are on
+replay paths the single-threaded simulator never takes, and the live path's event time is the
+clock's (102 recorded runs replayed with 2.8.2 are identical, `results/reproduction_check.md`);
+part D of the fifth-round analyses was recomputed from the recorded files.
+
+- **Outage block recency under replay (M4).** The outage detector's distinct-block set keeps each
+  block's newest failure time when an older failure is replayed (`store.zadd_max`, a script on
+  Redis); up to 2.8.1 the replay overwrote it, so a block with a recent failure could drop out of
+  the 1800-s window. Regression on memory, fakeredis and a real Redis; fails on 2.8.1.
+- **Block-test events at their transition's time (M5).** `_block_event` receives the event's time:
+  an event counts toward the test running at its time (one dated before the last crossing is
+  recorded, not counted, and cannot cause a crossing), a crossing issues its verdict at the event's
+  time and escalates against the verdict active then, the verdict's lifetime runs from the event's
+  time, and a reversal subtracts its failure only if that failure was counted in the current test.
+  Block documents written by earlier versions are read (identifier memory now holds recorded and
+  event times; `test_since` defaults to 0). Four defect tests fail on 2.8.1.
+- **Operating condition as a labelled heuristic (M2).** Part D caps the counter's allowance at the
+  offered volume N rather than at the no-policy arm's leakage, caps the first-verdict estimate at N,
+  computes the intercept from the 3-block, 60-minute cell and marks that row as the fit and the
+  others as checks, and states the horizon mismatch. Figure 7(b) evaluates the two estimates at the
+  sampled spreads only and labels the fitted intercept and the cap.
+- **Service model under the implemented window (M3).** The arrival-anchored share beyond the quota,
+  E[(1+X-q)+]/(1+m), is reported beside the exogenous-window share; the window's anchoring (it opens
+  at the block's first accepted send) is stated in the docs.
+- **Found while checking reproduction, not changed: sorted-set expiry differs between the stores.**
+  The memory store (which the simulator runs on) keeps a sorted set's expiry from its creation,
+  while the Redis store refreshes it on every write. The outage detector's per-carrier sets
+  (`outage:*`, expiry twice their window) therefore vanish wholesale in the simulation 2 x window
+  after they were first written, whatever arrived since, and are recreated empty; on Redis they
+  persist while written to. A first version of `zadd_max` refreshed the expiry and the 102-run
+  reproduction sample then differed in 18 runs: 16 only in the outage-alert count, one also in
+  the legitimate users hit by verdicts, one in the block-verdict counts (a suspension that did or
+  did not happen). `zadd_max` now follows the memory store's rule so the recorded results stand;
+  aligning the memory store with Redis changes the outage-alert numbers of the recorded studies and
+  is left for a release that reruns them.
+
 ## 2.8.1 (2026-10-03)
 
 Implementation repairs and analyses from the fifth-round review. The recorded 2.8.0 results stand:

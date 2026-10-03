@@ -382,7 +382,7 @@ def fig7_counter_boundary(CS, out):
     E4 = CS["E4"]
     fig, axes = plt.subplots(2, 1, figsize=(9, 10.5))                   # stacked: each panel the full text width
     style(axes[0], "(a) service: loss among the hot blocks' users (70 % WhatsApp)")
-    style(axes[1], "(b) security: leakage against the pumper's spread")
+    style(axes[1], "(b) security: leakage against the pumper's spread (estimates at the sampled spreads only; the crossing lies between 3 and 10 blocks)")
     for ax in axes:
         ax.tick_params(labelsize=10.5); ax.title.set_fontsize(12)
     rates = sorted({float(k.split("|")[0]) for k in E4["service"]})
@@ -411,14 +411,20 @@ def fig7_counter_boundary(CS, out):
             ys = [E4["security"][f"{b}|{kind}|60|{pol}"]["leaked_total"][0] for b in blocks]
             axes[1].plot(blocks, ys, color=col, marker=mk, markersize=7, linewidth=2, linestyle="-" if mk == "o" else "--",
                          label=f"{_short(pol)}: {kind}")
-    cap = [E4["security"][f"{b}|spreading, never verifies|60|none"]["leaked_total"][0] for b in blocks]
-    fine = [b for b in range(min(blocks), max(blocks) + 1)]
-    import numpy as _np
-    capf = _np.interp(fine, blocks, cap)
-    axes[1].plot(fine, [min(c, 4 * b * 6) for b, c in zip(fine, capf)], color=C["green"], linestyle=":", linewidth=1.6,
-                 label="counter envelope: 4 x blocks x 6 windows (Eq. 3)")
-    axes[1].plot(fine, [min(c, 5 * b + 95) for b, c in zip(fine, capf)], color=C["blue"], linestyle=":", linewidth=1.6,
-                 label="sequential estimate: 5 x blocks + 95 (Eq. 2)")
+    # the two simplified estimates, evaluated at the sampled spreads only (the crossing between 3 and 10 blocks is
+    # bracketed, not located): the counter's allowance 4 x B x 6 capped at the volume N the pumper offered in the
+    # counter arm, and the sequential tests' first-verdict estimate 5 x B + lambda tau, its intercept fitted on the
+    # 3-block cell (sixth-round review, M2)
+    sec = E4["security"]
+    kind = "spreading, never verifies"
+    n_ctr = [sec[f"{b}|{kind}|60|counter graded 4/10 min"]["requests"][0] for b in blocks]
+    n_seq = [sec[f"{b}|{kind}|60|sequential T1000 c1"]["requests"][0] for b in blocks]
+    k = 5
+    intercept = sec[f"3|{kind}|60|sequential T1000 c1"]["leaked_total"][0] - k * 3
+    axes[1].plot(blocks, [min(n, 4 * b * 6) for b, n in zip(blocks, n_ctr)], color=C["green"], linestyle=":", linewidth=1.6,
+                 marker="x", markersize=9, label="counter allowance 4 x B x 6, capped at the offered volume N (Eq. 3)")
+    axes[1].plot(blocks, [min(n, k * b + intercept) for b, n in zip(blocks, n_seq)], color=C["blue"], linestyle=":", linewidth=1.6,
+                 marker="x", markersize=9, label=f"sequential first-verdict estimate 5 x B + {intercept:.0f} (Eq. 2; intercept fitted on B = 3)")
     axes[1].set_xscale("log"); axes[1].set_xticks(blocks); axes[1].set_xticklabels([str(b) for b in blocks])
     axes[1].xaxis.set_minor_formatter(NullFormatter())
     axes[1].set_xlabel("blocks the pumper spreads over (60-minute attack)", color=INK, fontsize=11.5)

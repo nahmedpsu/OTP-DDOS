@@ -216,6 +216,47 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
   (`tests/integration/test_real_redis.py`), which is the only place those properties are
   established; vendors remain untested live.
 
+## What changed after the sixth-round report
+
+Repository-side items of the sixth-round report (2.8.2). The manuscript's analytical claims (M1,
+Q1-Q10) are the author's; the repository supplies the corrected analysis and semantics they rest on.
+
+- **Outage block recency under replay (M4).** The distinct-block set of the outage detector held
+  one member per block and a replay assigned it the replayed event's time, so an older replayed
+  failure erased a newer one's recency (the reviewer's two-send case: 900 moved back to 0, and the
+  1800-s window lost the block). The member now keeps the block's newest failure time
+  (`store.zadd_max`, one script on Redis). Regression: `tests/unit/test_sixth_round.py`,
+  `tests/integration/test_real_redis.py`; the test fails on 2.8.1.
+- **Block-test events at their transition's time (M5).** `_block_event` took the clock's time for
+  the active-verdict check, the verdict's time and its expiry, so a crossing replayed 600 s late was
+  dated 600 s late. The event's time is now passed in and the semantics are defined at the top of
+  `feedback.py`: an event counts toward the test running at its time (one dated before the last
+  crossing is recorded, not counted), a crossing issues its verdict at the event's time and escalates
+  against the verdict active then, and a reversal subtracts its failure only if that failure was
+  counted in the current test. Tests cover the replayed crossing, escalation near a verdict's expiry,
+  a reordered old event, and documents written by 2.8.1. The live path is unchanged (its event time
+  is the clock's), so no simulated number moves.
+- **Operating condition (M2).** Part D of `scripts/run_round5_analyses.py` now caps the counter's
+  allowance at the volume the pumper offered (N, from the same E4 cells) instead of the no-policy
+  arm's leakage, caps the sequential first-verdict estimate at N as well, computes the intercept
+  from the 3-block, 60-minute cell and marks that row as the fit and every other row as a check,
+  and states the horizon mismatch (whole attack against first verdict) in the report. Figure 7(b)
+  evaluates both estimates at the sampled spreads only and says so; the intercept's origin and the
+  cap are in its legend. `results/round5_analyses.{md,json}` part D was recomputed from the recorded
+  files (`--refresh-d`); no run changed.
+- **Service model (M3).** The share of a block's sends beyond the quota is reported under both
+  window models: exogenous fixed windows (E[(n-q)+]/m, the figures the fifth revision quoted) and the
+  implemented arrival-anchored window (E[(1+X-q)+]/(1+m): 7.27 % at m = 2 and 26.96 % at m = 4 for
+  q = 4, against 3.76 % and 19.54 %). The anchoring is now stated wherever the counter is described.
+- **Found, disclosed, not changed: sorted-set expiry in the memory store.** The simulator's memory
+  store keeps a sorted set's expiry from its creation; the Redis store refreshes it on every write.
+  The outage detector's per-carrier sets therefore empty 2 x window after their first write in a
+  simulated run and are recreated, which can suppress or delay a suspension that a Redis deployment
+  would have issued. Measured on the 102-run reproduction sample: a store that refreshes changes
+  18 runs, 16 of them only in the outage-alert count. The recorded results and `zadd_max` keep the
+  memory store's rule; aligning it with Redis means rerunning the outage-related studies
+  (`CHANGELOG.md`, 2.8.2).
+
 ## What changed after the fifth-round report
 
 Release 2.8.1. The 2.8.0 results stand; `scripts/check_reproduction.py` replays three recorded runs
@@ -243,7 +284,8 @@ recorded field (`results/reproduction_check.md`).
 - **Timing (M10).** `scripts/load_test.py --holdout N` fits the best latency threshold on one
   phase-4 run and applies it to independent runs (`results/performance_holdout.md`); the
   phase-4 accuracy in `results/performance.md` is a resubstitution value.
-- **Implementation (M8, M9).** Replayed effects at their transition's time; failure ids kept for
+- **Implementation (M8, M9).** Replayed effects at their transition's time (block-test verdicts
+  followed in 2.8.2, sixth round M5); failure ids kept for
   the replay horizon plus the code lifetime; conditional removal of timeouts; Step 11 challenges
   give back their source-cap counts; tests on memory, fakeredis, a real Redis and over HTTP. See
   `CHANGELOG.md`.
@@ -323,7 +365,9 @@ recorded field (`results/reproduction_check.md`).
   instances on a real Redis.
 - **The destination counter counts SMS sends** to the block in its window (stage read at Step 5,
   send reserved atomically at Step 11); a refused or challenged request and its retry cost nothing
-  unless an SMS goes out. Windows: daily, or short and refilling.
+  unless an SMS goes out. Windows: daily, or short and refilling. The window is arrival-anchored:
+  it opens at the block's first accepted send and later sends do not restart it, so a reset cycle
+  holds that send plus whatever arrives in the window's length (not a fixed clock window).
 - **Matched comparison on a common pipeline** (section F2): every row runs the full pipeline with
   only the destination policy changed; settings are selected on tuning seeds against a predeclared
   service target and evaluated on held-out seeds, at three block densities, at 65 % and 80 %

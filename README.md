@@ -49,7 +49,8 @@ blocks therefore scales with how many blocks the pumper can use.
    default sequential tests leak 90 (contained in 10 of 10 seeds, in 3.5 minutes); an instant
    verifier 19; a carrier that verifies 60 % of its codes with human-like delay 452 (contained in
    0 of 10) with 272 codes entered. A counter of SMS sends per block over a short refilling window
-   (4 per 10 minutes, selected in 2.7.0 against a benign service target) was then frozen and
+   (4 per 10 minutes, the window opening at the block's first accepted send; selected in 2.7.0
+   against a benign service target) was then frozen and
    tested under a separate protocol committed before its runs (`config/counter_protocol.json`,
    fresh seeds; `results/counter_study.md`):
    - Across four concentrated pumping profiles on the held-out family, it leaked at most 10 % of
@@ -297,8 +298,13 @@ Other things the evaluation established:
   reputation increment replayed after a crash lands where it belongs, not at the recovery time),
   identifiers outlive a late reversal's own replay, the timeout worker removes a timeout only if it
   was not rescheduled meanwhile, and a request that Step 11 turns into a challenge no longer uses
-  the source's SMS caps. None of these paths is reached by the single-threaded simulation: 102
-  recorded runs replayed with 2.8.1 are identical (`results/reproduction_check.md`).
+  the source's SMS caps. In 2.8.2 the remaining two replay cases are closed: the outage detector's
+  distinct-block set keeps a block's newest failure time when an older one is replayed, and a
+  block-test event replayed after a crash is applied at its own time (its verdict is dated and
+  expires from the event's time, escalates against the verdict active then, and an event dated
+  before the last crossing is recorded but not counted). None of these paths is reached by the
+  single-threaded simulation: 102 recorded runs replayed with 2.8.2 are identical
+  (`results/reproduction_check.md`), and the live path's event time is the clock's.
 - **Containment is a property of a finite window**: a run counts as contained only if leakage
   stays at or below 5 % of the attack rate to the end of the run for at least five minutes;
   60-minute runs report survival curves (section F1) and time to first verdict is reported

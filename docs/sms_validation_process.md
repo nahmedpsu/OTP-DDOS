@@ -679,7 +679,8 @@ window that applies after this send) and a slot in the capped daily counter; a l
 that refuses the request releases both. Two concurrent requests for one number cannot both
 pass. What is *not* one operation is the sequence of steps itself. The guarantees are
 exactly these: each rate-limit counter's check-and-consume, the per-number claim, the
-destination counter's send reservation and the hourly budget reservation are each one
+destination counter's send reservation (which opens the block's window at its first accepted
+send; later sends do not restart it) and the hourly budget reservation are each one
 atomic Redis operation; the steps between them are not a transaction, and a refusal
 releases the claims made before it. The feedback transitions are covered separately
 (Step 11, "State before the send").
@@ -833,7 +834,13 @@ transition's time (an outage observation keeps its own time, a reputation increm
 hour), block-event ids are kept for the horizon plus the code lifetime so a late reversal's
 own replay finds its failure, and the timeout worker removes a timeout only if its due time is
 unchanged; the corresponding 2.8.0 races are regression tests in
-`tests/unit/test_fifth_round.py` and `tests/integration/test_real_redis.py`.
+`tests/unit/test_fifth_round.py` and `tests/integration/test_real_redis.py`. Since 2.8.2 the
+outage detector's distinct-block set keeps a block's newest failure time under replay, and a
+block-test event replayed after a crash counts toward the test that was running at its time
+(an event dated before the last crossing is recorded, not counted), issues its verdict at the
+event's time and escalates against the verdict active then
+(`tests/unit/test_sixth_round.py`). What remains processing-time is only when the operator
+learns of a verdict a replay produced.
 
 **The code travels in the message.** Step 11 generates the code before the send, fills the
 message template (`{code}`), hands the filled message to the sender and stores the code

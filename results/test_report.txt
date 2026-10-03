@@ -1,27 +1,14 @@
-........................................................................ [ 17%]
-........................................................................ [ 34%]
-........................................................................ [ 51%]
-........................................................................ [ 68%]
-........................................................................ [ 86%]
-..........................................................               [100%]
-=============================== warnings summary ===============================
-../../../tmp/claude-0/venv-otp/lib/python3.11/site-packages/fastapi/testclient.py:1
-  /tmp/claude-0/venv-otp/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
-    from starlette.testclient import TestClient as TestClient  # noqa
-
-tests/unit/test_app_attest_enrollment.py: 11 warnings
-  /home/claude/OTP-DDOS/src/otp_guard/providers/attestation.py:187: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_before_utc.
-    if not (c.not_valid_before.replace(tzinfo=now.tzinfo) <= now <= c.not_valid_after.replace(tzinfo=now.tzinfo)):
-
-tests/unit/test_app_attest_enrollment.py: 11 warnings
-  /home/claude/OTP-DDOS/src/otp_guard/providers/attestation.py:187: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_after_utc.
-    if not (c.not_valid_before.replace(tzinfo=now.tzinfo) <= now <= c.not_valid_after.replace(tzinfo=now.tzinfo)):
-
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+........................................................................ [ 16%]
+........................................................................ [ 33%]
+........................................................................ [ 49%]
+........................................................................ [ 66%]
+........................................................................ [ 82%]
+........................................................................ [ 99%]
+..                                                                       [100%]
 ==================================== PASSES ====================================
 ____________________ test_synthetic_logs_replay_round_trip _____________________
 ----------------------------- Captured stdout call -----------------------------
-wrote 319 rows to /tmp/pytest-of-root/pytest-41/test_synthetic_logs_replay_rou0/logs.csv
+wrote 319 rows to /tmp/pytest-of-root/pytest-63/test_synthetic_logs_replay_rou0/logs.csv
 ______________ test_checkpoint_rows_from_other_code_are_rejected _______________
 ----------------------------- Captured stdout call -----------------------------
   reused 0, resumed 1, running 0 (stale rows rejected: 1)
@@ -79,6 +66,8 @@ PASSED tests/integration/test_real_redis.py::test_graded_counter_unsolved_at_sec
 PASSED tests/integration/test_real_redis.py::test_replayed_outage_event_keeps_its_time_across_instances
 PASSED tests/integration/test_real_redis.py::test_timeout_rescheduled_during_the_timeout_transition_across_instances
 PASSED tests/integration/test_real_redis.py::test_late_reversal_after_thirteen_minutes_across_instances
+PASSED tests/integration/test_real_redis.py::test_replayed_older_failure_keeps_the_block_newest_time_across_instances
+PASSED tests/integration/test_real_redis.py::test_replayed_crossing_is_dated_at_its_transition_across_instances
 PASSED tests/integration/test_replay.py::test_synthetic_logs_replay_round_trip
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[memory]
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[redis]
@@ -269,6 +258,20 @@ PASSED tests/unit/test_simulator_invariants.py::test_shared_block_pumper_uses_th
 PASSED tests/unit/test_simulator_invariants.py::test_quota_aware_pumper_never_exceeds_its_quota_per_block
 PASSED tests/unit/test_simulator_invariants.py::test_launch_brings_first_time_fresh_users_to_the_hot_blocks
 PASSED tests/unit/test_simulator_invariants.py::test_no_whatsapp_users_can_be_made_worse_at_challenges
+PASSED tests/unit/test_sixth_round.py::test_replayed_older_failure_keeps_the_block_newest_time[memory]
+PASSED tests/unit/test_sixth_round.py::test_replayed_older_failure_keeps_the_block_newest_time[redis]
+PASSED tests/unit/test_sixth_round.py::test_newer_failure_after_a_replayed_old_one_raises_the_block_time[memory]
+PASSED tests/unit/test_sixth_round.py::test_newer_failure_after_a_replayed_old_one_raises_the_block_time[redis]
+PASSED tests/unit/test_sixth_round.py::test_replayed_crossing_is_dated_at_its_transition[memory]
+PASSED tests/unit/test_sixth_round.py::test_replayed_crossing_is_dated_at_its_transition[redis]
+PASSED tests/unit/test_sixth_round.py::test_replayed_crossing_escalates_against_the_verdict_active_at_its_time[memory]
+PASSED tests/unit/test_sixth_round.py::test_replayed_crossing_escalates_against_the_verdict_active_at_its_time[redis]
+PASSED tests/unit/test_sixth_round.py::test_event_dated_before_the_last_crossing_is_not_counted_in_the_next_test[memory]
+PASSED tests/unit/test_sixth_round.py::test_event_dated_before_the_last_crossing_is_not_counted_in_the_next_test[redis]
+PASSED tests/unit/test_sixth_round.py::test_live_events_are_unchanged[memory]
+PASSED tests/unit/test_sixth_round.py::test_live_events_are_unchanged[redis]
+PASSED tests/unit/test_sixth_round.py::test_old_documents_without_event_times_are_read[memory]
+PASSED tests/unit/test_sixth_round.py::test_old_documents_without_event_times_are_read[redis]
 PASSED tests/unit/test_steps.py::test_web_happy_path_sends_sms_and_logs[memory]
 PASSED tests/unit/test_steps.py::test_web_happy_path_sends_sms_and_logs[redis]
 PASSED tests/unit/test_steps.py::test_attested_ios_from_any_host_is_allowed[memory]
@@ -471,4 +474,4 @@ PASSED tests/unit/test_third_round.py::test_two_baseline_workers_neither_double_
 PASSED tests/unit/test_third_round.py::test_partial_first_hour_is_not_a_sample_and_restart_keeps_the_last_hour[memory]
 PASSED tests/unit/test_third_round.py::test_partial_first_hour_is_not_a_sample_and_restart_keeps_the_last_hour[redis]
 PASSED tests/unit/test_third_round.py::test_weekly_profile_is_learned_in_the_simulation
-418 passed, 23 warnings in 183.03s (0:03:03)
+434 passed in 193.66s (0:03:13)

@@ -66,6 +66,18 @@ end
 return 0
 """
 
+# KEYS[1] = sorted set; ARGV = score, member, ttl (0: none). Add the member, or raise its score to the
+# given one; never lower it. A replayed older event therefore cannot erase the recency of a newer one
+# recorded under the same member (sixth-round review, M4).
+LUA_ZADD_MAX = """
+local s = redis.call('ZSCORE', KEYS[1], ARGV[2])
+if not s or tonumber(ARGV[1]) > tonumber(s) then
+    redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2])
+end
+if tonumber(ARGV[3]) > 0 then redis.call('EXPIRE', KEYS[1], ARGV[3]) end
+return 1
+"""
+
 # KEYS[1] = counter; ARGV[1] = units. Give units back only while the counter exists: a window that
 # has already expired must not come back as a negative count without a TTL.
 LUA_RELEASE = """
@@ -250,6 +262,17 @@ class MemoryStore:
             else:
                 v[0][member] = score
 
+    def zadd_max(self, key, score, member, ttl=None):
+        """Add member, or raise its score to `score`; never lower it (see LUA_ZADD_MAX). Like zadd above,
+        the memory store keeps an existing key's expiry (the Redis store refreshes it on every write);
+        the recorded simulation runs were produced under this rule, see the 2.8.2 changelog."""
+        with self.lock:
+            v = self._live(key)
+            if v is None:
+                self._put(key, {member: score}, ttl=ttl)
+            elif member not in v[0] or v[0][member] < score:
+                v[0][member] = score
+
     def zrangebyscore(self, key, lo, hi):
         with self.lock:
             v = self._live(key)
@@ -376,6 +399,7 @@ class RedisStore:
         self._reserve_tiered = self.r.register_script(LUA_TRY_RESERVE_TIERED)
         self._batch_once = self.r.register_script(LUA_HINCRBY_BATCH_ONCE)
         self._zrem_if_score = self.r.register_script(LUA_ZREM_IF_SCORE)
+        self._zadd_max = self.r.register_script(LUA_ZADD_MAX)
         self._release = self.r.register_script(LUA_RELEASE)
         self.round_trips = 0        # one per method call below; a pipeline counts once
 
@@ -487,6 +511,10 @@ class RedisStore:
         if ttl:
             pipe.expire(key, int(ttl))
         pipe.execute()
+
+    def zadd_max(self, key, score, member, ttl=None):
+        self.round_trips += 1
+        self._zadd_max(keys=[key], args=[repr(float(score)), member, int(ttl or 0)])
 
     def zrangebyscore(self, key, lo, hi):
         self.round_trips += 1

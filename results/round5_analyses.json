@@ -19,7 +19,8 @@
   "new_runs": 300,
   "new_attack_free_runs": 240,
   "new_union_eval_runs": 60,
-  "wall_s": 900.1203155517578
+  "wall_s": 900.1203155517578,
+  "part_d_refreshed": "2.8.2: envelope capped at the offered volume, fitted intercept labelled, arrival-anchored service model"
  },
  "A_selection": {
   "1000": {
@@ -23868,8 +23869,13 @@
    "none": 24.0,
    "sequential T1000 c1": 23.2,
    "counter graded 4/10 min": 23.6,
+   "offered_counter_arm": 24.0,
+   "offered_sequential_arm": 24.0,
+   "counter_allowance": 24,
    "counter_envelope": 24.0,
-   "sequential_estimate": 110
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 24.0,
+   "role": "check"
   },
   {
    "blocks": 3,
@@ -23878,8 +23884,13 @@
    "none": 71.6,
    "sequential T1000 c1": 23.2,
    "counter graded 4/10 min": 71.2,
-   "counter_envelope": 71.6,
-   "sequential_estimate": 110
+   "offered_counter_arm": 72.0,
+   "offered_sequential_arm": 72.0,
+   "counter_allowance": 72,
+   "counter_envelope": 72.0,
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 72.0,
+   "role": "check"
   },
   {
    "blocks": 3,
@@ -23888,8 +23899,13 @@
    "none": 342.0,
    "sequential T1000 c1": 109.6,
    "counter graded 4/10 min": 25.4,
+   "offered_counter_arm": 701.6,
+   "offered_sequential_arm": 701.6,
+   "counter_allowance": 24,
    "counter_envelope": 24,
-   "sequential_estimate": 110
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 109.6,
+   "role": "check"
   },
   {
    "blocks": 3,
@@ -23898,8 +23914,13 @@
    "none": 365.6,
    "sequential T1000 c1": 109.6,
    "counter graded 4/10 min": 71.2,
+   "offered_counter_arm": 2113.6,
+   "offered_sequential_arm": 2113.6,
+   "counter_allowance": 72,
    "counter_envelope": 72,
-   "sequential_estimate": 110
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 109.6,
+   "role": "fit"
   },
   {
    "blocks": 10,
@@ -23908,8 +23929,13 @@
    "none": 79.6,
    "sequential T1000 c1": 76.4,
    "counter graded 4/10 min": 79.0,
-   "counter_envelope": 79.6,
-   "sequential_estimate": 145
+   "offered_counter_arm": 80.0,
+   "offered_sequential_arm": 80.0,
+   "counter_allowance": 80,
+   "counter_envelope": 80.0,
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 80.0,
+   "role": "check"
   },
   {
    "blocks": 10,
@@ -23918,8 +23944,13 @@
    "none": 238.6,
    "sequential T1000 c1": 76.4,
    "counter graded 4/10 min": 238.0,
-   "counter_envelope": 238.6,
-   "sequential_estimate": 145
+   "offered_counter_arm": 240.0,
+   "offered_sequential_arm": 240.0,
+   "counter_allowance": 240,
+   "counter_envelope": 240.0,
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 144.6,
+   "role": "check"
   },
   {
    "blocks": 10,
@@ -23928,8 +23959,13 @@
    "none": 699.6,
    "sequential T1000 c1": 144.2,
    "counter graded 4/10 min": 80.8,
+   "offered_counter_arm": 717.4,
+   "offered_sequential_arm": 717.4,
+   "counter_allowance": 80,
    "counter_envelope": 80,
-   "sequential_estimate": 145
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 144.6,
+   "role": "check"
   },
   {
    "blocks": 10,
@@ -23938,8 +23974,13 @@
    "none": 1088.2,
    "sequential T1000 c1": 144.2,
    "counter graded 4/10 min": 239.8,
+   "offered_counter_arm": 2105.2,
+   "offered_sequential_arm": 2105.2,
+   "counter_allowance": 240,
    "counter_envelope": 240,
-   "sequential_estimate": 145
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 144.6,
+   "role": "check"
   },
   {
    "blocks": 30,
@@ -23948,8 +23989,13 @@
    "none": 238.6,
    "sequential T1000 c1": 217.2,
    "counter graded 4/10 min": 237.8,
-   "counter_envelope": 238.6,
-   "sequential_estimate": 245
+   "offered_counter_arm": 240.0,
+   "offered_sequential_arm": 240.0,
+   "counter_allowance": 240,
+   "counter_envelope": 240.0,
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 240.0,
+   "role": "check"
   },
   {
    "blocks": 30,
@@ -23958,8 +24004,13 @@
    "none": 716.4,
    "sequential T1000 c1": 217.2,
    "counter graded 4/10 min": 714.8,
-   "counter_envelope": 716.4,
-   "sequential_estimate": 245
+   "offered_counter_arm": 720.0,
+   "offered_sequential_arm": 720.0,
+   "counter_allowance": 720,
+   "counter_envelope": 720.0,
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 244.6,
+   "role": "check"
   },
   {
    "blocks": 30,
@@ -23968,8 +24019,13 @@
    "none": 709.6,
    "sequential T1000 c1": 241.6,
    "counter graded 4/10 min": 235.0,
+   "offered_counter_arm": 714.0,
+   "offered_sequential_arm": 714.0,
+   "counter_allowance": 240,
    "counter_envelope": 240,
-   "sequential_estimate": 245
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 244.6,
+   "role": "check"
   },
   {
    "blocks": 30,
@@ -23978,8 +24034,13 @@
    "none": 2013.6,
    "sequential T1000 c1": 241.8,
    "counter graded 4/10 min": 678.6,
+   "offered_counter_arm": 2124.4,
+   "offered_sequential_arm": 2124.4,
+   "counter_allowance": 720,
    "counter_envelope": 720,
-   "sequential_estimate": 245
+   "envelope_capped_by_offered": false,
+   "sequential_first_verdict_estimate": 244.6,
+   "role": "check"
   },
   {
    "blocks": 100,
@@ -23988,8 +24049,13 @@
    "none": 580.0,
    "sequential T1000 c1": 508.6,
    "counter graded 4/10 min": 578.6,
-   "counter_envelope": 580.0,
-   "sequential_estimate": 595
+   "offered_counter_arm": 582.4,
+   "offered_sequential_arm": 582.4,
+   "counter_allowance": 800,
+   "counter_envelope": 582.4,
+   "envelope_capped_by_offered": true,
+   "sequential_first_verdict_estimate": 582.4,
+   "role": "check"
   },
   {
    "blocks": 100,
@@ -23998,8 +24064,13 @@
    "none": 1746.0,
    "sequential T1000 c1": 594.4,
    "counter graded 4/10 min": 1742.0,
-   "counter_envelope": 1746.0,
-   "sequential_estimate": 595
+   "offered_counter_arm": 1755.2,
+   "offered_sequential_arm": 1755.2,
+   "counter_allowance": 2400,
+   "counter_envelope": 1755.2,
+   "envelope_capped_by_offered": true,
+   "sequential_first_verdict_estimate": 594.6,
+   "role": "check"
   },
   {
    "blocks": 100,
@@ -24008,8 +24079,13 @@
    "none": 712.2,
    "sequential T1000 c1": 502.6,
    "counter graded 4/10 min": 536.4,
-   "counter_envelope": 712.2,
-   "sequential_estimate": 595
+   "offered_counter_arm": 714.8,
+   "offered_sequential_arm": 714.8,
+   "counter_allowance": 800,
+   "counter_envelope": 714.8,
+   "envelope_capped_by_offered": true,
+   "sequential_first_verdict_estimate": 594.6,
+   "role": "check"
   },
   {
    "blocks": 100,
@@ -24018,8 +24094,13 @@
    "none": 2148.6,
    "sequential T1000 c1": 602.8,
    "counter graded 4/10 min": 1543.2,
-   "counter_envelope": 2148.6,
-   "sequential_estimate": 595
+   "offered_counter_arm": 2159.6,
+   "offered_sequential_arm": 2159.6,
+   "counter_allowance": 2400,
+   "counter_envelope": 2159.6,
+   "envelope_capped_by_offered": true,
+   "sequential_first_verdict_estimate": 594.6,
+   "role": "check"
   },
   {
    "blocks": 300,
@@ -24028,8 +24109,13 @@
    "none": 698.6,
    "sequential T1000 c1": 686.2,
    "counter graded 4/10 min": 696.6,
-   "counter_envelope": 698.6,
-   "sequential_estimate": 1595
+   "offered_counter_arm": 703.0,
+   "offered_sequential_arm": 703.0,
+   "counter_allowance": 2400,
+   "counter_envelope": 703.0,
+   "envelope_capped_by_offered": true,
+   "sequential_first_verdict_estimate": 703.0,
+   "role": "check"
   },
   {
    "blocks": 300,
@@ -24038,8 +24124,13 @@
    "none": 2140.2,
    "sequential T1000 c1": 1344.4,
    "counter graded 4/10 min": 2135.6,
-   "counter_envelope": 2140.2,
-   "sequential_estimate": 1595
+   "offered_counter_arm": 2154.6,
+   "offered_sequential_arm": 2154.6,
+   "counter_allowance": 7200,
+   "counter_envelope": 2154.6,
+   "envelope_capped_by_offered": true,
+   "sequential_first_verdict_estimate": 1594.6,
+   "role": "check"
   },
   {
    "blocks": 300,
@@ -24048,8 +24139,13 @@
    "none": 698.6,
    "sequential T1000 c1": 676.0,
    "counter graded 4/10 min": 672.8,
-   "counter_envelope": 698.6,
-   "sequential_estimate": 1595
+   "offered_counter_arm": 703.0,
+   "offered_sequential_arm": 703.0,
+   "counter_allowance": 2400,
+   "counter_envelope": 703.0,
+   "envelope_capped_by_offered": true,
+   "sequential_first_verdict_estimate": 703.0,
+   "role": "check"
   },
   {
    "blocks": 300,
@@ -24058,35 +24154,61 @@
    "none": 2140.2,
    "sequential T1000 c1": 1347.4,
    "counter graded 4/10 min": 2051.8,
-   "counter_envelope": 2140.2,
-   "sequential_estimate": 1595
+   "offered_counter_arm": 2154.6,
+   "offered_sequential_arm": 2154.6,
+   "counter_allowance": 7200,
+   "counter_envelope": 2154.6,
+   "envelope_capped_by_offered": true,
+   "sequential_first_verdict_estimate": 1594.6,
+   "role": "check"
   }
  ],
  "D_service_model": [
   {
    "legit_per_window": 0.5,
    "share_beyond_quota": 0.00037469751664431783,
-   "share_beyond_twice_quota": 7.229064902247728e-09
+   "share_beyond_twice_quota": 7.229064902247728e-09,
+   "anchored_share_beyond_quota": 0.0012926475430751945,
+   "anchored_share_beyond_twice_quota": 4.387429401268387e-08
   },
   {
    "legit_per_window": 1,
    "share_beyond_quota": 0.004348769566779209,
-   "share_beyond_twice_quota": 1.2475758904839651e-06
+   "share_beyond_twice_quota": 1.2475758904839651e-06,
+   "anchored_share_beyond_quota": 0.011668463221466419,
+   "anchored_share_beyond_twice_quota": 5.748386282700135e-06
   },
   {
    "legit_per_window": 2,
    "share_beyond_quota": 0.03757050481403079,
-   "share_beyond_twice_quota": 0.00014692965481444276
+   "share_beyond_twice_quota": 0.00014692965481444276,
+   "anchored_share_beyond_quota": 0.0726725163765048,
+   "anchored_share_beyond_twice_quota": 0.0004635260924958917
   },
   {
    "legit_per_window": 4,
    "share_beyond_quota": 0.19536681481316454,
-   "share_beyond_twice_quota": 0.008406746816878807
+   "share_beyond_twice_quota": 0.008406746816878807,
+   "anchored_share_beyond_quota": 0.26959942777718987,
+   "anchored_share_beyond_twice_quota": 0.016952120612072453
   },
   {
    "legit_per_window": 8,
    "share_beyond_quota": 0.507436088251839,
-   "share_beyond_twice_quota": 0.1395865319505969
+   "share_beyond_twice_quota": 0.1395865319505969,
+   "anchored_share_beyond_quota": 0.5574565104470032,
+   "anchored_share_beyond_twice_quota": 0.18485904956864227
   }
- ]
+ ],
+ "D_fit": {
+  "k_per_block": 5,
+  "intercept_lambda_tau": 94.6,
+  "fitted_on": [
+   3,
+   "spreading, never verifies",
+   60
+  ],
+  "fitted_on_sequential_leakage": 109.6,
+  "q": 4
+ }
 }

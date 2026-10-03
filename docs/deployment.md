@@ -85,7 +85,9 @@ The worker's minute tick also runs the feedback recovery sweep: an effect batch 
 process died is completed after 30 s. Effects are applied at most once, and exactly once
 if the sweep runs within the 20-minute replay horizon; a batch found older than that is
 skipped and counted in `otp:fx:abandoned` (alert on any increase). A replayed effect is
-applied at its transition's time. Run at least one worker, and alert on a tick gap of several
+applied at its transition's time (since 2.8.2 that includes block-test events: a verdict a
+replayed event causes is dated at the event, so a long-delayed replay can record a verdict that
+has already expired; the operator learns of it only at the replay). Run at least one worker, and alert on a tick gap of several
 minutes: past the 20-minute horizon an effect is skipped rather than risked twice. (The two
 races disclosed in 2.8.0, a late reversal recovered after 13 minutes and a timeout rescheduled
 during the worker's transition, are closed in 2.8.1.)

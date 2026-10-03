@@ -23,7 +23,15 @@ compare-and-set, as a batch with a sequence number and the transition's time; th
 applies the batch and removes it. Effects are applied at the recorded time, not at the time of a
 replay: an outage observation is inserted at its own time (the detector's windows end now, so a
 replayed old observation cannot enter the current window) and a reputation increment lands in its
-own hour (fifth-round review, M8; up to 2.8.0 a replay used the recovery time). Before a transition the caller writes a write-ahead intent (otp:intents);
+own hour (fifth-round review, M8; up to 2.8.0 a replay used the recovery time). Since 2.8.2 (sixth-round
+review, M4, M5) the outage detector's distinct-block set keeps each block's newest failure time under
+replay (a replayed older failure never lowers it), and a block-test event is applied at its own time
+too: it counts toward the test that was running then (an event dated before the last crossing
+belongs to a concluded test and is recorded but not counted), a crossing it causes issues its verdict
+at the event's time and escalates against the verdict active at that time, and the verdict's lifetime
+runs from the event's time (see _block_event). So reputation, outage and block-test effects all apply
+at the transition's time; what a replay can still differ in is when the operator learns of a verdict.
+Before a transition the caller writes a write-ahead intent (otp:intents);
 run_due_timeouts() sweeps intents older than RECOVER_AFTER_S and applies whatever batches are still
 recorded, so a process that dies between the compare-and-set and the end of its effects leaves work
 a later sweep completes.
@@ -190,14 +198,14 @@ class FeedbackLoop:
                     key, verified, fast, undo = eff[1:5]
                     of = eff[5] if len(eff) > 5 and eff[5] is not None else None
                     self._block_event(key, verified=verified, fast=fast, undo=undo, event_id=f"{log_id}:{tseq}",
-                                      undo_of=f"{log_id}:{of}" if of is not None else None)
+                                      undo_of=f"{log_id}:{of}" if of is not None else None, at=at)
             elif kind == "block_unfail":
                 if suspended is None:
                     suspended = self._suspension_decision(log_id, batch, rec)
                 if not suspended:
                     of = eff[2] if len(eff) > 2 and eff[2] is not None else None
                     self._block_event(eff[1], verified=False, undo_fail_only=True, event_id=f"{log_id}:{tseq}",
-                                      undo_of=f"{log_id}:{of}" if of is not None else None)
+                                      undo_of=f"{log_id}:{of}" if of is not None else None, at=at)
             elif kind == "trusted":
                 self.p.rep.mark_trusted(eff[1])
             elif kind == "timeout":
@@ -438,7 +446,9 @@ class FeedbackLoop:
         conversion signal uses only known-good clients, so a decoy flood cannot buy a suspension.
         Idempotent per (event, send): the sets are keyed by log id. The event is inserted at its own time
         `at` (the transition's), and the windows end at `now`: a replay after a crash cannot move an old
-        observation into the current window (fifth-round review, M8)."""
+        observation into the current window (fifth-round review, M8). The distinct-block set has one
+        member per block scored with that block's newest failure, so a replayed older failure never
+        lowers it (sixth-round review, M4; up to 2.8.1 a replay overwrote the score)."""
         cfg = self.p.cfg
         now = at if now is None else now
         c = self._carrier(rec)
@@ -447,7 +457,7 @@ class FeedbackLoop:
         self.p.store.zadd(f"outage:{event}:{c}", at, str(rec["log_id"]), ttl=2 * windows[event])
         self.p.store.zremrangebyscore(f"outage:{event}:{c}", float("-inf"), now - windows[event])   # each key trims itself
         if event in ("undelivered", "failed", "kg_failed"):
-            self.p.store.zadd(f"outage:blocks:{c}", at, rec["phone_number"][:cfg.destination_block_digits], ttl=2 * windows["blocks"])
+            self.p.store.zadd_max(f"outage:blocks:{c}", at, rec["phone_number"][:cfg.destination_block_digits], ttl=2 * windows["blocks"])
             self.p.store.zremrangebyscore(f"outage:blocks:{c}", float("-inf"), now - windows["blocks"])
         if self.p.store.exists(f"outage:{c}"):
             return
@@ -484,17 +494,36 @@ class FeedbackLoop:
     @staticmethod
     def _empty_block_state(verdicts=0):
         return {"v": 0, "f": 0, "fv": 0, "conv": 0.0, "speed": 0.0, "verdicts": verdicts,
-                "verdict": None, "history": [], "seen": {}}
+                "verdict": None, "history": [], "seen": {}, "test_since": 0.0}
 
-    def _block_event(self, key, verified, fast=False, undo=False, event_id=None, undo_fail_only=False, undo_of=None):
-        """One resolved send on a destination block. Counts, statistics, the current verdict and the
-        verdict history are one document updated by one compare-and-set: concurrent events are all
-        counted, a crossing happens once, and its stage is decided from the verdict already active in
-        the same document (a crossing while a verdict is active escalates to stage 2). An event with
-        an id the document has seen is ignored (replay after a crash). A reversal (undo, undo_fail_only)
-        names the failure it reverses (undo_of): if that failure has not reached the block yet, the
-        reversal does not subtract it but records its id, so the failure is ignored when it arrives;
-        the outcome does not depend on the order in which the two are applied. The statistics are floored at
+    @staticmethod
+    def _seen_times(seen, now):
+        """Normalise the identifier memory to id -> [recorded_at, event_at]. Older documents held a
+        list of ids (2.7.0) or id -> recorded_at (2.8.0, 2.8.1)."""
+        if isinstance(seen, list):
+            return {i: [now, now] for i in seen}
+        return {i: (list(t) if isinstance(t, (list, tuple)) else [t, t]) for i, t in (seen or {}).items()}
+
+    def _block_event(self, key, verified, fast=False, undo=False, event_id=None, undo_fail_only=False, undo_of=None, at=None):
+        """One resolved send on a destination block, dated `at` (the time of the transition that recorded
+        it; the clock's time on the live path, the recorded time on a replay). Counts, statistics, the
+        current verdict and the verdict history are one document updated by one compare-and-set:
+        concurrent events are all counted, a crossing happens once, and its stage is decided from the
+        verdict active at the event's time (a crossing while a verdict is active escalates to stage 2).
+
+        Event time (sixth-round review, M5). The document remembers when its current test began
+        (`test_since`: the time of the last crossing, 0 for a fresh block). An event is counted toward
+        the test that was running at its time: one dated before `test_since` belongs to a test that a
+        crossing has already concluded, so it is recorded (a later replay is still ignored) but not
+        counted, and it cannot cause a crossing. A crossing caused by an event dated `at` issues its
+        verdict at `at`, in force until `at + block_verdict_ttl` (a verdict replayed long after its
+        event may already have expired, exactly as if the event had been processed on time) and starts
+        the next test at `at`. A reversal (undo, undo_fail_only) names the failure it reverses (undo_of)
+        and subtracts it only if that failure was counted in the current test (its recorded event time
+        is at or after `test_since`); if the failure has not reached the block yet, the reversal records
+        its id as a tombstone, so the failure is ignored when it arrives: the outcome does not depend on
+        the order in which a failure and its reversal are applied. Identifiers are kept by the time they
+        were recorded (processing time), for id_retention_s(). The statistics are floored at
         -block_credit_thresholds x log(threshold) ('cusum'; 0 is Page's CUSUM) or unbounded ('sprt')."""
         cfg = self.p.cfg
         if "feedback" not in cfg.features:
@@ -503,24 +532,29 @@ class FeedbackLoop:
         thr = math.log(cfg.sprt_threshold)
         floor = -cfg.block_credit_thresholds * thr if cfg.block_test == "cusum" else -math.inf
         now = self.p.clock.now()
+        at = now if at is None else at
         out = {}
 
         def fn(cur):
             out.clear()
             st = dict(cur) if cur else self._empty_block_state()
-            st.setdefault("history", []); st.setdefault("verdict", None)
-            seen = st.get("seen") or {}
-            if isinstance(seen, list):                       # documents written before identifiers carried a time
-                seen = {i: now for i in seen}
+            st.setdefault("history", []); st.setdefault("verdict", None); st.setdefault("test_since", 0.0)
             keep_after = now - self.id_retention_s()
-            seen = {i: t for i, t in seen.items() if t > keep_after}
+            seen = {i: t for i, t in self._seen_times(st.get("seen"), now).items() if t[0] > keep_after}
             if event_id is not None and event_id in seen:
                 return None                                  # already applied
+            in_test = at >= st["test_since"]                 # dated inside the test now running
+            if event_id is not None:
+                seen = dict(seen, **{event_id: [now, at]})
             st["seen"] = seen
-            reverses = not (undo_of is not None and undo_of not in seen)   # False: the failure has not arrived
-            if undo_of is not None and not reverses:
-                seen = dict(seen, **{undo_of: now})          # tombstone: the failure will be ignored
+            if not in_test:                                  # belongs to a test a crossing has concluded
+                return st
+            if undo_of is not None and undo_of not in seen:
+                seen = dict(seen, **{undo_of: [now, at]})    # tombstone: the failure will be ignored
                 st["seen"] = seen
+                reverses = False
+            else:
+                reverses = undo_of is not None and seen[undo_of][1] >= st["test_since"]   # counted in this test
             if undo_fail_only:
                 if reverses:
                     st["f"] = max(0, st["f"] - 1)
@@ -540,22 +574,21 @@ class FeedbackLoop:
                 st["f"] += 1
                 st["conv"] += inc["fail"]
             st["conv"], st["speed"] = max(floor, st["conv"]), max(floor, st["speed"])
-            if event_id is not None:
-                st["seen"] = dict(seen, **{event_id: now})
             conv_hit = "conversion" in cfg.block_tests and st["v"] + st["f"] >= cfg.sprt_min_events and st["conv"] > thr
             speed_hit = "speed" in cfg.block_tests and st["v"] >= cfg.sprt_min_events and st["speed"] > thr
             if not (conv_hit or speed_hit):
                 return st
             reason = "never_verified" if conv_hit else "machine_verified"
-            active = st["verdict"] is not None and st["verdict"]["until"] > now
+            active = st["verdict"] is not None and st["verdict"]["until"] > at
             if cfg.block_action == "deny":
-                stage, until = "deny", now + cfg.denylist_ttl
+                stage, until = "deny", at + cfg.denylist_ttl
             else:
-                stage, until = (2 if active else 1), now + cfg.block_verdict_ttl
+                stage, until = (2 if active else 1), at + cfg.block_verdict_ttl
             n = st["verdicts"] + 1
-            event = {"id": f"{key}#{n}@{now:.3f}", "stage": stage, "reason": reason, "at": now, "until": until}
-            new = self._empty_block_state(n)                 # the next test starts from zero
-            new["verdict"] = {"stage": stage, "reason": reason, "at": now, "until": until}
+            event = {"id": f"{key}#{n}@{at:.3f}", "stage": stage, "reason": reason, "at": at, "until": until}
+            new = self._empty_block_state(n)                 # the next test starts from zero, at the crossing's time
+            new["test_since"] = at
+            new["verdict"] = {"stage": stage, "reason": reason, "at": at, "until": until}
             new["history"] = [h for h in st["history"] if h["until"] > now - 86400] + [event]
             new["seen"] = st["seen"]
             out["event"] = event
