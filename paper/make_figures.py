@@ -26,9 +26,13 @@ for r in runs:
     if r["study"] in ("v1", "v2") and r["index"][0] == "behavioural_only":
         series[(r["index"][1], r["study"])].append(r["attack"]["leaked_per_min"])
 fig, axes = plt.subplots(2, 3, figsize=(7.0, 3.8), sharex=True, sharey=True)
+from scipy import stats as sps
 for ax, (name, title) in zip(axes.flat, sel.items()):
     for design, col in (("v1", GRAY), ("v2", BLUE)):
-        m = np.mean(series[(name, design)], axis=0)
+        arr = np.array(series[(name, design)])
+        m = arr.mean(axis=0)
+        half = sps.t.ppf(0.975, len(arr) - 1) * arr.std(axis=0, ddof=1) / np.sqrt(len(arr))
+        ax.fill_between(range(1, 21), np.maximum(m - half, 0), m + half, color=col, alpha=0.18, lw=0)
         ax.plot(range(1, 21), m, color=col, lw=1.8)
         ax.text(20.3, m[-1], design, color=col, va="center", fontsize=7)
     ax.set_title(title, fontsize=8, loc="left"); ax.grid(axis="y", color="#e8e7e2", lw=0.6); ax.set_xlim(1, 22)
@@ -54,15 +58,39 @@ fig.tight_layout(); fig.savefig(OUT / "ablation.pdf")
 
 # Figure: dilution curve
 D = R["dilution"]; keys = sorted(D, key=float); xs = [float(k) for k in keys]
+def ci(k, field, scale=1.0):
+    m, lo, hi = D[k][field][:3]; return m * scale, (m - max(lo, 0)) * scale, (hi - m) * scale
 leak = [100 * D[k]["leaked_total"][0] / max(D[k]["requests"][0], 1) for k in keys]
-chal = [D[k]["legit_challenge_rate_pct"][0] for k in keys]
-fig, ax = plt.subplots(figsize=(3.4, 2.6))
-ax.plot(xs, leak, color=BLUE, lw=1.8, marker="o", ms=4); ax.text(xs[-1], leak[-1] + 3, "attack leaked, %", color=BLUE, ha="right", fontsize=7)
-ax.plot(xs, chal, color=ORANGE, lw=1.8, marker="o", ms=4); ax.text(xs[-1], chal[-1] + 3, "real users challenged, %", color=ORANGE, ha="right", fontsize=7)
+leak_err = [[100 * (D[k]["leaked_total"][0] - D[k]["leaked_total"][1]) / D[k]["requests"][0] for k in keys],
+            [100 * (D[k]["leaked_total"][2] - D[k]["leaked_total"][0]) / D[k]["requests"][0] for k in keys]]
+chal = [ci(k, "legit_challenge_rate_pct") for k in keys]; ref = [ci(k, "legit_refusal_rate_pct") for k in keys]
+fig, ax = plt.subplots(figsize=(3.6, 2.8))
+ax.errorbar(xs, leak, yerr=leak_err, color=BLUE, lw=1.8, marker="o", ms=4, capsize=2); ax.text(xs[-1], leak[-1] + 4, "attack leaked, %", color=BLUE, ha="right", fontsize=7)
+ax.errorbar(xs, [c[0] for c in chal], yerr=[[c[1] for c in chal], [c[2] for c in chal]], color=ORANGE, lw=1.8, marker="o", ms=4, capsize=2)
+ax.text(xs[-1], chal[-1][0] + 4, "users challenged, %", color=ORANGE, ha="right", fontsize=7)
+ax.errorbar(xs, [c[0] for c in ref], yerr=[[c[1] for c in ref], [c[2] for c in ref]], color=GRAY, lw=1.8, marker="s", ms=3, capsize=2)
+ax.text(xs[-1], ref[-1][0] + 4, "users refused, %", color=GRAY, ha="right", fontsize=7)
 ax.set_xscale("log"); ax.set_xticks(xs); ax.set_xticklabels([k for k in keys]); ax.set_xlabel("attack rate / legitimate rate"); ax.set_ylabel("percent")
 ax.set_ylim(0, 105); ax.grid(axis="y", color="#e8e7e2", lw=0.6)
 fig.tight_layout(); fig.savefig(OUT / "dilution.pdf")
 
-for f in ("tradeoff.png", "pumper_spread.png"):
-    shutil.copy(ROOT / "results" / f, OUT / f)
+shutil.copy(ROOT / "results" / "tradeoff.png", OUT / "tradeoff.png")
+
+# Figure: pumper spread, leakage against the OBSERVED distinct blocks requested, with the estimate
+S = R["spread"]
+fig, axes = plt.subplots(1, 2, figsize=(7.0, 3.0), sharey=True)
+for ax, verify, title in zip(axes, ("0.0", "1.0"), ("carrier does not verify", "carrier verifies within 1 s")):
+    pts = []
+    for k, v in S.items():
+        if k.startswith(f"verify={verify},"):
+            pts.append((v["attacker_blocks_requested"][0], v["leaked_total"][0], v["leaked_total"][1], v["leaked_total"][2], v["predicted"][0]))
+    pts.sort()
+    xs = [p[0] for p in pts]
+    ax.errorbar(xs, [p[1] for p in pts], yerr=[[p[1] - max(p[2], 0) for p in pts], [p[3] - p[1] for p in pts]],
+                fmt="o", color=BLUE, ms=4, capsize=2, lw=1.2, label="measured, 95 % interval")
+    ax.plot(xs, [p[4] for p in pts], color=ORANGE, lw=1.6, marker="_", ms=9, ls="--", label="estimate, Eq. (2)")
+    ax.set_xscale("log"); ax.set_title(title, fontsize=8, loc="left"); ax.set_xlabel("observed distinct 8-digit blocks requested")
+    ax.grid(axis="y", color="#e8e7e2", lw=0.6)
+axes[0].set_ylabel("SMS leaked in 20 min"); axes[0].legend(frameon=False, fontsize=7, loc="upper left")
+fig.tight_layout(); fig.savefig(OUT / "pumper_spread.pdf")
 print("figures written to", OUT)
