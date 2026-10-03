@@ -1,0 +1,585 @@
+% Manuscript for Computers & Security (Elsevier). Build: latexmk -pdf main.tex
+% Every number in this text comes from a file under ../results/ at the tagged
+% release; the section "Artifact availability" says how to regenerate them.
+\documentclass[preprint,12pt]{elsarticle}
+
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{multirow}
+\usepackage{xurl}
+\usepackage[hidelinks]{hyperref}
+\usepackage{lineno}
+\usepackage{xcolor}
+\graphicspath{{figures/}}
+
+\journal{Computers \& Security}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{From a Production OTP Flood to a Layered Defence: Measured Limits of Risk-Scored SMS Verification Against Residential Flooders and Colluding Carriers}
+
+\author[inst1]{Naveed Ahmed\corref{cor1}}
+\ead{optimistbs@gmail.com}
+\cortext[cor1]{Corresponding author.}
+\affiliation[inst1]{organization={TODO: affiliation},
+            addressline={TODO},
+            city={TODO},
+            country={Saudi Arabia}}
+
+\begin{abstract}
+A registration endpoint that sends a one-time password (OTP) by SMS to any number it is given will be used to send SMS at someone else's expense. We describe such an incident, the first set of controls that stopped it, and how the attacker adapted to them by rotating addresses, spoofing client attributes and staying under every per-key threshold. We then present a twelve-step pipeline that replaces claimed trust with earned trust: platform exemptions require app attestation, every client carries a signed identity, numbers are checked for cost and liveness before any money is spent, and a risk score built on whether earlier codes were ever verified decides between sending, delaying, challenging, moving to a cheaper channel or refusing. The pipeline is implemented and evaluated in a calibrated simulation with legitimate traffic in the background, thirty seeds per attacker and confidence intervals, since no production logs were available. Attacks that can be recognised per request are stopped completely while 99\,\% of real users are delivered. A residential attacker with human-like CAPTCHA scores and valid numbers is not separated by any behavioural signal at any volume tested; the only containment is rationing, which holds it to 241 of 600 messages by refusing 42\,\% of first-time users. Against SMS pumping the destination number is the one key the attacker cannot rotate, and a sequential test on 10\,000-number blocks bounds leakage to about five messages per block plus whatever is in flight; a colluding carrier evades it only by verifying 42\,\% of its codes, each a fake account. The tests' cost to real users is measured over 24 hours and a carrier outage. Code, evaluation and results are public.
+\end{abstract}
+
+\begin{highlights}
+\item A production OTP flood, the first fix, and how the attacker adapted to it
+\item Per-request-recognisable attacks are stopped with 99\,\% of real users delivered
+\item A human-like residential flooder leaves only rationing; the trade-off is measured
+\item Pumper leakage is about 5 messages per destination block touched, plus in-flight
+\item The block tests' false-positive cost is measured over 24 h and a carrier outage
+\end{highlights}
+
+\begin{keyword}
+SMS pumping \sep artificially inflated traffic \sep one-time password \sep rate limiting \sep risk scoring \sep residential proxies \sep fraud prevention \sep authentication
+\end{keyword}
+
+\end{frontmatter}
+
+\linenumbers
+
+% ---------------------------------------------------------------------------
+\section{Introduction}
+\label{sec:intro}
+
+Most online services verify a phone number the same way: the user types the number, the service sends it a code by SMS, the user types the code back. The sending step costs money, between a tenth of a cent and twenty cents per message depending on the destination, and the endpoint that triggers it is reachable before any account exists. That combination makes it a target in two ways. A flooder can trigger thousands of messages to numbers it does not own, which costs the service money and its users delivery. A pumper does the same to numbers on a range whose operator shares the termination fee with it, which turns the service's SMS budget into the attacker's income. The second practice is called SMS pumping or artificially inflated traffic (AIT), and MITRE lists it as a resource-hijacking technique~\cite{mitre_t1496_003}. The scale is not small: in 2023 Twitter's owner stated publicly that the company had been losing about 60 million dollars a year to telecommunications operators that used bot accounts to pump two-factor SMS~\cite{commsrisk2023twitter}, and Huh et al.\ report that the 3-month log of one large authentication service contained as many attack requests as genuine ones in the nineteen countries they studied~\cite{huh2025ait}.
+
+This paper starts from such an incident on a registration flow we operated. The first response was the usual one: a hidden CAPTCHA, one message per number per minute, five requests per IP per minute, a country allow-list, a limit on message length, and a block on VPN and proxy connections. It stopped the attack it was built for. The attack that came back a few weeks later was different: it rotated through residential addresses, sent the header that marked a request as coming from the iOS app, and kept every number and every address under its threshold. Reviewing the first design against this attacker exposed eight gaps, and the second design, which this paper describes, closes them.
+
+The second design is a pipeline of twelve steps and an asynchronous feedback loop. Its organising idea is that trust should be earned by behaviour, not claimed in a header. Platform exemptions are granted only after Apple App Attest or Google Play Integrity has verified the app. Every client carries a signed session token bound to a device fingerprint, so an identity survives an address change. Numbers are checked for country, prefix cost class, generated patterns and liveness before a message is paid for. Each network, device, country and number range carries a reputation derived from one fact the service can observe and the attacker cannot forge without owning phones: whether the codes it asked for were ever entered. A risk score built on these signals chooses among five responses, from sending at once to refusing, and a global circuit breaker bounds the total spend whatever the traffic looks like.
+
+We built it, and then we tried to break it. The evaluation is a simulation, because no production logs from the incident were available to us, and we say so wherever a number depends on that. Within it we ask five questions.
+
+\begin{itemize}
+\item[RQ1] Which attacks does the design stop, compared with the first one, and at what cost to real users?
+\item[RQ2] Which layer is responsible for stopping each attack?
+\item[RQ3] When does reputation built on verification outcomes separate an attacker from real users, and when does it not?
+\item[RQ4] When it does not, what does containment cost?
+\item[RQ5] What do the tests that act on a shared key, the destination number block, cost real users when the population differs from the calibration or a carrier fails?
+\end{itemize}
+
+The answers are not all good news for the design, and the paper is written around that. Three results carry it. Attacks that can be recognised per request, a spoofed platform header, datacenter rotation, a premium-rate range, a single client, a sequential walk through a number range, are stopped completely with 99\,\% of real users still delivered. A residential attacker that looks like a real user leaves nothing but rationing, and the paper measures the trade-off between what it leaks and how many real users are refused. SMS pumping is separable on the destination block, with a closed-form bound on what it costs and a measured false-positive price, until the colluding carrier verifies enough of its own codes, at which point the cost moves downstream into fake accounts.
+
+The contributions are:
+\begin{enumerate}
+\item A documented case of an OTP flood, the controls that stopped it, and the adapted attack that defeated them, as eight named gaps (Section~\ref{sec:incident}).
+\item A layered design that closes those gaps with graded responses and explicit limits on collateral damage, with an open implementation (Sections~\ref{sec:design} and~\ref{sec:method}).
+\item A calibrated, seeded evaluation against nine attacker profiles, six adaptive attackers and four pumpers, with an ablation on the same seeds (Section~\ref{sec:results}).
+\item A separability result: outcome-based reputation separates an attacker only on keys the attacker dominates, shown by a dilution curve and a parameter sweep that cannot move it (Section~\ref{sec:separability}).
+\item A closed-form model of pumping leakage against destination-block tests, checked against simulation, with its evasion threshold and its false-positive cost (Sections~\ref{sec:model},~\ref{sec:pumping} and~\ref{sec:fp}).
+\end{enumerate}
+
+The rest of the paper follows this order: related work (Section~\ref{sec:related}), the incident and threat model (Section~\ref{sec:incident}), the design (Section~\ref{sec:design}), the model (Section~\ref{sec:model}), the evaluation method (Section~\ref{sec:method}), results by question (Section~\ref{sec:results}), lessons and limitations (Section~\ref{sec:discussion}) and a conclusion.
+
+% ---------------------------------------------------------------------------
+\section{Background and related work}
+\label{sec:related}
+
+\subsection{Where the money goes}
+
+Telephony fraud is old, and most of its forms depend on the gap between what a call or message costs to deliver and what someone is paid for terminating it. Sahin et al.\ organised the field in a taxonomy of root causes, weaknesses, techniques and schemes, and placed international revenue share fraud (IRSF) among the revenue-share schemes: a party advertises a range of numbers as premium-rate destinations, traffic is generated to them, and the termination fee is split along the route~\cite{sahin2017sok}. They note that the causes, legacy infrastructure, opaque routing where each operator knows only the next hop, and operators' reluctance to share pricing or fraud findings, are unlikely to be fixed soon. SMS is a minor topic in that survey; its mechanics are those of voice.
+
+In later work Sahin and Francillon collected 3.14 million test numbers advertised by twelve IRSF providers over four years and showed that the number range is the attacker's managed asset: about 80\,\% of ranges were shared across providers, 57\,\% were mobile ranges, and a single block of a thousand Latvian numbers was carved into sub-ranges by six providers in one year~\cite{sahin2021irsf}. They also showed why blocking by range is dangerous. Coarse blocking of frequent IRSF destinations has made whole countries unreachable, and their own naive range-based detector had a 5.8\,\% false-positive rate against 0.26\,\% for a classifier trained on call features. Two things carry over to SMS pumping: the destination range is what the fraudster cannot easily change, and anything that acts on a range must account for the real subscribers in it. Our destination-block tests (Section~\ref{sec:blocks}) and their false-positive study (Section~\ref{sec:fp}) are built on exactly that pair.
+
+\subsection{Detecting artificially inflated SMS traffic}
+
+The closest work to ours is by Huh et al.~\cite{huh2025ait}. They had what we did not: 9.4 million SMS authentication logs from a service with tens of millions of users, from nineteen countries over three months in 2023, labelled by a peak-traffic heuristic into 4.95 million attack and 4.50 million genuine requests. They trained gradient-boosted trees on three kinds of features, per request, per user or device over 24 hours, and country-wide, and reached a recall of 89.6\,\% at a false-positive rate of 0.19\,\% on web traffic and 91.1\,\% at 0.11\,\% on native traffic. The system is deployed and blocks a request when its score passes a threshold.
+
+Three of their findings shaped our design. First, per-entity rate limits do not work against this attacker: about 73\,\% of web attacks sent four or fewer requests per identity in 24 hours, below any limit a service would set. Second, the strongest signals were not the client's but the destination's: the number of distinct numbers sharing a prefix in a day was the dominant native feature, and attacks showed about 92\,\% zero conversion where genuine traffic showed 21\,\%. Third, their evasion analysis found that an attacker would need about 48 times as many phone prefixes to evade the web model.
+
+Where we differ is in what the system does and what it needs. Theirs is a classifier that needs labelled traffic and answers block or allow; ours is a prevention pipeline that works from day one without labels, acts online with a graded response, and carries explicit bounds on the harm a wrong decision does. We also treat their main signal, verification outcome per key, as the central object of study rather than one feature among many, and ask where it stops working. We see the two as complementary: a trained model of their kind would be one more input to our risk score, not a replacement for the limits around it. We note that their labels came from peak periods and that they report low recall on non-peak attacks; our low-and-slow attackers (Section~\ref{sec:adaptive}) are the case their labelling would have missed.
+
+\subsection{Defences in practice and their known limits}
+
+Commercial SMS verification services ship a fraud filter. Twilio's Verify Fraud Guard, the documented example, blocks verifications to regions and countries known for pumping, flags destinations that are new relative to an account's history, and offers three protection levels with stated false-positive rates under 1\,\% and under 2\,\%~\cite{twilio_fraudguard}. It is a destination-side filter at the provider; it has no view of the client, the session or the fingerprint, and it is as good as the provider's list.
+
+The client-side controls that services deploy first are a CAPTCHA and an IP limit, and both have measured limits. Motoyama et al.\ showed in 2010 that CAPTCHA solving is a labour market, with retail prices of a dollar per thousand, 86 to 89\,\% accuracy and median response times of ten to twenty seconds, and argued that a CAPTCHA should be judged as friction on the attacker's economics rather than as a barrier~\cite{motoyama2010captcha}. Dionysiou and Athanasopoulos later classified the automated solvers and concluded that machine learning alone was not sufficient to break text CAPTCHAs, while the human-labour route remained open~\cite{dionysiou2020captcha}. We price the solving step at 0.3 cents per token in our threat model, from current market prices, and the evaluation gives the attacker farmed scores indistinguishable from humans. On the IP side, Mi et al.\ infiltrated five residential proxy services and found 6.18 million addresses, 95\,\% of them residential, 90\,\% relaying for under fifteen minutes before rotating, and only 2.2\,\% on any blacklist, with an average of 22 days before one was listed~\cite{mi2019resip}. Richter et al.\ measured that more than 90\,\% of cellular networks sit behind carrier-grade NAT, with up to 128 subscribers behind one public address, and concluded that address-based reputation and blocking are ``all but infeasible'' there~\cite{richter2016cgn}. Our design treats the address as one weak signal among several and gives carrier NAT ranges a higher per-address allowance; the evaluation measures what happens when it does not.
+
+\subsection{Risk-based decisions and the security of SMS codes}
+
+Risk-based authentication scores a login from implicit features and asks for more proof when the score is high. Wiefling et al.\ probed eight large services with 224 accounts and found that every service that applied risk-based authentication used the IP address, that most added the user agent or screen resolution, and that the ones with a single feature re-authenticated users often~\cite{wiefling2019rba}. Our Step~7 is a risk engine of that kind applied before a message is sent rather than after a password, with the difference that its strongest signal, the verification history of each key, is produced by the system's own earlier decisions.
+
+The security of the code once sent is a separate problem and we do not address it. Mulliner et al.\ showed in 2013 that smartphone trojans intercept SMS codes and proposed a dedicated channel as a defence~\cite{mulliner2013smsotp}; Siadati et al.\ showed in this journal that users can be talked into forwarding a code and that rewording the message cut the attack's success from 50\,\% to 8\,\%~\cite{siadati2017sms}. Those attacks target the user who asked for a code. Ours targets the service that sends it.
+
+\subsection{What was missing}
+
+Taken together, the literature establishes that the attacker can rotate addresses, fingerprints and CAPTCHA solutions cheaply, that the destination range is what a pumper cannot rotate, and that acting on a range harms real subscribers. What it does not contain is a measurement of where behaviour-based reputation stops separating attackers from users, nor a false-positive accounting for reputation keyed on the destination. That is what this paper adds.
+
+% ---------------------------------------------------------------------------
+\section{The incident and the adapted attacker}
+\label{sec:incident}
+
+\subsection{What happened}
+
+The registration flow sent an SMS to any unregistered number it was given. During its first weeks the endpoint was called repeatedly with randomly generated numbers in the allowed country, and every call produced a paid message. There was no limit per number, per address or in total, no check on the message body, no restriction on country, and nothing that distinguished a browser from a script.
+
+The first set of controls, which we call v1, is listed in Table~\ref{tab:v1}. It was conventional and it worked against the attack it was built for: a hidden reCAPTCHA v3 with a score threshold on web requests, one message per number per minute, five requests per address per minute, a country allow-list with one country exempted for app users, a 420-character limit on the body, a block on connections that a proxy-detection service flagged, and per-platform, per-country caps tuned to historical peaks.
+
+\begin{table}[t]
+\caption{The v1 controls and the gaps the adapted attacker exposed in them.}
+\label{tab:v1}
+\small
+\begin{tabular}{p{0.8cm}p{5.0cm}p{6.6cm}}
+\toprule
+Gap & v1 assumed & How it was bypassed \\
+\midrule
+A & The \texttt{HTTP\_PLATFORM} header says which platform sent the request; iOS skips the host check, apps skip reCAPTCHA & Sending the header. Every platform-based exemption was reachable by anyone \\
+B & Five requests per address per minute bounds one attacker & Residential proxy pools give a fresh address per request; nothing keyed the attacker across addresses \\
+C & A number passed to the provider is worth sending to & Random and sequential numbers cost the same as real ones; nothing checked liveness \\
+D & An allowed country is a safe destination & Premium-rate and revenue-share ranges inside the country cost many times a standard message \\
+E & Per-key caps bound total spend & A wide attack under every cap burned budget without bound; nothing watched the total \\
+F & Check-then-increment is a rate limit & Two instances racing both passed; under a flood the race was hit constantly \\
+G & A bulk flag and a test-server flag are internal & Neither required stronger authentication than a normal request \\
+H & Each check is pass or fail and the response says which failed & Thresholds were probed one at a time; registered numbers could be enumerated \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{How the attacker adapted}
+
+The abuse that returned did not trip v1. Requests arrived from thousands of addresses in residential ranges, each used a handful of times. They carried the iOS platform header and so skipped both the CAPTCHA and the host check. They kept each number under one message a minute and each address under five a minute. Reviewing v1 against this attacker produced the eight gaps in Table~\ref{tab:v1}. They are not implementation bugs; each one is an assumption that held for the first attacker and not for the second.
+
+\subsection{Threat model}
+
+We assume an attacker who wants either to make the service send as many messages as possible (a flooder) or to make it send messages to numbers on which the attacker is paid (a pumper). The attacker can buy residential proxy access at about 3 USD per gigabyte, a fresh browser fingerprint at no cost, and reCAPTCHA v3 tokens with human-like scores at about 0.3 cents each; can generate numbers at will; and knows the service's thresholds, since it can probe them. A pumper additionally controls, through a colluding operator or reseller, a set of destination ranges, and may be able to read the messages delivered to them and enter the codes. Interactive challenges can be bought solved. The attacker cannot forge an app attestation, cannot change the number ranges its partner terminates, and cannot make a real person on an unrelated number verify a code. These capabilities and prices are the ones the evaluation uses; Table~\ref{tab:attackers} lists the profiles built from them.
+
+% ---------------------------------------------------------------------------
+\section{Design}
+\label{sec:design}
+
+Two principles drive the design. Cheap local checks run first, so that obvious abuse is refused before a network call to a CAPTCHA or number-lookup vendor and long before a message is paid for. Trust is earned by behaviour and never claimed by a header: platform exemptions require attestation, clients need a signed session, and every key a request touches carries a reputation derived from whether the codes it asked for were ever verified.
+
+\subsection{The pipeline}
+
+Every OTP request passes through twelve steps (Table~\ref{tab:steps}); the first failing step stops it, and whatever the outcome the client receives the same response. Steps~0 to~6 are hard rejects on cheap or local evidence. Step~7 turns the evidence collected so far into a score and a tier. Steps~8 to~10 are the capacity controls. Step~11 picks a channel, writes the audit record and answers.
+
+\begin{table}[t]
+\caption{The twelve steps and the gap each one closes. FB is the asynchronous feedback loop.}
+\label{tab:steps}
+\small
+\begin{tabular}{cp{7.2cm}p{4.3cm}}
+\toprule
+Step & Check & What it closes \\
+\midrule
+0 & Proxy block; platform derived from attestation, never from the header & Gap A \\
+1 & Signed session token bound to a fingerprint; nonce replay; 3 requests per session per 10 min & Gap B, replay \\
+2 & Atomic limits per address, per /24 subnet and per ASN, lower for hosting ASNs & Gaps B, F \\
+3 & reCAPTCHA v3 with a score threshold, web only & bots \\
+4 & Origin check, web only & domain allow-list \\
+5 & Number intelligence: E.164 parsing, country, prefix cost class, sequential and narrow-range detection, liveness lookup & Gaps C, D \\
+6 & Body length; excluded numbers & body limits \\
+7 & Risk score and tier: allow, delay, challenge, downgrade, block & Gap H \\
+8 & Per-number backoff: 60\,s doubling to 1\,h; five per day & per-number flooding \\
+9 & Per-source, per-platform, per-country caps with an adaptive multiplier & aggregate caps \\
+10 & Global circuit breaker on hourly count and spend & Gap E \\
+11 & Channel selection; audit log; uniform response body and a constant response time & Gap H \\
+FB & Verification feedback: verified, failed, undelivered per key; destination-block tests; auto-denylist of fine keys & the signal an attacker cannot fake without phones \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Three steps deserve a word because the evaluation turns on them. Step~0 never reads the platform from the header. An iOS request is one with a valid App Attest assertion, an Android request one with a valid Play Integrity verdict; an invalid attestation is a stronger signal of abuse than none and is blocked; a request with neither is a web request and gets no exemption. Step~2 makes every rate limit a single Lua script in Redis, so that check and increment are one operation across all instances. Step~11 returns HTTP~200 with the same body for every outcome from Step~1 onward and pads the handler to a 400\,ms floor, so that neither the body nor the timing tells the caller which step refused it.
+
+\subsection{The risk score and its tiers}
+
+Step~7 computes
+\begin{equation}
+s = \sum_i w_i x_i + w_c\,\frac{\max(0,\theta - r_{\min})}{\theta} - w_v\,v_n - w_f\,v_f,
+\label{eq:score}
+\end{equation}
+where the $x_i$ are the per-request signals of Table~\ref{tab:weights}, $v_n$ and $v_f$ indicate a number and a fingerprint with verified history, $r_{\min}$ is the lowest conversion ratio over the keys the request touches (address, subnet, ASN, fingerprint, country, prefix and destination block), $\theta = 0.3$ and $w_c = 25$. The score is clamped to $[0,100]$ and mapped to a tier at 20, 40, 60 and 80: \emph{allow} sends at once; \emph{delay} sends after a few seconds that double per request in the session; \emph{challenge} returns an interactive challenge to a browser and re-enters Step~7 with a $-20$ credit when it is solved (apps are downgraded instead); \emph{downgrade} may use push, WhatsApp or silent network authentication but never SMS; \emph{block} refuses. In the circuit breaker's elevated mode every boundary moves down by ten points; in emergency mode only a score under 10 may use SMS.
+
+\begin{table}[t]
+\caption{Signals and weights in the risk score. Positive values raise risk.}
+\label{tab:weights}
+\small
+\begin{tabular}{p{8.2cm}r}
+\toprule
+Signal & Points \\
+\midrule
+reCAPTCHA score $c$ (web) & $(1-c)\times 25$ \\
+Address in a hosting or datacenter ASN & $+15$ \\
+Address abuse-list score $a\in[0,1]$ & $a\times 15$ \\
+Fingerprint first seen under 5 min ago / under 1 h ago & $+20$ / $+10$ \\
+Each previous request in this session & $+5$ \\
+Lowest conversion ratio $r_{\min}$ over the request's keys, when below 0.3 & up to $+25$ \\
+Sustained flood on a key ($\geq 100$ resolved sends, ratio $< 0.1$) & $+15$ \\
+Address country differs from number country & $+10$ \\
+Sequential number; narrow-range burst & $+15$ each \\
+Elevated-cost prefix; unknown prefix; VoIP number & $+10$ each \\
+App without attestation inside the grace window & $+20$, never better than delay \\
+Interactive challenge solved & $-20$ \\
+Number verified before; fingerprint verified before & $-20$; $-15$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No single signal blocks. The largest contribution a shared key can make, the conversion penalty, moves a clean-looking web client only to \emph{delay}, which still sends; that is deliberate, since the penalty attaches to keys such as a country or a residential ASN that real users share with whoever is attacking through them. Refusing needs signals to stack, and a distributed attacker supplies them by construction: a rotating client has a fresh fingerprint, a reused one accumulates its own history, generated numbers trip the pattern detectors.
+
+\subsection{The feedback loop}
+\label{sec:feedback}
+
+Each send is attached to the reputation keys of its request. When the code is entered, every key's \emph{verified} counter rises; when five wrong attempts are made, or two minutes pass after delivery with no attempt, \emph{failed} rises; a verification that arrives after that is reclassified. Counters live in hourly buckets over a rolling day. The ratio verified\,/\,(verified\,+\,failed) counts resolved sends only, so a burst of fresh legitimate traffic, a campaign launch for instance, is neutral until its codes have had time to be entered. The two-minute window replaced the ten-minute code validity after we measured that 99\,\% of simulated real users verify within about 100 seconds; waiting the full validity only delayed the signal.
+
+Two things gate what counts. A send counts as failed only after the provider's delivery receipt confirmed it arrived; a send with no receipt inside sixty seconds, or a failed one, is \emph{undelivered} and feeds neither the ratio nor the block tests. And verification speed, used below, is clocked from the receipt, not from the send, so that a slow route cannot make a person look like a machine. A provider without delivery reports is configured to clock from the send, as our first version did.
+
+Fine keys whose ratio falls below 0.1 over at least fifty resolved sends are placed on a 24-hour denylist: addresses, subnets, fingerprints and hosting ASNs. A residential ASN is never denylisted, because it holds thousands of real people and denylisting it would hand the attacker a denial of service; a residential attack is handled by the score instead, where the conversion penalty and the sustained-flood bonus move every request on that key into the challenge tier, so that real users on the same ISP solve a challenge and are served while the bot is not.
+
+\subsection{Destination-block tests}
+\label{sec:blocks}
+
+The keys above are all ones the attacker can rotate. The destination is the one a pumper cannot: it is paid only on the numbers its partner terminates. We therefore key reputation also on the 8-digit block of the destination, 10\,000 numbers, and judge blocks by sequential probability-ratio tests~\cite{wald1945sprt} rather than by the shared-key thresholds, because a block is touched by legitimate traffic a fraction of a time per day and a block with several sends is almost certainly one party's.
+
+Two tests run per block, each reaching a verdict when the likelihood ratio of attacker to legitimate behaviour exceeds 1\,000. The conversion test assumes real users verify 80\,\% of codes and a flooder at most 10\,\%: five unverified sends in a row give a ratio of $(0.9/0.2)^5 = 1\,845$, and a real population at 80\,\% conversion produces that with probability $0.2^5$, three in ten thousand. The speed test assumes a machine enters a code within five seconds of delivery 90\,\% of the time; real users do so whenever their operating system fills the code in for them, which Android's SMS Retriever and the WebOTP API do without a keystroke~\cite{google_smsretriever,wicg_webotp}. The design assumes that for 20\,\% of verifications, at which five instant verifications in a row give a ratio above 1\,000, and the number must be set from the deployment's own measured distribution. The counters restart after each verdict.
+
+What a verdict does is graded, because a wrong verdict on a block is a wrong verdict on 10\,000 numbers. The first verdict makes the block's first-time clients solve an interactive challenge for an hour; a second inside that hour moves them to non-SMS channels. Clients with verified history, a fingerprint or a number that verified before, are never affected. The 24-hour denylist is kept as an option; Section~\ref{sec:pumping} measures what it buys. Finally, a carrier outage is not a pumper: the tests are suspended for fifteen minutes on a prefix whose delivery receipts collapse across at least ten of its blocks, or whose \emph{returning} clients stop verifying across at least ten blocks. Only clients with verified history count toward the second signal, so an attacker cannot buy a suspension with a decoy flood without burning verified accounts to do it.
+
+\subsection{Capacity controls}
+
+Step~8 doubles the wait between messages to the same number, 60\,s, 120\,s, up to an hour, and caps a number at five messages a day. Step~9 enforces caps per source, platform and country, multiplied by a factor between 0.25 and 1.5 that an hourly job sets from the key's conversion and its deviation from a four-week baseline; a tightened cap never rations a client with verified history, and a request moved off SMS does not consume it. Step~10 watches the hourly message count and the hourly spend in prefix cost units against a budget, moves the pipeline to an elevated mode at 80\,\% and an emergency mode at 100\,\%, and pages on-call. In emergency mode the cleanest traffic still gets SMS, so that an attack cannot turn the breaker into a denial of service against real users; a manual kill switch stops all SMS.
+
+Appendix~\ref{app:defaults} lists every default and the reason for it; the pseudocode for each step is in the repository~\cite{otpguard2026}.
+
+% ---------------------------------------------------------------------------
+\section{A model of pumping leakage}
+\label{sec:model}
+
+Against the block tests, a pumper's leakage does not depend on how many numbers it uses but on how many blocks it touches. Let $B$ be the number of 8-digit blocks the pumper's ranges intersect, $\lambda$ its request rate, $N$ its total requests, and $k$ the number of sends a block costs before its verdict when every send goes the attacker's way. For the conversion test $k$ is the smallest integer with $k\,\ln\frac{1-p_a}{1-p_\ell} > \ln 1000$, where $p_\ell = 0.8$ and $p_a = 0.1$ are the assumed verification probabilities of a real user and a flooder; that gives $k = 5$. For the speed test, with $q_\ell = 0.2$ and $q_a = 0.9$ the probabilities of an instant verification, $k = \lceil \ln 1000 / \ln(q_a/q_\ell) \rceil = 5$ as well. Then
+\begin{equation}
+L \approx \min\bigl(N,\; kB + \lambda\,\tau\bigr),
+\label{eq:leak}
+\end{equation}
+where $\tau$ is the time a send stays unresolved: the resolution timeout plus the delivery delay plus half the period of the worker that resolves timeouts for a carrier that never verifies, about 2.5 minutes with our defaults, and only the delivery delay plus the carrier's own entry delay for one that verifies at once.
+
+A carrier that verifies a share $\sigma$ of its codes with human-like delay moves the conversion test's expected increment per send to $\sigma \ln\frac{p_a}{p_\ell} + (1-\sigma)\ln\frac{1-p_a}{1-p_\ell}$, which is zero at
+\begin{equation}
+\sigma^{*} = \frac{\ln\frac{1-p_a}{1-p_\ell}}{\ln\frac{1-p_a}{1-p_\ell} - \ln\frac{p_a}{p_\ell}} = 0.42 .
+\label{eq:evasion}
+\end{equation}
+Above that share the test drifts away from a verdict. The price is that each verified code is a registered account on a number the pumper controls, so evasion costs the pumper at least $\sigma^{*}$ fake accounts per message it is paid for, and the defender inherits them. Section~\ref{sec:pumping} checks Eq.~\eqref{eq:leak} against simulation at nine points and Eq.~\eqref{eq:evasion} against a carrier verifying 60\,\%.
+
+% ---------------------------------------------------------------------------
+\section{Implementation and evaluation method}
+\label{sec:method}
+
+\subsection{Implementation}
+
+The pipeline, its store, the feedback loop and the vendor adapters are about 3\,000 lines of Python, with one method per step. All state sits behind one store interface with an in-memory backend for tests and a Redis backend for deployment; every rate limit is one Lua script. Adapters exist for Google reCAPTCHA, Play Integrity, App Attest assertions, two IP-intelligence services, a number-lookup service, Twilio SMS and WhatsApp, push notifications and an alert sink, each with a stated policy on vendor outage: CAPTCHA and attestation fail closed, IP intelligence and number lookup fail open with a neutral result. A FastAPI service exposes the session, request, verify and delivery-receipt endpoints and a worker resolves timeouts and runs the adaptive baseline job. The test suite has 205 tests, each pipeline test on both backends. No live vendor call has been made from the repository; adapters are tested against recorded responses.
+
+\subsection{Simulation}
+
+Because no production logs were available to us, the evaluation is a minute-by-minute simulation of one registration source. Each run warms up with ten minutes of legitimate traffic, then runs twenty minutes of attack with legitimate traffic in the background at 20 requests per minute. Legitimate users verify 80\,\% of codes after a lognormal delay (median 22\,s from delivery, typed; median 2\,s for the 20\,\% whose device fills the code in); 20\,\% of requests come from a browser that verified before; 5\,\% leave through an in-country hosting range, 5\,\% roam from abroad and 2\,\% sit behind a cloud proxy abroad. Delivery receipts arrive after a lognormal delay with median 3\,s. Prices are published list prices: 0.1422 USD per SMS to Saudi Arabia, 0.008 USD per number lookup, 0.001 USD per CAPTCHA assessment, 0.003 USD per solved CAPTCHA token, 3 USD per gigabyte of residential proxy traffic. Where a figure is an assumption rather than a published one, the repository's calibration table says so; the legitimate conversion of 80\,\% is such an assumption, chosen above the 68\,\% that one large provider reports as its global average~\cite{twilio_verify}.
+
+Each attacker runs on thirty seeds. Per seed, the pool size (500 to 50\,000 addresses), the request rate (10 to 60 per minute) and the CAPTCHA score class are drawn at random. Results are means with 95\,\% $t$-intervals over seeds; the intervals cover seed-to-seed variation, not calibration error. Two modes are run: \emph{behavioural only}, with the source caps lifted so that the other layers are visible, and \emph{with source caps}, at three times the legitimate rate, adaptive for v2 and static for v1, since the adaptive multiplier is a v2 feature. v1 is the first design run through the same code with every v2 layer switched off by a feature flag.
+
+\subsection{Metrics}
+
+For the attacker: total messages leaked over the twenty minutes; time to containment, the first minute after which leakage never again exceeds 5\,\% of the attack rate; messages leaked before containment; steady-state leakage per minute after it; and the defender's cost in messages, lookups and assessments. For real users: delivered, challenged and refused as a share of their requests, and the added delay. For the block tests: blocks that reached a verdict, and real users a verdict touched.
+
+\subsection{Attackers}
+
+\begin{table}[t]
+\caption{Attacker profiles. All residential attackers draw addresses from in-country residential ranges; ``farmed'' CAPTCHA scores follow the human distribution.}
+\label{tab:attackers}
+\small
+\begin{tabular}{p{3.4cm}p{8.9cm}}
+\toprule
+Profile & Description \\
+\midrule
+\multicolumn{2}{l}{\emph{Main study}} \\
+naive single client & One address, one session, random numbers, a basic bot's CAPTCHA scores \\
+datacenter rotation & Hosting ASN abroad, fresh fingerprint per request, headless-browser scores \\
+residential bot & Residential pool, fresh fingerprint, bot or headless scores \\
+residential CAPTCHA farm & Residential pool, fresh fingerprint, farmed scores \\
+residential aged fingerprints & Residential pool, unique fingerprints seeded two hours earlier, farmed scores \\
+residential reused profile & Residential pool, one 48-hour-old browser profile reused \\
+sequential numbers & Residential pool, numbers walked upward \\
+premium pumping & Residential pool, a premium-rate prefix \\
+spoofed platform & Residential pool, the iOS header without attestation \\
+\multicolumn{2}{l}{\emph{Adaptive}} \\
+pumper, listed range & Colluding carrier on an elevated-cost range, verifies every code within 1\,s, or 60\,\% after 30\,s \\
+pumper, unlisted range & As above, on a range the prefix table does not know \\
+challenge solver & Datacenter rotation that buys a solution to every interactive challenge \\
+low and slow & 2 or 10 requests per minute over 20 residential ASNs, aged fingerprints \\
+\multicolumn{2}{l}{\emph{Pumping study}} \\
+concentrated pumper & Three 10\,000-number blocks inside a standard prefix; carrier does not verify, verifies within 1\,s, verifies 60\,\% after 30\,s, or buys challenge solutions \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Results}
+\label{sec:results}
+
+\subsection{RQ1: what is stopped, and at what cost}
+
+\begin{table}[t]
+\caption{Messages leaked in twenty minutes (about 600 requests) and the share of real users refused, means over thirty seeds. Full tables with intervals are in the repository.}
+\label{tab:headline}
+\footnotesize
+\begin{tabular}{lrrrr}
+\toprule
+& \multicolumn{2}{c}{caps lifted} & \multicolumn{2}{c}{with source caps: leaked / refused} \\
+Attacker & v1 & v2 & v1 (static) & v2 (adaptive) \\
+\midrule
+Naive single client & 31 & 2 & 31 / 1\,\% & 2 / 1\,\% \\
+Datacenter rotation & 416 & 0 & 400 / 2\,\% & 0 / 1\,\% \\
+Premium-prefix pumping & 595 & 0 & 558 / 4\,\% & 0 / 1\,\% \\
+Spoofed platform header & 599 & 0 & 100 / 0\,\% & 0 / 1\,\% \\
+Sequential numbers & 595 & 70 & 558 / 4\,\% & 63 / 2\,\% \\
+Residential, reused profile & 593 & 126 & 563 / 4\,\% & 93 / 6\,\% \\
+Residential, bot CAPTCHA scores & 219 & 221 & 219 / 1\,\% & 160 / 12\,\% \\
+Residential, farmed CAPTCHA & 593 & 597 & 563 / 4\,\% & 241 / 42\,\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:headline} and Figure~\ref{fig:perminute} answer the first question. Four attacks are stopped outright, with no message sent at any seed: the spoofed header, because Step~0 derives the platform from attestation; datacenter rotation, because the hosting ASN and the fresh fingerprint put every request in the block tier; premium-prefix pumping, because Step~5 refuses the range; and, in all but a trickle, the single client, which the per-session cap holds to two messages. The sequential walk is stopped at minute 3.5 after 63 to 70 messages, because every number it tries sits in one destination block and that block reaches a verdict after five unverified sends; v1 leaked it whole. The reused browser profile is stopped at minute 4.7, because its fingerprint accumulates its own history. In every one of these cases 99\,\% of real users are delivered and about 2\,\% are challenged, the latter being the corporate, roaming and cloud-proxy minority whose addresses carry risk points.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{leakage_per_minute}
+\caption{Messages leaked per minute of attack, v1 against v2, means over thirty seeds with the source caps lifted. The first three attacks never send a message under v2; the sequential walk and the reused profile are stopped within five minutes; the farmed-CAPTCHA attacker is untouched.}
+\label{fig:perminute}
+\end{figure}
+
+The last two rows are the other half of the answer. A residential attacker with bot-grade CAPTCHA scores is held mostly by Step~3 under both designs. One with farmed scores, fresh or pre-aged fingerprints and valid numbers leaks everything with the caps lifted under both designs, 593 and 597 of 600, and the two intervals overlap. With the caps on, v1's static cap leaks 563 and refuses 4\,\% of real users; v2's adaptive cap leaks 241 and refuses 42\,\% of first-time users (returning users are exempt and are all delivered). All of v2's gain against this attacker is rationing. We return to why in Section~\ref{sec:separability}.
+
+\subsection{RQ2: which layer does what}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{ablation}
+\caption{Leave-one-layer-out ablation with the source caps on. Each cell is the mean over the same ten seeds; the first column is the complete design on those seeds.}
+\label{fig:ablation}
+\end{figure}
+
+Figure~\ref{fig:ablation} removes one layer at a time, with every column on the same ten seeds. Each recognisable attack has one layer that stops it: the session cap for the naive client (2 to 31 without it), the risk engine for datacenter rotation (0 to 85), number intelligence for premium pumping (0 to 74). The feedback loop stops the reused profile (98 to 246 without it) and, together with the destination-block key, the sequential walk (61 with both; 231 without the loop, 178 without the block key, 244 without the risk engine). Against the two farmed-CAPTCHA attackers only one column changes: without the adaptive cap they leak 550 instead of 246. Every other layer, the loop included, is invisible to them. An earlier version of this ablation compared a thirty-seed reference against ten-seed columns and concluded that the loop contributed nothing; that comparison mixed seed sets and was wrong, which is why the reference column here is computed on the same seeds.
+
+\subsection{RQ3: where reputation stops separating}
+\label{sec:separability}
+
+The conversion penalty attaches to the keys a request touches. A residential attacker with farmed scores touches an address it uses once, a fingerprint it uses once, and a country, a prefix and a residential ASN it shares with every real user. Its failures therefore land on the shared keys, and the penalty they produce lands on everyone. That is rationing, not separation.
+
+Two experiments show that no setting changes this. Figure~\ref{fig:dilution} raises the attack from half the legitimate rate to ten times it for an hour. Up to twice the legitimate rate the attack leaks 99\,\%: the shared keys' ratios stay above 0.3 because real users keep verifying. At five times, 95\,\% leaks and 7\,\% of real users are challenged; at ten times, 71\,\% leaks and 18\,\% are challenged. The penalty starts near 1.8 times the legitimate volume, but starting is not separating. The parameter sweep (Table~\ref{tab:sweep}) says the same thing from the other side. Raising the conversion weight from 25 to 40, or cutting the OTP timeout to two minutes, changes nothing because the signal never fires on these keys. Scaling the tier boundaries to 0.6 cuts leakage by about 40\,\% and challenges 18\,\% of real users. Raising the fresh-fingerprint weight to 40 stops the attacker outright and challenges 46\,\% of real users and refuses 10\,\%, because most real sign-ups are also new browsers.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.55\textwidth]{dilution}
+\caption{The farmed-CAPTCHA attacker at multiples of the legitimate rate for an hour, with the source caps lifted. The conversion penalty starts to fire near twice the legitimate volume and fires on real users as it does so.}
+\label{fig:dilution}
+\end{figure}
+
+\begin{table}[t]
+\caption{Weight and boundary sweep against the farmed-CAPTCHA attacker, caps lifted, ten seeds. The default is 25 for the conversion weight, 20 for the fresh-fingerprint weight, 1.0 for the boundary scale and 120\,s for the resolution timeout.}
+\label{tab:sweep}
+\footnotesize
+\begin{tabular}{p{2.8cm}lrp{1.9cm}p{1.7cm}}
+\toprule
+Parameter & Value & Leaked / 600 & Real users challenged & Real users refused \\
+\midrule
+default & -- & 586 & 1.4\,\% & 0.8\,\% \\
+conversion weight & 40 & 586 & 1.4\,\% & 0.8\,\% \\
+resolution timeout & 120\,s $\to$ 600\,s & 586 & 1.4\,\% & 0.8\,\% \\
+boundary scale & 0.6 & 357 & 18.2\,\% & 6.6\,\% \\
+fresh-fingerprint weight & 40 & 0 & 46.0\,\% & 10.2\,\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The lesson generalises beyond this design. Any reputation built on outcomes separates an attacker from real users only on keys the attacker dominates, and the attacker decides how pure the client-side keys are: an address, a fingerprint and a session can be made single-use for nothing, and a CAPTCHA solution costs 0.3 cents. That leaves two kinds of key where separation is possible. Keys the attacker reuses by mistake or for convenience, like the reused browser profile, and keys it cannot rotate at all.
+
+\subsection{RQ4: what rationing costs}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.75\textwidth]{tradeoff}
+\caption{Steady-state leakage of the farmed-CAPTCHA attacker against friction for real users (refused plus challenged), over the cap and weight sweeps. The line is the Pareto frontier.}
+\label{fig:tradeoff}
+\end{figure}
+
+When separation is impossible, the only lever is the volume cap, and Figure~\ref{fig:tradeoff} measures what it costs. Along the frontier, holding the attacker to 10 messages a minute refuses about 40\,\% of first-time users; holding it to under one a minute refuses 61\,\%; letting it through refuses almost none. The adaptive multiplier's floor and the base cap set where on this line a deployment sits (an adaptive floor of 0.25 at three times the legitimate rate, the default, leaks 246 and refuses 41\,\%), and the circuit breaker sets a ceiling on spend beyond which the line is left. There is no point on it that a service would call good; the honest statement is that against this attacker the design trades money for first-time sign-ups at a measured rate, and that returning users are kept out of the trade.
+
+\subsection{RQ3 continued: pumping on the key the attacker cannot rotate}
+\label{sec:pumping}
+
+\begin{table}[t]
+\caption{Concentrated pumpers on three 10\,000-number blocks, caps lifted, ten seeds; messages leaked of about 600, time to containment, and verified fake accounts the carrier created. Default: block key, two-minute resolution, graded verdicts.}
+\label{tab:pumping}
+\footnotesize
+\begin{tabular}{p{3.0cm}p{1.9cm}rrr}
+\toprule
+Carrier & Design & Leaked & Contained at (min) & Fake accounts \\
+\midrule
+\multirow{3}{*}{does not verify} & v1 & 563 & never & 0 \\
+ & v2 default & 104 & 4.9 & 0 \\
+ & v2, 24-h denylist & 104 & 4.9 & 0 \\
+\midrule
+\multirow{2}{*}{verifies within 1\,s} & v1 & 562 & never & 562 \\
+ & v2 default & 18 & 1.5 & 18 \\
+\midrule
+\multirow{2}{*}{verifies 60\,\% after 30\,s} & v1 & 563 & never & 331 \\
+ & v2 default & 559 & never & 323 \\
+\midrule
+\multirow{2}{*}{\parbox{3.4cm}{does not verify; buys challenge solutions}} & v2 default & 122 & 5.7$^{a}$ & 0 \\
+ & v2, 24-h denylist & 104 & 4.9 & 0 \\
+\midrule
+farmed-CAPTCHA flooder (control) & v2 default & 576 & never & 0 \\
+\bottomrule
+\end{tabular}
+
+{\footnotesize $^{a}$ Contained in nine of ten seeds.}
+\end{table}
+
+Table~\ref{tab:pumping} is the pumping result. A pumper whose carrier does not verify is contained in every seed by minute~5 with 104 messages leaked; one whose carrier enters every code within a second is caught by the speed test by minute~1.5 with 18 leaked, and it loses money at any revenue share we assumed. A pumper that buys a solution to every challenge earns a second verdict on its blocks and is moved off SMS, at 122 leaked against 104 under the hard denylist; that is what the denylist buys, eighteen messages, against a lockout of 10\,000 numbers for a day. The flooder control is untouched by any of this, as it should be: it touches blocks at random and never concentrates on one.
+
+A carrier that verifies 60\,\% of its codes after a human-like delay defeats every variant, leaks 559 of 600, and leaves 323 verified accounts on numbers it controls. Equation~\eqref{eq:evasion} said it needed 42\,\%; 60\,\% is comfortably past it. The pumping has not been stopped; its cost has moved from the SMS bill to whatever those accounts are later used for, and measuring it there is outside this paper.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{pumper_spread}
+\caption{Messages leaked against the number of distinct destination numbers a pumper spreads over, with ranges that fit inside, align with, or span the 8-digit key. Leakage depends on the blocks touched, not the numbers used.}
+\label{fig:spread}
+\end{figure}
+
+Figure~\ref{fig:spread} and Table~\ref{tab:spreadmodel} vary how widely the pumper spreads. Ranges of 1\,000 and 10\,000 numbers behave identically because each sits in one block; ranges of 100\,000 numbers touch ten blocks each and leak accordingly; and at 300 blocks the pumper is the flooder again. The model of Eq.~\eqref{eq:leak} predicts every point to within a few messages: 88 against 85 to 87 measured at three blocks, 223 against 216 to 218 at thirty, and saturation at three hundred; for the instant verifier, 17 against 17 to 19, and 152 against 152. The in-flight term is what separates the two carriers at small $B$: the non-verifier's sends stay unresolved for the two-minute window and keep leaking while the verdicts land, the verifier's resolve within seconds.
+
+\begin{table}[t]
+\caption{The leakage model against the spread sweep (ten seeds). $B$ is the number of 8-digit blocks the pumper's ranges touch.}
+\label{tab:spreadmodel}
+\footnotesize
+\begin{tabular}{lrrrr}
+\toprule
+Carrier & Ranges $\times$ size & $B$ & Measured & Model \\
+\midrule
+does not verify & $3\times 1\,000$; $3\times 10\,000$ & 3 & 87; 85 & 88 \\
+ & $3\times 100\,000$; $30\times 1\,000$; $30\times 10\,000$ & 30 & 216; 218; 217 & 223 \\
+ & $30\times 100\,000$; $300\times 1\,000$; $300\times 10\,000$ & 300 & 536; 528; 533 & $\approx N$ \\
+verifies within 1\,s & $3\times 1\,000$; $3\times 10\,000$ & 3 & 19; 17 & 17 \\
+ & $3\times 100\,000$; $30\times 1\,000$; $30\times 10\,000$ & 30 & 152; 152; 152 & 152 \\
+ & $30\times 100\,000$; $300\times 1\,000$; $300\times 10\,000$ & 300 & 537; 529; 550 & $\approx N$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{RQ5: what the block tests cost real users}
+\label{sec:fp}
+
+The block tests are the one part of the design that acts on a key real people share by the thousand, and they were calibrated to the simulated population. Three experiments ask what they do when the population differs, over a day, and during an outage.
+
+The first is a Monte Carlo of the exact tests on one block that sees only legitimate traffic (Table~\ref{tab:fp}). With the tests as deployed, assuming 80\,\% conversion and 20\,\% fast verifications, a population that converts at 80\,\% produces a verdict on about one block in a thousand per day, and a 30\,\% autofill share against the 20\,\% calibration adds under one percent. A population that converts at 65\,\% produces a verdict on about 2\,\% of blocks with thirty or more sends a day; one at 50\,\%, on 9 to 25\,\%. The conversion calibration, not the speed one, is the sensitive parameter, and it must come from measured traffic.
+
+\begin{table}[t]
+\caption{Probability that a block seeing only legitimate traffic reaches a verdict in one day, by true conversion and true share of verifications within 5\,s of delivery; 30 sends per block per day; tests calibrated to 80\,\% and 20\,\%. Monte Carlo, 20\,000 trials per cell.}
+\label{tab:fp}
+\scriptsize
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Conversion & fast 0\,\% & 5\,\% & 10\,\% & 20\,\% & 30\,\% \\
+\midrule
+50\,\% & 18.5\,\% & 18.6\,\% & 18.6\,\% & 18.4\,\% & 19.1\,\% \\
+65\,\% & 1.9\,\% & 1.9\,\% & 1.8\,\% & 1.8\,\% & 2.6\,\% \\
+80\,\% & 0.03\,\% & 0.10\,\% & 0.07\,\% & 0.11\,\% & 0.69\,\% \\
+90\,\% & 0.00\,\% & 0.01\,\% & 0.02\,\% & 0.07\,\% & 0.78\,\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The second runs the simulation for 24 hours with no attacker, with legitimate numbers drawn from a fixed set of blocks so that each block sees 144, 29 or about 4 sends a day. At 80\,\% conversion the day produces between zero and two verdicts and touches at most one or two of 29\,000 real users. At 65\,\% it produces 3 to 18 verdicts and touches 1 to 22 users, who meet a challenge rather than a refusal; delivery stays at 99.3\,\% in every cell. The third stops one prefix, a seventh of the traffic, for thirty minutes inside an hour, in two forms: the provider reports every send failed, or reports delivery while nobody receives anything. With receipts gating the tests and the carrier-wide suspension, neither form produces a verdict, and an alert names the carrier. Without the suspension the silent outage flags 1.4 blocks and touches 1.8 users; the send-clocked design we started with flags 1.4 blocks in both forms. These are the numbers that justified the receipt gating and the graded verdict.
+
+\subsection{Adaptive attackers, economics and overhead}
+\label{sec:adaptive}
+
+A colluding carrier on a range the prefix table lists as elevated-cost is held to twenty messages by the per-prefix cap whether it verifies instantly or with human-like delay; on an unlisted standard range the human-like one is the pumper of Table~\ref{tab:pumping}. A datacenter attacker that buys a solution to every challenge turns zero leaked messages into about fifty per run; the challenge credit reduces friction for people and is not a defence against solvers. Low-and-slow attacks under the dilution bound leak in full at their own rate: 42 messages in twenty minutes at two per minute over twenty ASNs, 199 at ten per minute.
+
+With revenue credited only to pumpers, at a termination price of 0.1422 USD and a revenue share of 20 to 50\,\%, premium-prefix pumping earns 14 to 40 USD per twenty minutes under v1 and loses 1.78 USD under v2; the instant-verifying concentrated pumper loses money under v2; the human-like one earns 14 to 38 USD under both designs and adds 323 accounts.
+
+Overhead was measured against a real Redis on a four-vCPU container with four worker processes and vendors faked: a full send costs 14.8\,ms at the median and 27\,ms at the 99th percentile in process, with 46 Redis round trips, and the service serves 203 requests per second at concurrency 32 without the response floor. Of those 46 round trips, five are the delivery receipt, the block-test counters and the outage windows. With the 400\,ms floor, 6\,000 requests across four outcomes showed no distinguishable pair by Kolmogorov--Smirnov test for five of six pairs; the sixth, a sent code against a repeated number, was marginal ($p = 0.04$, mean difference 0.4\,ms), which at six tests is what chance produces and which an equivalence test within 2\,ms rejects as a usable gap for every pair. Without the floor every pair is distinguishable.
+
+% ---------------------------------------------------------------------------
+\section{Discussion: lessons and limitations}
+\label{sec:discussion}
+
+\subsection{Lessons}
+
+\begin{enumerate}
+\item \emph{Reputation separates attackers only on keys they dominate.} Everything the evaluation found reduces to this. The attacker chooses the purity of the client-side keys and can make them single-use for nothing; the defender's signal lands on whatever the attacker shares with real users. Tuning cannot change it; Table~\ref{tab:sweep} tried.
+\item \emph{The destination is the key a pumper cannot rotate, and its cost is linear in blocks touched.} Equation~\eqref{eq:leak} held at every point we measured. It also says what a pumper must do to evade: spread over hundreds of blocks, at which point it is paid on fewer of them, or verify 42\,\% of its codes, at which point it is manufacturing accounts.
+\item \emph{A wrong verdict on a shared key must be graded.} Ten thousand numbers are behind each block. A challenge for an hour, then non-SMS channels, with returning users exempt, cost eighteen messages against the hard denylist and avoided a day's lockout.
+\item \emph{Failure is a delivery receipt and a timeout, not a timeout alone.} Clocking from the send made a slow route look like a machine and an outage look like a pumper. Clocking from the receipt fixed both and cost five round trips.
+\item \emph{Calibration is part of the defence.} The block tests assume the deployment's conversion and its autofill share. Set wrong, they flag real blocks at a measurable rate; the Monte Carlo of Table~\ref{tab:fp} is the tool to check them with.
+\item \emph{A request moved off SMS must not consume the SMS cap.} We found this by watching real users refused on the attacker's behalf, and the fix is one line.
+\end{enumerate}
+
+\subsection{Limitations}
+
+Everything here is simulated. No logs from the incident or the v1 period were available to us, so every absolute number is conditional on the calibration, and the calibration marks which of its figures are assumptions. The repository contains a replay tool and a log schema so that the comparison can be rerun on production traffic when it becomes available; that is the one addition that would change what this paper can claim. The number-lookup fake says every number is live, which makes the random-number attackers harder than reality on that axis. The prefix table is a sample; an incomplete one in production leaks premium ranges. Legitimate behaviour is stylised: one request per user, no retries after a failed delivery, and every user on the same ISP as the residential attacker, which is the worst case for dilution. The autofill share and the returning-user share are assumptions, and the false-positive study sweeps the first because the speed test's calibration depends on it. The outage detector's conversion signal needs ten returning users' failures, which on a low-traffic prefix takes most of half an hour; the delivery-receipt signal is faster and only as honest as the provider's reports. A colluding carrier could fake failed receipts for other people's sends on its own prefix to suspend the tests there, at the price of an alert every window; we did not model it. Attackers do not adapt within a run except through the adaptive profiles. The confidence intervals cover seeds, not the model.
+
+\subsection{Ethics and privacy}
+
+The design fingerprints browsers, keeps addresses and phone numbers in reputation counters for a day and in audit records for thirty, and challenges people on the strength of what strangers on their network did. Each of those is a choice with a cost, and a deployment in the European Union or in Saudi Arabia will need a lawful basis, a retention statement and a way for a refused user to reach a person. No human data was used in this work; the simulation's users are synthetic. The incident is described with the operator's permission and without identifying it.
+
+% ---------------------------------------------------------------------------
+\section{Conclusion}
+\label{sec:conclusion}
+
+An OTP endpoint is an SMS budget behind a form, and the first thing that stops a flood is not the last. The design in this paper stops every attack that can be recognised from the request itself without touching real users, contains a pumper on the one key it cannot rotate at a cost that has a closed form, and measures what it does to real people when its assumptions are wrong. It does not separate a residential attacker that looks like a person, and we have shown that no setting of its parameters will; what it offers there is a measured trade between money and first-time sign-ups, with returning users kept out of it. Those three results, one positive, one negative and one bounded, are what a layered defence of this kind can honestly claim, and the artifact lets anyone check them.
+
+% ---------------------------------------------------------------------------
+\section*{Artifact availability}
+
+The implementation, the evaluation harness, every recorded result and the scripts that regenerate them are at \url{https://github.com/nahmedpsu/OTP-DDOS} (version 2.4.0; an archived DOI will be added on acceptance). \texttt{make results} reproduces every table and figure in this paper from fixed seeds; the full tables with confidence intervals are in \texttt{results/evaluation.md} and \texttt{results/performance.md}.
+
+\section*{CRediT authorship contribution statement}
+\textbf{Naveed Ahmed:} Conceptualization, Methodology, Software, Validation, Investigation, Writing -- original draft, Writing -- review \& editing. TODO: add co-authors.
+
+\section*{Declaration of competing interest}
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper.
+
+\section*{Declaration of generative AI and AI-assisted technologies in the writing process}
+During the preparation of this work the author used Claude (Anthropic) to assist with writing and reviewing code, running the evaluation, and drafting and editing the manuscript text. The author reviewed and verified every number, claim and reference, and takes full responsibility for the content of the publication.
+
+\section*{Data availability}
+No real traffic data was used. All synthetic data, seeds and results are in the repository above.
+
+% ---------------------------------------------------------------------------
+\appendix
+\section{Default values and the reasons for them}
+\label{app:defaults}
+
+\begin{table}[h]
+\footnotesize
+\begin{tabular}{p{3.2cm}p{2.6cm}p{6.6cm}}
+\toprule
+Setting & Default & Reason \\
+\midrule
+Tier boundaries & 20 / 40 / 60 / 80 & A clean web user scores under 15; one strong signal alone lands in \emph{delay}, never \emph{block}; refusing needs three independent signals \\
+Conversion penalty & below 0.3, at least 20 resolved sends & Legitimate conversion runs well above 50\,\%; under 30\,\% is not a bad day, it is a flood; 20 resolved sends keeps one user's typos from triggering it \\
+Resolution timeout & 120\,s after delivery & 99\,\% of simulated real users verify within about 100\,s; a late verification is reclassified \\
+Auto-denylist & ratio below 0.1 on 50 resolved sends, 24\,h; fine keys and hosting ASNs only & No legitimate population converts under 10\,\% on fifty sends; a residential ASN is thousands of people \\
+Block tests & likelihood ratio 1\,000; $p_\ell=0.8$, $p_a=0.1$; $q_\ell=0.2$, $q_a=0.9$; 5\,s from receipt & False-positive probability $0.2^5$ per block at the calibration; $q_\ell$ must be measured \\
+Block verdict & challenge for 1\,h, then non-SMS; verified clients exempt & Bounds a wrong verdict to first-time users for an hour \\
+Outage suspension & 15\,min; 10 blocks; half of 20 sends undelivered, or returning users under 30\,\% on 10 sends in 30\,min & Only returning users count for the conversion signal, so a decoy flood cannot buy it \\
+Per-address cap & 5\,/\,min; 30\,/\,min for listed carrier-NAT ASNs & Carriers put hundreds of subscribers behind one address; at 5\,/\,min half a normal sign-up flow is refused \\
+Circuit breaker & elevated at 80\,\%, emergency at 100\,\% of an hourly budget set to twice the p99 legitimate hour & Room for the elevated mode to act before the hard cap \\
+Response floor & 400\,ms & Above the pipeline's wall-time p99 with one worker per vCPU; it must be sized per deployment \\
+Per-number daily cap; session cap & 5; 3 per 10\,min & A real user retries two or three times; three covers a resend with one to spare \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\bibliographystyle{elsarticle-num}
+\bibliography{refs}
+
+\end{document}
