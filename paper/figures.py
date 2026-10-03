@@ -292,10 +292,11 @@ def _short(n):
 
 
 def fig6_matched(R, out):
-    """The matched comparison at 200 blocks. (a) every evaluated setting: benign completion (separate
-    24-hour attack-free runs) against leakage summed over four attack-profile means (separate attack runs),
-    with the benign service target; direct labels. (b) per-attacker paired differences in leakage against
-    the default for the selected settings, so pairing is shown rather than inferred from marginal intervals."""
+    """The matched comparison at 200 blocks, as two figures so each panel has the full text width.
+    fig6_matched_a: every evaluated setting, benign completion (separate 24-hour attack-free runs)
+    against leakage summed over four attack-profile means (separate attack runs), with the benign
+    service target; only the reference and selected settings are labelled. fig6_matched_b: per-attacker
+    paired differences in leakage against the default for the selected settings."""
     M = R["matched"]
     density = "200"
     names = M["evaluate"][density]
@@ -311,78 +312,91 @@ def fig6_matched(R, out):
         if "refuse" in n:
             return "counter refusing, daily"
         return "counter graded, short window" if "min" in n else "counter graded, daily"
-    fig = plt.figure(figsize=(8.6, 10.8), layout="constrained")
-    top, bottom = fig.subfigures(2, 1, height_ratios=[1, 1.05])          # each panel keeps its own margins
-    axes = [top.subplots(), bottom.subplots()]
-    style(axes[0], "(a) benign completion against leakage, every evaluated setting")
-    style(axes[1], "(b) leakage: paired difference to the default, per attacker")
-    for ax in axes:                                                    # printed at about 0.7 of its drawn size
-        ax.tick_params(labelsize=10.5); ax.title.set_fontsize(12)
-    groups = {}
+    chosen = [v for k, v in sel["chosen"].items() if v not in ("sequential T1000 c1",) and not k.startswith("matched false")]
+    chosen = list(dict.fromkeys(chosen))
+    labelled = set(chosen) | {"none", "sequential T1000 c1"}
+    # (a)
+    fig, ax = plt.subplots(figsize=(8.6, 5.8))
+    style(ax)
+    ax.tick_params(labelsize=10.5)
     for n in names:
         leg = M["legit"][density][n]["0.65"]["legit_completed_pct"]
         att = [M["attack"][n][x]["leaked_total"] for x in M["attack"][n]]
         y = sum(a[0] for a in att); ylo = sum(a[1] for a in att); yhi = sum(a[2] for a in att)
         col = fam_col[family(n)]
         is_def = n == "sequential T1000 c1"
-        axes[0].errorbar(leg[0], y, xerr=err(leg), yerr=[[y - ylo], [yhi - y]], fmt="*" if is_def else "o", color=col, ecolor=INK2,
-                         markersize=15 if is_def else 9, elinewidth=0.9, capsize=2, markeredgecolor=INK if is_def else SURFACE, zorder=3)
-        for gk, members in groups.items():                  # points closer than the label size share one label
-            if abs(gk[0] - leg[0]) < 0.06 and abs(gk[1] - y) < 200:
-                members.append((n, leg[0], y))
-                break
-        else:
-            groups[(leg[0], y)] = [(n, leg[0], y)]
-    for (x0, y0), members in groups.items():
-        axes[0].annotate("\n".join(_short(n) for n, _, _ in sorted(members, key=lambda m: -m[2])), (x0, y0), textcoords="offset points",
-                         xytext=(9, 4), fontsize=11, color=INK, va="center")
+        ax.errorbar(leg[0], y, xerr=err(leg), yerr=[[y - ylo], [yhi - y]], fmt="*" if is_def else "o", color=col, ecolor=INK2,
+                    markersize=15 if is_def else 9, elinewidth=0.9, capsize=2, markeredgecolor=INK if is_def else SURFACE, zorder=3)
+        if n in labelled:
+            lab = "default (T1000, credit 1)" if is_def else _short(n)
+            dy = -12 if is_def else 14 if n == "none" else -6 if "refuse" in n else 5     # none and the refusing counter coincide
+            ax.annotate(lab, (leg[0], y), textcoords="offset points", xytext=(9, dy), fontsize=11, color=INK, va="center")
     tgt = sel["service_target_completion_pct"]
-    axes[0].axvline(tgt, color=INK, linestyle=":", linewidth=1.4)
-    lo_y = axes[0].get_ylim()[0]
-    axes[0].annotate("benign service target\n(default − 0.5 pp,\ntuning seeds)", (tgt, lo_y + 0.45 * (axes[0].get_ylim()[1] - lo_y)),
-                     textcoords="offset points", xytext=(-6, 0), ha="right", fontsize=10, color=INK)
-    axes[0].set_xlabel("legitimate users completing, %\n(separate 24-hour attack-free runs, 65 % conversion)", color=INK, fontsize=11.5)
-    x0, x1 = axes[0].get_xlim()
-    axes[0].set_xlim(x0, x1 + 0.35 * (x1 - x0))                           # room for the direct labels
-    axes[0].set_ylabel("SMS leaked in 20 min: SUM of four\nattack-profile means (separate attack runs)", color=INK, fontsize=11.5)
-    # (b) paired differences for the selected settings
-    chosen = [v for k, v in sel["chosen"].items() if v not in ("sequential T1000 c1",) and not k.startswith("matched false")]
-    chosen = list(dict.fromkeys(chosen))
+    ax.axvline(tgt, color=INK, linestyle=":", linewidth=1.4)
+    lo_y = ax.get_ylim()[0]
+    ax.annotate("tuning target\n(default − 0.5 pp,\ntuning seeds)", (tgt, lo_y + 0.45 * (ax.get_ylim()[1] - lo_y)),
+                textcoords="offset points", xytext=(-6, 0), ha="right", fontsize=10.5, color=INK)
+    ax.set_xlabel("legitimate users completing, %  (separate 24-hour attack-free runs, 65 % conversion)", color=INK, fontsize=11.5)
+    ax.set_ylabel("SMS leaked in 20 min: SUM of four\nattack-profile means (separate attack runs)", color=INK, fontsize=11.5)
+    x0, x1 = ax.get_xlim()
+    ax.set_xlim(x0, x1 + 0.3 * (x1 - x0))
+    handles = [Line2D([], [], marker="o", color=c, linestyle="", markersize=9, label=f) for f, c in fam_col.items()] + \
+              [Line2D([], [], marker="*", color=C["blue"], markersize=13, linestyle="", label="default")]
+    ax.legend(handles=handles, frameon=False, fontsize=10.5, loc="upper left")
+    save(fig, out, "fig6_matched_a")
+    # (b)
     atts = list(M["attack"]["none"])
     alab = {"concentrated_pumper_no_verify": "never verifies", "concentrated_pumper_verifies_instantly": "verifies instantly",
             "concentrated_pumper_verifies_humanlike": "verifies 60 %, human-like", "concentrated_pumper_solves_challenges": "solves challenges"}
+    fig, ax = plt.subplots(figsize=(8.6, 7.0))
+    style(ax)
+    ax.tick_params(labelsize=10.5)
     yy = 0
     yt, yl = [], []
     for a in atts:
         for n in chosen:
             d = M["attack"][n][a]["paired_leak_vs_default"]
-            axes[1].errorbar(d[0], yy, xerr=err(d), fmt="o", color=fam_col[family(n)], ecolor=INK2, markersize=8, capsize=2)
+            ax.errorbar(d[0], yy, xerr=err(d), fmt="o", color=fam_col[family(n)], ecolor=INK2, markersize=8, capsize=2)
             yt.append(yy); yl.append(f"{alab[a]} — {_short(n)}")
             yy += 1
         yy += 0.8
-    axes[1].axvline(0, color=INK, linewidth=1.4)
-    axes[1].set_yticks(yt); axes[1].set_yticklabels(yl, fontsize=11, color=INK); axes[1].invert_yaxis()
-    axes[1].set_xlabel("SMS leaked: setting − default, paired per seed\n(negative = leaks less)", color=INK, fontsize=11.5)
-    handles = [Line2D([], [], marker="o", color=c, linestyle="", markersize=9, label=f) for f, c in fam_col.items()] + \
-              [Line2D([], [], marker="*", color=C["blue"], markersize=13, linestyle="", label="default")]
-    axes[0].legend(handles=handles, frameon=False, fontsize=10.5, loc="upper left")
-    fig.patch.set_facecolor(SURFACE)
-    for sf in (top, bottom):
-        sf.set_facecolor(SURFACE)
-    fig.savefig(out / "fig6_matched.png", dpi=220, bbox_inches="tight"); fig.savefig(out / "fig6_matched.svg", bbox_inches="tight")
-    fig.savefig(out / "fig6_matched.pdf", bbox_inches="tight")
-    plt.close(fig)
+    ax.axvline(0, color=INK, linewidth=1.4)
+    ax.set_yticks(yt); ax.set_yticklabels(yl, fontsize=11, color=INK); ax.invert_yaxis()
+    ax.set_xlabel("SMS leaked: setting − default, paired per seed\n(negative = leaks less)", color=INK, fontsize=11.5)
+    save(fig, out, "fig6_matched_b")
 
 
-def fig7_counter_boundary(CS, out):
+def unfitted_estimates(runs_path, kind="spreading, never verifies", minutes=60):
+    """Equations 2 and 3 for the E4 security runs, from each run's offered requests N, requested blocks B
+    and offered rate N / minutes, with tau from the configuration (otp_guard.evaluation.model); means over
+    seeds per block count. Nothing is fitted to E4."""
+    import gzip, math, sys
+    sys.path.insert(0, str(ROOT / "src"))
+    from otp_guard.config import Config
+    from otp_guard.evaluation.model import predicted_leak
+    cfg, acc = Config(), {}
+    with gzip.open(runs_path, "rt") as f:
+        for line in f:
+            r = json.loads(line)
+            if r.get("study") != "E4" or r["index"][0] != "security":
+                continue
+            _, nb, k, mins, pol, _s = r["index"]
+            if k != kind or mins != minutes or pol != "counter graded 4/10 min":
+                continue
+            N, B = r["attack"]["requests"], r["attacker_blocks_requested"]
+            acc.setdefault(nb, []).append((predicted_leak(cfg, B, N / mins, N, False), min(N, 4 * B * math.ceil(mins / 10))))
+    return {nb: {"tests_estimate": sum(x for x, _ in v) / len(v), "counter_bound": sum(y for _, y in v) / len(v)} for nb, v in acc.items()}
+
+
+def fig7_counter_boundary(CS, out, runs_path=ROOT / "results" / "counter_study_runs.jsonl.gz"):
     """The counter study's operating boundary (results/counter_study.json, E4): (a) completion lost
     because of the policy among the hot blocks' users, against the legitimate rate on those blocks,
     attack-free and under a pumper on the same blocks, at the modelled WhatsApp reachability; (b) leakage
     against the number of blocks a pumper spreads over, for the counter, the default and no policy."""
     E4 = CS["E4"]
-    fig, axes = plt.subplots(2, 1, figsize=(9, 10.5))                   # stacked: each panel the full text width
-    style(axes[0], "(a) service: loss among the hot blocks' users (70 % WhatsApp)")
-    style(axes[1], "(b) security: leakage against the pumper's spread (estimates at the sampled spreads only; the crossing lies between 3 and 10 blocks)")
+    fig, axes = plt.subplots(2, 1, figsize=(9, 11.5))                   # stacked: each panel the full text width
+    style(axes[0], "(a) service: loss among the hot blocks' users (70 % WhatsApp); dotted line: the quota, 4 per 10 min")
+    style(axes[1], "(b) security: leakage against the pumper's spread")
     for ax in axes:
         ax.tick_params(labelsize=10.5); ax.title.set_fontsize(12)
     rates = sorted({float(k.split("|")[0]) for k in E4["service"]})
@@ -398,8 +412,6 @@ def fig7_counter_boundary(CS, out):
                          label=f"{_short(pol)}, {'attack-free' if cond == 'benign' else 'pumper on the same blocks'}")
             axes[0].fill_between(rates, lo, hi, color=col, alpha=0.12, linewidth=0)
     axes[0].axvline(4, color=INK2, linestyle=":", linewidth=1.2)
-    axes[0].annotate("counter quota:\n4 sends per 10 min", (4, axes[0].get_ylim()[1]), textcoords="offset points", xytext=(5, -30),
-                     fontsize=10.5, color=INK)
     axes[0].set_xscale("log"); axes[0].set_xticks(rates); axes[0].set_xticklabels([f"{r:g}" for r in rates])
     axes[0].xaxis.set_minor_formatter(NullFormatter())
     axes[0].set_xlabel("legitimate sends per hot block per 10 minutes", color=INK, fontsize=11.5)
@@ -411,25 +423,17 @@ def fig7_counter_boundary(CS, out):
             ys = [E4["security"][f"{b}|{kind}|60|{pol}"]["leaked_total"][0] for b in blocks]
             axes[1].plot(blocks, ys, color=col, marker=mk, markersize=7, linewidth=2, linestyle="-" if mk == "o" else "--",
                          label=f"{_short(pol)}: {kind}")
-    # the two simplified estimates, evaluated at the sampled spreads only (the crossing between 3 and 10 blocks is
-    # bracketed, not located): the counter's allowance 4 x B x 6 capped at the volume N the pumper offered in the
-    # counter arm, and the sequential tests' first-verdict estimate 5 x B + lambda tau, its intercept fitted on the
-    # 3-block cell (sixth-round review, M2)
-    sec = E4["security"]
-    kind = "spreading, never verifies"
-    n_ctr = [sec[f"{b}|{kind}|60|counter graded 4/10 min"]["requests"][0] for b in blocks]
-    n_seq = [sec[f"{b}|{kind}|60|sequential T1000 c1"]["requests"][0] for b in blocks]
-    k = 5
-    intercept = sec[f"3|{kind}|60|sequential T1000 c1"]["leaked_total"][0] - k * 3
-    axes[1].plot(blocks, [min(n, 4 * b * 6) for b, n in zip(blocks, n_ctr)], color=C["green"], linestyle=":", linewidth=1.6,
-                 marker="x", markersize=9, label="counter allowance 4 x B x 6, capped at the offered volume N (Eq. 3)")
-    axes[1].plot(blocks, [min(n, k * b + intercept) for b, n in zip(blocks, n_seq)], color=C["blue"], linestyle=":", linewidth=1.6,
-                 marker="x", markersize=9, label=f"sequential first-verdict estimate 5 x B + {intercept:.0f} (Eq. 2; intercept fitted on B = 3)")
+    est = unfitted_estimates(runs_path)   # full-rate pumper, 60 minutes
+    # evaluated at the sampled spreads only (markers); the dotted joins do not locate a crossover
+    axes[1].plot(blocks, [est[b]["counter_bound"] for b in blocks], color=C["green"], linestyle=":", linewidth=1.6, marker="x", markersize=9,
+                 label="counter bound (Eq. 3), per run")
+    axes[1].plot(blocks, [est[b]["tests_estimate"] for b in blocks], color=C["blue"], linestyle=":", linewidth=1.6, marker="x", markersize=9,
+                 label="tests' first-verdict estimate (Eq. 2), per run")
     axes[1].set_xscale("log"); axes[1].set_xticks(blocks); axes[1].set_xticklabels([str(b) for b in blocks])
     axes[1].xaxis.set_minor_formatter(NullFormatter())
     axes[1].set_xlabel("blocks the pumper spreads over (60-minute attack)", color=INK, fontsize=11.5)
     axes[1].set_ylabel("SMS leaked in 60 minutes", color=INK, fontsize=11.5)
-    axes[1].legend(frameon=False, fontsize=10, loc="upper left")
+    axes[1].legend(frameon=False, fontsize=10, loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2)
     save(fig, out, "fig7_counter_boundary")
 
 
@@ -440,14 +444,14 @@ def main():
     a = ap.parse_args()
     R = json.loads((pathlib.Path(a.results) / "evaluation.json").read_text())
     out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
-    for old in out.glob("fig6_detectors.*"):
+    for old in list(out.glob("fig6_detectors.*")) + list(out.glob("fig6_matched.*")):
         old.unlink()
     for fn in (fig1_leakage, fig2_ablation, fig3_dilution, fig4_tradeoff, fig5_spread, fig6_matched):
         fn(R, out)
         print("wrote", fn.__name__)
     cs = pathlib.Path(a.results) / "counter_study.json"
     if cs.exists():
-        fig7_counter_boundary(json.loads(cs.read_text()), out)
+        fig7_counter_boundary(json.loads(cs.read_text()), out, pathlib.Path(a.results) / "counter_study_runs.jsonl.gz")
         print("wrote fig7_counter_boundary")
 
 
