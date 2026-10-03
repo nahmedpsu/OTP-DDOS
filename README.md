@@ -171,6 +171,8 @@ tests/
   unit/                         per step, per adapter, factory, the review counterexamples, simulator invariants
   integration/                  HTTP API, end-to-end scenarios, concurrency on a real redis-server (two instances)
 paper/
+  main.tex, refs.bib            the manuscript (Computers & Security); `make -C paper` builds main.pdf
+  rebuttal_round4.js            the current response letter (docx built from it; earlier rounds kept)
   figures.py                    the manuscript figures, drawn from results/ (see paper/README.md)
 scripts/
   run_scenarios.py              attack scenarios -> results/scenarios.{md,json}
