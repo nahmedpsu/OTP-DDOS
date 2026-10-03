@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.8.0 (unreleased)
+## 2.8.0 (2026-10-03)
 
 Repairs and studies from the fourth-round review (`docs/evaluation.md`, "What changed after the
 fourth-round report"):
