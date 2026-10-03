@@ -19,6 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt                                          # noqa: E402
 from matplotlib.colors import TwoSlopeNorm, LinearSegmentedColormap      # noqa: E402
 from matplotlib.lines import Line2D                                      # noqa: E402
+from matplotlib.ticker import NullFormatter                              # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SURFACE, INK, INK2, GRID, AXIS = "#fcfcfb", "#0b0b0b", "#52514e", "#e6e5e0", "#c3c2b7"
@@ -47,10 +48,10 @@ def style(ax, title=None):
         ax.set_title(title, loc="left", color=INK)       # panel labels only; figure captions are in the manuscript
 
 
-def save(fig, out, name):
+def save(fig, out, name, rect=None):
     fig.patch.set_facecolor(SURFACE)
-    fig.tight_layout()
-    fig.savefig(out / f"{name}.png", dpi=220); fig.savefig(out / f"{name}.svg")
+    fig.tight_layout(rect=rect) if rect else fig.tight_layout()
+    fig.savefig(out / f"{name}.png", dpi=220); fig.savefig(out / f"{name}.svg"); fig.savefig(out / f"{name}.pdf")
     plt.close(fig)
 
 
@@ -82,8 +83,9 @@ def fig1_leakage(R, out):
                     error_kw=dict(ecolor=INK, elinewidth=1.1, capsize=3), edgecolor=SURFACE, linewidth=1.5)
         ax.set_yticks(y); ax.set_yticklabels([ATTACKER_LABELS[n] for n in names], color=INK, fontsize=10)
         ax.invert_yaxis(); ax.set_xlim(0, 105); ax.set_xlabel(xl, color=INK, fontsize=9.5)
-    axes[0].legend(frameon=False, fontsize=9, loc="lower right")
-    save(fig, out, "fig1_leakage")
+    h, lab = axes[0].get_legend_handles_labels()            # below the panels: no bar is covered
+    fig.legend(h, lab, frameon=False, fontsize=9.5, loc="lower center", ncol=2)
+    save(fig, out, "fig1_leakage", rect=(0, 0.06, 1, 1))
 
 
 def fig2_ablation(R, out):
@@ -322,7 +324,7 @@ def fig6_matched(R, out):
         axes[0].errorbar(leg[0], y, xerr=err(leg), yerr=[[y - ylo], [yhi - y]], fmt="*" if is_def else "o", color=col, ecolor=INK2,
                          markersize=15 if is_def else 9, elinewidth=0.9, capsize=2, markeredgecolor=INK if is_def else SURFACE, zorder=3)
         for gk, members in groups.items():                  # points closer than the label size share one label
-            if abs(gk[0] - leg[0]) < 0.06 and abs(gk[1] - y) < 120:
+            if abs(gk[0] - leg[0]) < 0.06 and abs(gk[1] - y) < 200:
                 members.append((n, leg[0], y))
                 break
         else:
@@ -387,6 +389,7 @@ def fig7_counter_boundary(CS, out):
     axes[0].annotate("counter quota:\n4 sends per 10 min", (4, axes[0].get_ylim()[1]), textcoords="offset points", xytext=(5, -26),
                      fontsize=9, color=INK)
     axes[0].set_xscale("log"); axes[0].set_xticks(rates); axes[0].set_xticklabels([f"{r:g}" for r in rates])
+    axes[0].xaxis.set_minor_formatter(NullFormatter())
     axes[0].set_xlabel("legitimate sends per hot block per 10 minutes", color=INK, fontsize=10)
     axes[0].set_ylabel("completions lost because of the policy,\npp of the hot blocks' users", color=INK, fontsize=10)
     axes[0].legend(frameon=False, fontsize=8.5, loc="upper left")
@@ -397,6 +400,7 @@ def fig7_counter_boundary(CS, out):
             axes[1].plot(blocks, ys, color=col, marker=mk, markersize=7, linewidth=2, linestyle="-" if mk == "o" else "--",
                          label=f"{_short(pol)}: {kind}")
     axes[1].set_xscale("log"); axes[1].set_xticks(blocks); axes[1].set_xticklabels([str(b) for b in blocks])
+    axes[1].xaxis.set_minor_formatter(NullFormatter())
     axes[1].set_xlabel("blocks the pumper spreads over (60-minute attack)", color=INK, fontsize=10)
     axes[1].set_ylabel("SMS leaked in 60 minutes", color=INK, fontsize=10)
     axes[1].legend(frameon=False, fontsize=8.5, loc="upper left")
