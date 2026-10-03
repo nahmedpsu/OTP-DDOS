@@ -55,6 +55,27 @@ end
 return 1
 """
 
+# KEYS[1] = sorted set; ARGV = member, expected score. Remove the member only if its score is still
+# the one the caller read: a member re-added meanwhile with a new score (a rescheduled timeout) stays.
+LUA_ZREM_IF_SCORE = """
+local s = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if s and tonumber(s) == tonumber(ARGV[2]) then
+    redis.call('ZREM', KEYS[1], ARGV[1])
+    return 1
+end
+return 0
+"""
+
+# KEYS[1] = counter; ARGV[1] = units. Give units back only while the counter exists: a window that
+# has already expired must not come back as a negative count without a TTL.
+LUA_RELEASE = """
+if redis.call('EXISTS', KEYS[1]) == 1 then
+    redis.call('DECRBY', KEYS[1], ARGV[1])
+    return 1
+end
+return 0
+"""
+
 LUA_TRY_ACQUIRE_ALL = """
 for i = 1, #KEYS do
     local cur = tonumber(redis.call('GET', KEYS[i]) or '0')
@@ -242,6 +263,20 @@ class MemoryStore:
             if v is not None:
                 v[0].pop(member, None)
 
+    def zscore(self, key, member):
+        with self.lock:
+            v = self._live(key)
+            return None if v is None else v[0].get(member)
+
+    def zrem_if_score(self, key, member, score):
+        """Remove member only if its score is still `score` (see LUA_ZREM_IF_SCORE)."""
+        with self.lock:
+            v = self._live(key)
+            if v is not None and score is not None and v[0].get(member) == score:
+                del v[0][member]
+                return True
+            return False
+
     def zremrangebyscore(self, key, lo, hi):
         with self.lock:
             v = self._live(key)
@@ -340,6 +375,8 @@ class RedisStore:
         self._reserve = self.r.register_script(LUA_TRY_RESERVE)
         self._reserve_tiered = self.r.register_script(LUA_TRY_RESERVE_TIERED)
         self._batch_once = self.r.register_script(LUA_HINCRBY_BATCH_ONCE)
+        self._zrem_if_score = self.r.register_script(LUA_ZREM_IF_SCORE)
+        self._release = self.r.register_script(LUA_RELEASE)
         self.round_trips = 0        # one per method call below; a pipeline counts once
 
     @staticmethod
@@ -459,6 +496,17 @@ class RedisStore:
         self.round_trips += 1
         self.r.zrem(key, member)
 
+    def zscore(self, key, member):
+        self.round_trips += 1
+        s = self.r.zscore(key, member)
+        return None if s is None else float(s)
+
+    def zrem_if_score(self, key, member, score):
+        self.round_trips += 1
+        if score is None:
+            return False
+        return int(self._zrem_if_score(keys=[key], args=[member, repr(float(score))])) == 1
+
     def zremrangebyscore(self, key, lo, hi):
         self.round_trips += 1
         self.r.zremrangebyscore(key, lo, hi)
@@ -493,7 +541,7 @@ class RedisStore:
 
     def release(self, key, units=1):
         self.round_trips += 1
-        self.r.decrby(key, int(units))
+        self._release(keys=[key], args=[int(units)])
 
     def smembers(self, key):
         self.round_trips += 1

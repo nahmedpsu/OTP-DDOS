@@ -126,3 +126,25 @@ def test_internal_timeout_tick_requires_credential(api):
     h.clock.advance(601)
     assert c.post("/internal/timeouts/run", headers={"X-Service-Credential": "svc-secret"}).status_code == 200
     assert h.p.rep.get("num:966501234567").failed == 1
+
+
+def test_stage_one_challenge_over_http(api):
+    """The graded destination counter's stage 1 through the HTTP API (fifth-round M9): past the limit
+    a web client gets the challenge response, and its retry with a solved challenge is sent."""
+    from otp_guard.evaluation.runner import MATCHED
+    h, c = api
+    _, feats, cfg = MATCHED["counter graded 1/10 min"]
+    h.cfg.features = set(feats)
+    for k, v in cfg.items():
+        setattr(h.cfg, k, v)
+    h.lift_source_caps()
+    tok = web_session(c)
+    assert otp(c, tok, mobile="966501230001").json()["status"] == "ok"
+    assert h.sms_sent == 1
+    tok2 = web_session(c)
+    r = otp(c, tok2, mobile="966501230002", ip="198.51.100.11")
+    assert r.status_code == 200 and r.json()["status"] == "challenge"
+    assert h.sms_sent == 1
+    r = otp(c, tok2, mobile="966501230002", ip="198.51.100.11", challenge_proof="challenge-ok")
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+    assert h.sms_sent == 2

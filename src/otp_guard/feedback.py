@@ -19,8 +19,11 @@ so a decision and the state it depends on cannot be separated by another worker:
 Effects, at most once, and once unless abandoned
 -----------------------------------------------
 A transition does not apply its effects directly. It records them in the entry, in the same
-compare-and-set, as a batch with a sequence number and a timestamp; the caller then applies the
-batch and removes it. Before a transition the caller writes a write-ahead intent (otp:intents);
+compare-and-set, as a batch with a sequence number and the transition's time; the caller then
+applies the batch and removes it. Effects are applied at the recorded time, not at the time of a
+replay: an outage observation is inserted at its own time (the detector's windows end now, so a
+replayed old observation cannot enter the current window) and a reputation increment lands in its
+own hour (fifth-round review, M8; up to 2.8.0 a replay used the recovery time). Before a transition the caller writes a write-ahead intent (otp:intents);
 run_due_timeouts() sweeps intents older than RECOVER_AFTER_S and applies whatever batches are still
 recorded, so a process that dies between the compare-and-set and the end of its effects leaves work
 a later sweep completes.
@@ -28,7 +31,9 @@ a later sweep completes.
 Applying is idempotent within a replay horizon H = replay_horizon_s() (the entry's lifetime,
 2 x otp_ttl): the reputation increments of a batch are one once-only script
 (store.hincrby_batch_once, keyed by log id and batch number, marker kept H + 1 h), and block-test
-events carry an event id the block document remembers for H + 60 s. Identifiers are kept by age,
+events carry an event id the block document remembers for id_retention_s() = H + otp_ttl + 60 s:
+a reversal can be recorded up to otp_ttl after the failure it names and is itself replayable for H,
+so the failure's id outlives every replay of its reversal. Identifiers are kept by age,
 not by count, so no volume of later events can push one out early (an earlier version kept the
 last 256 and could count a replayed failure twice). A batch is applied only while it is younger than
 H; an older one (possible only if its entry was kept alive by later writes and no sweep ran for
@@ -37,24 +42,17 @@ remaining effects (outage records, the trusted-number set, timeout scheduling, d
 are idempotent by construction. So: every recorded effect is applied at most once, and exactly once
 if a sweep runs within H of the transition. Out of scope: an entry that expires before a sweep
 reaches it (its effects are lost, not doubled), and Redis Cluster (the scripts assume one shard).
-The size of a block document grows with the events it receives within H, which the hourly SMS
-ceiling bounds.
+The size of a block document grows with the events it receives within its retention, which the
+hourly SMS ceiling bounds.
 
-Two races are known, bounded and not closed (fourth-round review, M15); neither is exercised by the
-single-threaded simulation. (1) A reversal whose failure id has expired. A failure's block-event id
-lives H + 60 s from the failure; a reversal (a late verification, possible until the code expires,
-i.e. up to otp_ttl - resolution_timeout_s after the failure) recorded at time t stays replayable
-until t + H. If the process died after recording the reversal and the first sweep reaches it after
-the failure's id is gone but before the reversal is stale, the reversal finds no failure to
-subtract, records a tombstone and leaves the failure counted. That needs no sweep for at least
-H + 60 s - (t - t_fail): about 13 minutes in the worst case (a verification eight minutes after
-the failure), and no gap at all when the verification follows the failure within 60 s. A fix would
-keep failure ids for H + otp_ttl + 60 s. (2) The timeout worker's read/act separation.
-run_due_timeouts() removes a send's member from otp:timeouts after its transition; a correcting
-receipt that reopens the send between the two steps re-schedules the resolution timeout under the
-same member, and the removal deletes it. The reopened send is then never resolved 'failed' by
-timeout: its failure is lost, not doubled (a code entry still verifies it; the entry expires). A
-fix would remove the member only if its score is unchanged (one script).
+Two races disclosed in 2.8.0 are closed in 2.8.1 (fifth-round review, M9; regression tests in
+tests/unit/test_fifth_round.py and on a real Redis). (1) A reversal whose failure id had expired:
+ids lived H + 60 s from the failure, so a late verification whose first sweep came more than about
+13 minutes after it found no failure to subtract; ids now live H + otp_ttl + 60 s. (2) The timeout
+worker's read/act separation: run_due_timeouts() removed a send's member from otp:timeouts after
+its transition, so a correcting receipt that reopened the send in between lost its rescheduled
+timeout; the member is now removed only if its due time is unchanged (store.zrem_if_score, one
+script on Redis).
 
 Step 11 is not one transaction (budget reservation, audit record, `sent` counters, OTP entry,
 enqueue). Its crash semantics: a crash before on_sent leaves a reserved budget unit and possibly
@@ -103,6 +101,12 @@ class FeedbackLoop:
     def replay_horizon_s(self):
         """How long after a transition its recorded effects may still be applied (see the module notes)."""
         return self._ttl()
+
+    def id_retention_s(self):
+        """How long a block remembers an event identifier: the replay horizon, plus the code lifetime (a
+        reversal can be recorded up to otp_ttl after the failure it reverses and is itself replayable for
+        the horizon), plus a margin for clock skew between workers."""
+        return self.replay_horizon_s() + self.p.cfg.otp_ttl + self.SEEN_MARGIN_S
 
     # ---------------------------------------------------------------- send side
     @staticmethod
@@ -166,8 +170,9 @@ class FeedbackLoop:
         cfg = self.p.cfg
         tseq = batch["tseq"]
         now = self.p.clock.now()
+        at = batch.get("at", now)                            # the transition's time: a replay keeps it
         suspended = None
-        stale = now - batch.get("at", now) > self.replay_horizon_s()
+        stale = now - at > self.replay_horizon_s()
         if stale:
             self.p.store.incr(self.ABANDONED)
         for eff in batch["effects"]:
@@ -175,9 +180,9 @@ class FeedbackLoop:
             if stale and kind in ("rep", "block", "block_unfail"):
                 continue                                     # identifiers may be gone: never risk a second application
             if kind == "outage":
-                self._outage_record(rec, eff[1], now)
+                self._outage_record(rec, eff[1], at, now)
             elif kind == "rep":
-                self.p.rep.incr_batch_once(f"fx:{log_id}:{tseq}", [tuple(op) for op in eff[1]], self._ttl() + 3600)
+                self.p.rep.incr_batch_once(f"fx:{log_id}:{tseq}", [tuple(op) for op in eff[1]], self._ttl() + 3600, at=at)
             elif kind == "block":
                 if suspended is None:
                     suspended = self._suspension_decision(log_id, batch, rec)
@@ -339,9 +344,12 @@ class FeedbackLoop:
         batches a stopped process left behind."""
         now = self.p.clock.now()
         for member in list(self.p.store.zrangebyscore(self.TIMEOUTS, float("-inf"), now)):
+            due = self.p.store.zscore(self.TIMEOUTS, member)
             kind, _ = self._transition(int(member), self._timeout_decide())
             if kind != "not_due":
-                self.p.store.zrem(self.TIMEOUTS, member)
+                # a correcting receipt may have reopened the send and rescheduled it under the same
+                # member after the transition: remove the member only if its due time is unchanged
+                self.p.store.zrem_if_score(self.TIMEOUTS, member, due)
         self.recover()
 
     # ---------------------------------------------------------------- verify endpoint
@@ -423,20 +431,23 @@ class FeedbackLoop:
     def _carrier(self, rec):
         return rec.get("prefix") or "unknown"
 
-    def _outage_record(self, rec, event, now):
+    def _outage_record(self, rec, event, at, now=None):
         """event: 'delivered' | 'undelivered' (from receipts: the carrier's own report), 'failed' (any
         client's code was not entered) or 'kg_verified' | 'kg_failed' (outcomes of clients with verified
         history, whom an attacker cannot impersonate). The delivery signal uses all sends; the
         conversion signal uses only known-good clients, so a decoy flood cannot buy a suspension.
-        Idempotent per (event, send): the sets are keyed by log id."""
+        Idempotent per (event, send): the sets are keyed by log id. The event is inserted at its own time
+        `at` (the transition's), and the windows end at `now`: a replay after a crash cannot move an old
+        observation into the current window (fifth-round review, M8)."""
         cfg = self.p.cfg
+        now = at if now is None else now
         c = self._carrier(rec)
         windows = {"delivered": cfg.outage_window_s, "undelivered": cfg.outage_window_s, "failed": cfg.outage_kg_window_s,
                    "kg_verified": cfg.outage_kg_window_s, "kg_failed": cfg.outage_kg_window_s, "blocks": cfg.outage_kg_window_s}
-        self.p.store.zadd(f"outage:{event}:{c}", now, str(rec["log_id"]), ttl=2 * windows[event])
+        self.p.store.zadd(f"outage:{event}:{c}", at, str(rec["log_id"]), ttl=2 * windows[event])
         self.p.store.zremrangebyscore(f"outage:{event}:{c}", float("-inf"), now - windows[event])   # each key trims itself
         if event in ("undelivered", "failed", "kg_failed"):
-            self.p.store.zadd(f"outage:blocks:{c}", now, rec["phone_number"][:cfg.destination_block_digits], ttl=2 * windows["blocks"])
+            self.p.store.zadd(f"outage:blocks:{c}", at, rec["phone_number"][:cfg.destination_block_digits], ttl=2 * windows["blocks"])
             self.p.store.zremrangebyscore(f"outage:blocks:{c}", float("-inf"), now - windows["blocks"])
         if self.p.store.exists(f"outage:{c}"):
             return
@@ -501,7 +512,7 @@ class FeedbackLoop:
             seen = st.get("seen") or {}
             if isinstance(seen, list):                       # documents written before identifiers carried a time
                 seen = {i: now for i in seen}
-            keep_after = now - self.replay_horizon_s() - self.SEEN_MARGIN_S
+            keep_after = now - self.id_retention_s()
             seen = {i: t for i, t in seen.items() if t > keep_after}
             if event_id is not None and event_id in seen:
                 return None                                  # already applied

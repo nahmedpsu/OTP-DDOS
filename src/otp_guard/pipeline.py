@@ -49,6 +49,7 @@ class Request:
     rep_cache: dict = field(default_factory=dict)
     rep_split: dict = field(default_factory=dict)
     number_claims: list = field(default_factory=list)
+    source_cap_claims: list = field(default_factory=list)   # Step 9 cap counters this request incremented
     count_stage: int = None            # set by the graded per-block counter (block_count_action = 'graded')
     known_good: bool = None            # decided once per request (is_known_good)
     risk_score: float = None
@@ -735,7 +736,17 @@ class Pipeline:
             return True
         limits = [self.rl(f"sms_cap_per_minute_{p}:limit", f"{req.source}:{cc}", (minute_cap, 60)),
                   self.rl(f"sms_cap_per_hour_{p}:limit", f"{req.source}:{cc}", (hour_cap, 3600))]
-        return RateLimit.try_acquire_all(limits)
+        ok = RateLimit.try_acquire_all(limits)
+        if ok:
+            req.source_cap_claims = [l.redis_key for l in limits]
+        return ok
+
+    def release_source_caps(self, req):
+        """A request that Step 11 turns into a challenge has sent nothing: like a request challenged at
+        Step 7 (which never reaches Step 9), it does not use the source's SMS caps."""
+        for key in req.source_cap_claims:
+            self.store.release(key, 1)
+        req.source_cap_claims = []
 
     # ---------- Step 10 ----------
     def current_hour(self):
@@ -804,6 +815,7 @@ class Pipeline:
             req.signals.append("block_count_stage1")
             if req.trusted_platform == "web":
                 self.release_number_claims(req)        # the retry with the proof claims the number again
+                self.release_source_caps(req)          # and counts against the source caps then
                 req.tier = "challenge"
                 return Response(200, {"status": "challenge", "challenge": "interactive_recaptcha"},
                                 rejected_at="step11", tier="challenge", risk_score=req.risk_score)

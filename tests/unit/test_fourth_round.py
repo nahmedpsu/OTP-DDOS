@@ -154,17 +154,21 @@ def test_block_effect_is_not_replayed_after_many_later_events(h):
 
 def test_event_identifiers_are_kept_for_the_replay_horizon(h):
     """Identifiers are retained by age, not by count: any number of events inside the horizon are
-    remembered, and an identifier is dropped only after the horizon has passed."""
+    remembered, and an identifier is dropped only after its retention (the replay horizon plus the
+    code lifetime plus a margin, so a late reversal's own replay still finds it; 2.8.1) has passed."""
     _open(h)
     fb = h.p.feedback
     for i in range(2000):
         fb._block_event("block:96650778", verified=False, event_id=f"e{i}")
     fb._block_event("block:96650778", verified=False, event_id="e0")       # a replay inside the horizon
     assert fb.block_llr("block:96650778")[2][1] == 2000
-    h.clock.advance(fb.replay_horizon_s() + 61)
+    h.clock.advance(fb.replay_horizon_s() + 61)                            # past the horizon, inside the retention
+    fb._block_event("block:96650778", verified=False, event_id="mid")
+    assert "e0" in h.p.store.get("blocktest:block:96650778")["seen"]
+    h.clock.advance(fb.id_retention_s() - fb.replay_horizon_s())
     fb._block_event("block:96650778", verified=False, event_id="late")
     st = h.p.store.get("blocktest:block:96650778")
-    assert len(st["seen"]) == 1                                            # the old identifiers are gone
+    assert set(st["seen"]) == {"mid", "late"}                              # the old identifiers are gone
 
 
 def test_a_batch_older_than_the_replay_horizon_is_abandoned_not_replayed(h):

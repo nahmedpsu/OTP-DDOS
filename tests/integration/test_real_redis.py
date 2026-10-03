@@ -15,7 +15,10 @@ What is established here, and only here (the unit suite runs on the memory store
   * the graded destination counter's first boundary holds under concurrent requests from two
     instances (requests past it are challenged), and its second tier admits only solved challenges
     up to twice the limit;
-  * store.update (WATCH/MULTI/EXEC) serialises conflicting writers.
+  * store.update (WATCH/MULTI/EXEC) serialises conflicting writers;
+  * (2.8.1) unsolved requests at the counter's second boundary send nothing; a replayed outage
+    observation keeps its own time; a timeout rescheduled by a correcting receipt during the timeout
+    worker's transition survives; a late reversal recovered 14 minutes later still finds its failure.
 Not established: behaviour under network partitions or a Redis failover, Redis Cluster (the Lua
 scripts assume one shard), and process crashes at points other than the injected ones.
 Not established anywhere in this repository: behaviour against live vendors (attestation, CAPTCHA,
@@ -296,3 +299,104 @@ def test_token_bucket_first_boundary_across_instances(redis_url):
     _run([worker(k) for k in range(8)])
     assert sum(r.channel == "sms" and r.rejected_at is None for r in out) == 4
     assert sum(r.tier == "challenge" for r in out) == 4
+
+
+# ---------------- fifth round (2.8.1) ----------------
+
+class _Crash(Exception):
+    pass
+
+
+def test_graded_counter_unsolved_at_second_boundary_across_instances(redis_url):
+    """With the block at twice its limit (four sends, four solved challenges), six concurrent unsolved
+    requests split over two instances send nothing and leave the count at 8."""
+    h, pipes = _counter_instances(redis_url)
+    for i in range(4):
+        pipes[0].process(_req(h, i))
+    for i in range(4):
+        pipes[1].process(_with_proof(_req(h, 50 + i)))
+    reqs = [_req(h, 100 + i) for i in range(6)]
+    _gate_after_step5(pipes, len(reqs))
+    out, lock = [], threading.Lock()
+    def worker(k):
+        def go():
+            r = pipes[k % 2].process(reqs[k])
+            with lock: out.append(r)
+        return go
+    _run([worker(k) for k in range(len(reqs))])
+    assert sum(r.channel == "sms" for r in out) == 0
+    assert int(pipes[0].store.get(pipes[0].block_count_key(reqs[0].mobile))) == 8
+
+
+def _with_proof(req):
+    req.challenge_proof = "challenge-ok"
+    return req
+
+
+def test_replayed_outage_event_keeps_its_time_across_instances(redis_url):
+    """Fifth-round M8: instance 0 records a negative receipt in the outage detector and dies before
+    clearing the batch; 601 s later instance 1's sweep completes the batch. The old observation must
+    not enter the current 600-s window."""
+    h, pipes = two_instances(redis_url)
+    h.cfg.block_tests = ()
+    r = pipes[0].process(_req(h, 11, block="96650448"))
+    fb0 = pipes[0].feedback
+    orig = fb0._outage_record
+    def dying(*a, **k):
+        fb0._outage_record = orig
+        orig(*a, **k)
+        raise _Crash()
+    fb0._outage_record = dying
+    with pytest.raises(_Crash):
+        fb0.on_delivery(r.log_id, False)
+    key = f"outage:undelivered:{fb0._carrier(pipes[0].sms_history.get(r.log_id))}"
+    h.clock.advance(h.cfg.outage_window_s + 1)
+    assert pipes[1].feedback.recover() >= 1
+    now = h.clock.now()
+    assert pipes[1].store.zcount_many([key], now - h.cfg.outage_window_s, now) == [0]
+
+
+def test_timeout_rescheduled_during_the_timeout_transition_across_instances(redis_url):
+    """Fifth-round M9: instance 0's timeout worker resolves a send as undelivered; before it removes
+    the timeout member, a correcting receipt through instance 1 reopens the send and reschedules it.
+    The rescheduled timeout must survive and resolve the send later."""
+    h, pipes = two_instances(redis_url)
+    h.cfg.block_tests = ()
+    r = pipes[0].process(_req(h, 12, block="96650449"))
+    h.clock.advance(h.cfg.receipt_grace_s + 1)
+    fb0, fb1 = pipes[0].feedback, pipes[1].feedback
+    orig = fb0._transition
+    def interleaved(log_id, decide):
+        out = orig(log_id, decide)
+        fb0._transition = orig
+        assert fb1.on_delivery(log_id, True) == "reopened"
+        return out
+    fb0._transition = interleaved
+    fb0.run_due_timeouts()
+    assert str(r.log_id) in pipes[1].store.zrangebyscore(fb1.TIMEOUTS, float("-inf"), float("inf"))
+    h.clock.advance(min(h.cfg.resolution_timeout_s, h.cfg.otp_ttl) + 1)
+    fb1.run_due_timeouts()
+    assert pipes[1].store.get(f"otp:code:{r.log_id}")["resolution"] == "failed"
+
+
+def test_late_reversal_after_thirteen_minutes_across_instances(redis_url):
+    """Fifth-round M9: a failure is applied; a late verification through instance 0 dies before its
+    block effect; instance 1's sweep reaches it 14 minutes later. The failure must be reversed."""
+    h, pipes = two_instances(redis_url)
+    h.cfg.block_tests = ()
+    r = pipes[0].process(_req(h, 13, block="96650450"))
+    fb0, fb1 = pipes[0].feedback, pipes[1].feedback
+    fb0.on_delivery(r.log_id, True)
+    h.clock.advance(h.cfg.resolution_timeout_s + 1)
+    fb0.run_due_timeouts()
+    h.clock.advance(h.cfg.otp_ttl - h.cfg.resolution_timeout_s - 10)
+    orig = fb0._apply
+    def dying(log_id, rec, batch):
+        fb0._apply = orig
+        raise _Crash()
+    fb0._apply = dying
+    with pytest.raises(_Crash):
+        fb0.verify(pipes[0].sms_history[r.log_id]["session_id"], r.log_id, fb0.code_for(r.log_id))
+    h.clock.advance(14 * 60)
+    fb1.recover()
+    assert fb1.block_llr("block:96650450")[2][:2] == (1, 0)

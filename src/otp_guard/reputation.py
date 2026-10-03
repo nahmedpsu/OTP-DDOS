@@ -24,9 +24,11 @@ class ReputationStore:
     def incr(self, key, field, by=1):
         self.store.hincrby(f"rep:{key}:{self._hour()}", field, by, ttl=self.BUCKET_TTL)
 
-    def incr_batch_once(self, marker, ops, marker_ttl):
-        """ops: [(key, field, by)]: applied together, at most once per marker while the marker lives (feedback effects)."""
-        h = self._hour()
+    def incr_batch_once(self, marker, ops, marker_ttl, at=None):
+        """ops: [(key, field, by)]: applied together, at most once per marker while the marker lives (feedback effects).
+        `at` is the time of the transition that recorded the effects: a replay after a crash lands in the
+        hour the event belongs to, not the hour of the recovery."""
+        h = self._hour() if at is None else int(at // 3600)
         return self.store.hincrby_batch_once(marker, [(f"rep:{k}:{h}", f, by, self.BUCKET_TTL) for k, f, by in ops], marker_ttl)
 
     def get(self, key):
