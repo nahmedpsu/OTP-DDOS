@@ -40,6 +40,22 @@ reaches it (its effects are lost, not doubled), and Redis Cluster (the scripts a
 The size of a block document grows with the events it receives within H, which the hourly SMS
 ceiling bounds.
 
+Two races are known, bounded and not closed (fourth-round review, M15); neither is exercised by the
+single-threaded simulation. (1) A reversal whose failure id has expired. A failure's block-event id
+lives H + 60 s from the failure; a reversal (a late verification, possible until the code expires,
+i.e. up to otp_ttl - resolution_timeout_s after the failure) recorded at time t stays replayable
+until t + H. If the process died after recording the reversal and the first sweep reaches it after
+the failure's id is gone but before the reversal is stale, the reversal finds no failure to
+subtract, records a tombstone and leaves the failure counted. That needs no sweep for at least
+H + 60 s - (t - t_fail): about 13 minutes in the worst case (a verification eight minutes after
+the failure), and no gap at all when the verification follows the failure within 60 s. A fix would
+keep failure ids for H + otp_ttl + 60 s. (2) The timeout worker's read/act separation.
+run_due_timeouts() removes a send's member from otp:timeouts after its transition; a correcting
+receipt that reopens the send between the two steps re-schedules the resolution timeout under the
+same member, and the removal deletes it. The reopened send is then never resolved 'failed' by
+timeout: its failure is lost, not doubled (a code entry still verifies it; the entry expires). A
+fix would remove the member only if its score is unchanged (one script).
+
 Step 11 is not one transaction (budget reservation, audit record, `sent` counters, OTP entry,
 enqueue). Its crash semantics: a crash before on_sent leaves a reserved budget unit and possibly
 `sent` counts without a send (both conservative); a crash after on_sent and before enqueue leaves

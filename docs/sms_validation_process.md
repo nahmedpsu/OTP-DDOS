@@ -828,7 +828,12 @@ verdict is active is stage 2 whichever worker processed it. Rules: the top of
 `src/otp_guard/feedback.py`. Tests: `tests/unit/test_third_round.py` (interleavings and
 crash injection) and, across two instances on a real Redis, `tests/integration/test_real_redis.py`.
 Not covered: an entry that expires (20 minutes) before the sweep reaches it, network
-partitions, Redis failover and Redis Cluster.
+partitions, Redis failover and Redis Cluster. Two bounded races are known and not closed
+(stated at the top of `feedback.py`): a reversal recovered after the reversed failure's
+event id has expired (a sweep gap of 13 minutes or more after a late verification) leaves
+that failure counted; and a correcting receipt that reopens a send between the timeout
+worker's transition and its removal of the send from the timeout set loses the rescheduled
+resolution timeout, so the send's failure is never counted (lost, not doubled).
 
 **The code travels in the message.** Step 11 generates the code before the send, fills the
 message template (`{code}`), hands the filled message to the sender and stores the code

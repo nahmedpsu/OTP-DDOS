@@ -133,6 +133,9 @@ Each is quantified in [`results/evaluation.md`](results/evaluation.md),
   listed in `CGNAT_ASNS`.
 - **Campaign bursts** deliver 12.5 % under the default source caps until the cap is raised.
 - **VPN users are blocked** by policy, as the problem statement asked.
+- **Two feedback races are open** (bounded and disclosed, not closed): the reversal-recovery
+  window and the timeout-worker/correcting-receipt interleaving under "Delivery receipts and
+  state" below.
 - **Capacity and timing under load.** Under an adversarial mixture at concurrency 128 the
   400 ms floor no longer bounds 81 % of sends, and response time then separates a send from a
   refusal for an observer (88 % best-threshold accuracy on a small sample); see "Performance".
@@ -286,6 +289,11 @@ Other things the evaluation established:
   once if the recovery sweep runs within a 20-minute replay horizon), and the sweep finishes
   them after a crash; graded escalation and crash recovery are tested
   across two instances on a real Redis (`docs/sms_validation_process.md`, "State machine").
+  Two bounded races remain open and are stated at the top of `feedback.py`: a reversal (late
+  verification) that is recovered more than about 13 minutes after it arrived can leave the
+  failure it reverses counted, and a correcting receipt that lands between the timeout worker's
+  transition and its bookkeeping loses that send's resolution timeout (its failure is lost, not
+  doubled). Neither is reached by the single-threaded simulation.
 - **Containment is a property of a finite window**: a run counts as contained only if leakage
   stays at or below 5 % of the attack rate to the end of the run for at least five minutes;
   60-minute runs report survival curves (section F1) and time to first verdict is reported
@@ -361,6 +369,12 @@ requests (the simulation, being single-threaded, was unaffected); a block rememb
 last 256 event ids, so a recovered failure could be counted twice; and a reversal applied
 before the failure it reverses left the failure counted. All three are fixed and covered by
 regression tests (`tests/unit/test_fourth_round.py`, `tests/integration/test_real_redis.py`).
+Erratum: `config/counter_protocol.json` (seed note) and the header of `results/counter_study.md`
+say the 6000-series seeds were never used before that protocol; six of them (6000-6002 and
+6100-6102) had served as the main evaluation's robustness seeds for points 10 and 11
+(`5000 + 100 x point + seed`). The protocol file is kept as committed, because its recorded hash
+would otherwise change; the overlap is stated here, in `CHANGELOG.md`, in `docs/evaluation.md`
+and in a marked line of the generated report. The 300-series seeds are fresh.
 
 **Provenance of the results.** `results/evaluation.json` and `results/counter_study.json` record
 the hash of the code that produced every run, the environment, and whether the invocation was

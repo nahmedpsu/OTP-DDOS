@@ -18,10 +18,12 @@ the defence does; `workload_digest` hashes that trace and the tests assert it eq
 Reactions to the defence (a resend after a code that never came, a threshold-aware carrier's
 choice to verify) are not part of the digest and are counted separately.
 
-Channel fallback. The number's WhatsApp reachability, drawn per request, is written into the
-channel registry the selector reads (svc.channels.whatsapp_numbers) before that request is
-processed: reachable numbers are added, unreachable ones removed. A downgraded first-time client
-is therefore served over WhatsApp with probability `whatsapp_fraction` and refused otherwise.
+Channel fallback. The number's WhatsApp reachability is a stable property of the number by default
+(`whatsapp_mode='per_number'`: a hash of the seed and the number, below `whatsapp_fraction`;
+`'per_request'` draws it per request as versions before 2.8.0 did). It is written into the channel
+registry the selector reads (svc.channels.whatsapp_numbers) before each request is processed:
+reachable numbers are added, unreachable ones removed. A downgraded first-time client is therefore
+served over WhatsApp with probability `whatsapp_fraction` over numbers and refused otherwise.
 Attacker numbers are never registered.
 
 Legitimate users. Each first request creates a user record; its later requests (a challenge retry,

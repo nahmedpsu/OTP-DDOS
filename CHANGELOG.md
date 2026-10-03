@@ -34,6 +34,23 @@ fourth-round report"):
 - **Timing**: per-outcome distributions under the adversarial load mixture with a stated observer
   model and threshold-classifier accuracy.
 - **Figures** redrawn for legibility; Figure 7 (counter boundary); Figure 2 key-effects table.
+- **Open, bounded races (disclosed, not closed; M15).** A reversal recovered after the reversed
+  failure's block-event id has expired (a sweep gap of about 13 minutes or more after a late
+  verification, in the worst case) leaves the failure counted; and a correcting receipt that
+  reopens a send between the timeout worker's transition and its removal of the send from the
+  timeout set loses the rescheduled resolution timeout (the failure is lost, not doubled). Both are
+  stated at the top of `feedback.py` with the fix each would take.
+- **Erratum (seeds).** `config/counter_protocol.json` says the 6000-series held-out seeds were
+  never used before; six of them (6000-6002, 6100-6102) had been the main evaluation's robustness
+  seeds for points 10 and 11 (`5000 + 100 x point + seed`). The protocol file is unchanged so that
+  its recorded hash stands; the overlap is stated in the README, `docs/evaluation.md`, a marked
+  line of `results/counter_study.md` and the report generator. Seeds 300-309 are fresh.
+- **Documentation after the runs.** The simulator docstring says reachability is stable per
+  number (it still said "drawn per request"); the legitimate-conversion calibration cites Twilio's
+  Verify page, which states 68 %+, instead of the blog post, which states no figure. These edits
+  to source text change the code hash relative to the ones recorded in the 2.8.0 results
+  (`ec40cf34...`, `fbf12e7f...`), which identify the code at commit 1c277a0; no behaviour changed,
+  and a `--reuse` of those checkpoints is rejected by design.
 
 ## 2.7.0
 

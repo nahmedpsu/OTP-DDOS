@@ -228,12 +228,23 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
   replay horizon rather than the last 256; a batch older than the horizon is skipped and counted,
   never applied twice; a reversal reaching a block before the failure it reverses leaves a
   tombstone. The guarantee is at most once, and exactly once if the sweep runs within the horizon.
+  Two races remain open, bounded and stated at the top of `feedback.py`: a reversal recovered
+  after the reversed failure's event id has expired (a sweep gap of about 13 minutes or more
+  after a late verification, in the worst case) leaves the failure counted; and a correcting
+  receipt that lands between the timeout worker's transition and its bookkeeping loses that
+  send's resolution timeout (the failure is lost, not doubled). Neither is reached by the
+  single-threaded simulation.
 - **The counter study (M1-M4, M7-M9, M13, M16)** follows `config/counter_protocol.json`, a fresh
   protocol committed and pushed before its runs. It freezes the policies the 2.7.0 comparison
   selected and does not relabel the earlier predeclared study. Chronology: written after the 2.7.0
   results were known; only the seeds (300-309, 6000+) and the shifted workloads it names are new,
   and the generator and attacker family are those developed over the earlier revisions.
-  Results: `results/counter_study.md`.
+  Results: `results/counter_study.md`. Erratum: the protocol's seed note says the 6000-series
+  seeds were never used before; six of them (6000-6002, 6100-6102) had been the main
+  evaluation's robustness seeds for points 10 and 11 (`5000 + 100 x point + seed`). The
+  protocol file is kept as committed (its recorded hash would otherwise change); the overlap is
+  stated here, in the README, in `CHANGELOG.md` and in a marked line of the generated report.
+  The 300-series seeds are fresh.
 - **Simulator realism (M13).** WhatsApp reachability is a stable property of the number (a hash
   of seed and number) instead of a per-request draw; returning account holders carry verified
   fingerprint history as well as a trusted number; the counter study adds hot blocks, a product
@@ -379,7 +390,7 @@ parameter, its value and its source, and marks assumptions. The important ones:
 
 - SMS price 0.1422 USD (Twilio, Saudi Arabia); HLR lookup 0.008 USD; reCAPTCHA Enterprise
   0.001 USD per assessment.
-- Legitimate OTP conversion 80 % (Twilio reports 65 %+ globally; assumed within range).
+- Legitimate OTP conversion 80 % (Twilio's Verify product page reports 68 %+ globally; assumed within range).
 - reCAPTCHA v3 human score distribution Beta(9, 1.5) (assumed; Google publishes none).
 - CAPTCHA solving 0.003 USD per v3 token; residential proxies 3 USD per GB; pumping
   revenue share 20 to 50 % of the termination fee (assumed; public reports give no figure).

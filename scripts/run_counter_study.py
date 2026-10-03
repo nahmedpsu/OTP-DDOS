@@ -259,7 +259,9 @@ def write_markdown(R, path):
          f"committed before these runs): {meta['runs']} simulation runs, {meta['wall_s']:.0f} s wall time, "
          + ("a clean invocation" if pv["invocation"] == "clean" else f"{pv['resumed']} runs resumed from this invocation's checkpoint and "
             f"{pv['reused']} reused, all produced by the same code")
-         + f"; code hash `{pv['code_hash'][:16]}...`. Fresh seeds {meta['seeds'][0]}-{meta['seeds'][-1]} and 6000+ (never used before). "
+         + f"; code hash `{pv['code_hash'][:16]}...`. Fresh seeds {meta['seeds'][0]}-{meta['seeds'][-1]}; held-out family seeds 6000 + 100 x point + k "
+         "(six of them, 6000-6002 and 6100-6102, were also the main evaluation's robustness seeds for points 10 and 11, contrary to the "
+         "protocol's seed note; see the erratum in CHANGELOG.md). "
          "Means with 95 % percentile-bootstrap intervals over seeds; paired differences are bootstrapped per seed and marked * when the "
          "interval excludes zero. *Attributable loss* is net completions lost because of the policy, per request against `none` on the "
          "same offered trace, in percentage points of offered users (positive = lost); *gross* counts are lost and gained separately. "

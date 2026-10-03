@@ -14,8 +14,9 @@ CALIBRATION = {
         "source": "reCAPTCHA Enterprise billing, https://docs.cloud.google.com/recaptcha/docs/billing-information"},
     "legit_conversion": {
         "value": 0.80, "unit": "fraction of legitimate OTP sends that are verified",
-        "source": "Twilio reports a 65 %+ global SMS OTP conversion rate; well-run flows sit higher. "
-                  "0.80 is ASSUMED within that range. https://www.twilio.com/en-us/blog/validate-measure-success-verify-implementation"},
+        "source": "Twilio's Verify product page reports a 68 %+ global conversion rate; well-run flows sit higher. "
+                  "0.80 is ASSUMED within that range. https://www.twilio.com/en-us/user-authentication-identity/verify "
+                  "(how Twilio defines the rate: https://www.twilio.com/en-us/blog/validate-measure-success-verify-implementation)"},
     "legit_verify_delay_s": {
         "value": {"lognormal_median_s": 22, "sigma": 0.6}, "unit": "seconds from delivery to code entry, typed by hand",
         "source": "67 % of users abandon if the code takes over 30 s; with delivery at a median 3 s, a median of 22 s "
