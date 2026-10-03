@@ -1,5 +1,51 @@
 # Changelog
 
+## 2.8.1 (2026-10-03)
+
+Implementation repairs and analyses from the fifth-round review. The recorded 2.8.0 results stand:
+the simulator is single-threaded and never crashes a process, so none of the repaired paths is
+reached in a simulated run, and 102 recorded runs (three per study, every study of both result
+files, long runs included) replayed with 2.8.1 are identical in every recorded field
+(`scripts/check_reproduction.py`, `results/reproduction_check.md`). The code hashes recorded in
+the 2.8.0 results identify commit 1c277a0 (tag v2.8.0).
+
+- **Event time on replay (M8).** A replayed effect batch is applied at its transition's time: an
+  outage observation is inserted at its own time and judged against the window ending now (a
+  replay 601 s later used to move an old delivery failure into the current 600-s window), and a
+  replayed reputation increment lands in its own hour.
+- **Late reversal after the failure's identifier expired (closed; was disclosed in 2.8.0).**
+  Block-event ids are kept for the replay horizon plus the code lifetime plus 60 s.
+- **Timeout worker (closed; was disclosed in 2.8.0).** A timeout member is removed only if its
+  due time is unchanged (`store.zrem_if_score`), so a correcting receipt that reschedules the send
+  during the worker's transition keeps its timeout.
+- **Step 11 challenges and the source caps.** A request that Step 11 turns into a challenge gives
+  back the source-cap counts it took at Step 9, as a request challenged at Step 7 never takes them.
+  Other later refusals keep request-rate semantics (documented).
+- **Release of an expired claim on Redis** gives nothing back instead of creating a negative
+  counter without a TTL.
+- **Tests**: `tests/unit/test_fifth_round.py` (the reviewer's replay diagnostic, the two closed
+  races, the source caps, expired release, the app stage-1 path serially and at Step 11, Step 11's
+  crash semantics; memory and fakeredis), four more real-Redis tests (unsolved requests at the
+  counter's second boundary, replayed outage time, the timeout race, the late reversal), and the
+  HTTP stage-1 path in `tests/integration/test_api.py`. Each new defect test fails on 2.8.0.
+- **Analyses** (`scripts/run_round5_analyses.py`, `results/round5_analyses.md`): selection repeated
+  under each objective on the tuning runs over every setting, with winners outside the original
+  shortlist evaluated on the fresh seeds; claims K1-K5 by attacker; attacked service answered three
+  ways (extra harm against the attacked no-policy arm, degradation against attack-free operation
+  under the same policy, benign cost) with gross losses, gains and cohorts, from 240 new attack-free
+  runs on the E1 traces; the counter's leakage envelope against Equation 1 on the security map.
+- **Timing**: `scripts/load_test.py --holdout N` fits the best latency threshold on one phase-4 run
+  and evaluates it on independent runs (`results/performance_holdout.md`).
+- **Timing result**: three new runs on a 2-vCPU machine (99 % of sends over the floor); a
+  threshold fitted on one run scored 95 to 99.9 % balanced accuracy on each other run.
+- **Dated protocol corrections** in `config/counter_protocol_erratum.md` (the seed note; the
+  burst-12 label); `config/counter_protocol.json` is unchanged, so its recorded hash stands.
+- **Provenance**: `scripts/headline_numbers.py` also maps the re-selection, per-attacker claims,
+  attacked-service and held-out timing numbers (`results/headline_numbers.md`).
+- **Figures** 2, 4, 6 and 7 redrawn for legibility (Figures 4, 6 and 7 stacked to full width;
+  Figure 7 shows the counter's envelope and the leakage estimate). In manuscript revision 5 they
+  are Figures 2, 4, 5 and 6; the spread figure (`fig5_spread`) is kept in the artifact only.
+
 ## 2.8.0 (2026-10-03)
 
 Repairs and studies from the fourth-round review (`docs/evaluation.md`, "What changed after the

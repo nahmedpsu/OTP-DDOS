@@ -84,12 +84,11 @@ Apple-issued attestation from a real device has been run through it.
 The worker's minute tick also runs the feedback recovery sweep: an effect batch whose
 process died is completed after 30 s. Effects are applied at most once, and exactly once
 if the sweep runs within the 20-minute replay horizon; a batch found older than that is
-skipped and counted in `otp:fx:abandoned` (alert on any increase). Run at least one worker,
-and alert on a tick gap of several minutes: two bounded races remain open (top of
-`feedback.py`), one of which needs a sweep gap of 13 minutes or more after a late
-verification to leave a reversed failure counted; the other, a correcting receipt landing
-between the worker's timeout transition and its bookkeeping, loses that send's resolution
-timeout (the failure is lost, never doubled).
+skipped and counted in `otp:fx:abandoned` (alert on any increase). A replayed effect is
+applied at its transition's time. Run at least one worker, and alert on a tick gap of several
+minutes: past the 20-minute horizon an effect is skipped rather than risked twice. (The two
+races disclosed in 2.8.0, a late reversal recovered after 13 minutes and a timeout rescheduled
+during the worker's transition, are closed in 2.8.1.)
 `known_good_budget_per_min` (default off) bounds how many requests per minute per (source,
 country) are granted the verified-history exemption; set it to about twice the measured
 returning-user rate. `receipt_policy = "robust"` (default `standard`) counts a failed

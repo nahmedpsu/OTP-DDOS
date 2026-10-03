@@ -216,6 +216,40 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
   (`tests/integration/test_real_redis.py`), which is the only place those properties are
   established; vendors remain untested live.
 
+## What changed after the fifth-round report
+
+Release 2.8.1. The 2.8.0 results stand; `scripts/check_reproduction.py` replays three recorded runs
+from every study of both result files with the final code and finds them identical in every
+recorded field (`results/reproduction_check.md`).
+
+- **Selection under each objective (M1).** `scripts/run_round5_analyses.py` (part A) makes every
+  setting that meets the tuning target on the E5 tuning runs a candidate, selects under each
+  objective on the tuning runs (summed leakage, worst case, a first-time-loss limit, each attacker
+  alone, 2,000 random mixes) with the original tie-break, freezes the union of winners and
+  evaluates it on the fresh seeds; the 60 union members that had no evaluation runs were run
+  (`results/round5_union_eval_runs.jsonl.gz`). The random mixes are a tuning-data selection only:
+  on evaluation data, a policy with the lowest point estimate for every attacker minimises every
+  nonnegative mixture.
+- **Claims by attacker (M6)** (part B): K1-K5 per carrier, with the points of the failing cells.
+  The 144 cells share workloads and seeds and are not independent samples.
+- **Attacked service, three questions (M2, M3)** (part C): for every E1 arm, extra harm against
+  the attacked no-policy arm, degradation against attack-free operation under the same policy
+  (240 new attack-free runs on the E1 traces, `results/round5_attack_free_runs.jsonl.gz`) and the
+  benign cost, by cohort (all, first-time, returning, the attacked blocks' users) with gross
+  losses and gains.
+- **Operating condition (M5)** (part D): the counter's envelope (quota x blocks x windows) and the
+  Equation 2 estimate against the E4 security map, and the Poisson share of a block's sends
+  beyond the quota and twice the quota.
+- **Timing (M10).** `scripts/load_test.py --holdout N` fits the best latency threshold on one
+  phase-4 run and applies it to independent runs (`results/performance_holdout.md`); the
+  phase-4 accuracy in `results/performance.md` is a resubstitution value.
+- **Implementation (M8, M9).** Replayed effects at their transition's time; failure ids kept for
+  the replay horizon plus the code lifetime; conditional removal of timeouts; Step 11 challenges
+  give back their source-cap counts; tests on memory, fakeredis, a real Redis and over HTTP. See
+  `CHANGELOG.md`.
+- **Protocol corrections.** `config/counter_protocol_erratum.md` attaches dated corrections (the
+  seed note, the burst-12 label) to the frozen protocol, which is unchanged.
+
 ## What changed after the fourth-round report
 
 - **Concurrent counter semantics (M5).** The graded counter's first boundary was read at Step 5
@@ -228,12 +262,9 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
   replay horizon rather than the last 256; a batch older than the horizon is skipped and counted,
   never applied twice; a reversal reaching a block before the failure it reverses leaves a
   tombstone. The guarantee is at most once, and exactly once if the sweep runs within the horizon.
-  Two races remain open, bounded and stated at the top of `feedback.py`: a reversal recovered
-  after the reversed failure's event id has expired (a sweep gap of about 13 minutes or more
-  after a late verification, in the worst case) leaves the failure counted; and a correcting
-  receipt that lands between the timeout worker's transition and its bookkeeping loses that
-  send's resolution timeout (the failure is lost, not doubled). Neither is reached by the
-  single-threaded simulation.
+  Two races remained open in 2.8.0 and are closed in 2.8.1 (below): a reversal recovered after
+  the reversed failure's event id had expired, and a correcting receipt landing between the
+  timeout worker's transition and its bookkeeping.
 - **The counter study (M1-M4, M7-M9, M13, M16)** follows `config/counter_protocol.json`, a fresh
   protocol committed and pushed before its runs. It freezes the policies the 2.7.0 comparison
   selected and does not relabel the earlier predeclared study. Chronology: written after the 2.7.0

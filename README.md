@@ -133,12 +133,14 @@ Each is quantified in [`results/evaluation.md`](results/evaluation.md),
   listed in `CGNAT_ASNS`.
 - **Campaign bursts** deliver 12.5 % under the default source caps until the cap is raised.
 - **VPN users are blocked** by policy, as the problem statement asked.
-- **Two feedback races are open** (bounded and disclosed, not closed): the reversal-recovery
-  window and the timeout-worker/correcting-receipt interleaving under "Delivery receipts and
-  state" below.
+- **Step 11 is not one transaction** (reservations, audit record, counters, OTP entry, enqueue):
+  its crash semantics are conservative and tested (`tests/unit/test_fifth_round.py`). The two
+  feedback races disclosed in 2.8.0 are closed in 2.8.1 (see "Delivery receipts and state").
 - **Capacity and timing under load.** Under an adversarial mixture at concurrency 128 the
   400 ms floor no longer bounds 81 % of sends, and response time then separates a send from a
-  refusal for an observer (88 % best-threshold accuracy on a small sample); see "Performance".
+  refusal for an observer (88 % best-threshold accuracy, fitted and measured on the same small
+  sample; a threshold fitted on one run scored 95 to 99.9 % on two others, on a 2-vCPU machine
+  where nearly every send overran the floor); see "Performance".
 
 ## Repository layout
 
@@ -291,11 +293,12 @@ Other things the evaluation established:
   once if the recovery sweep runs within a 20-minute replay horizon), and the sweep finishes
   them after a crash; graded escalation and crash recovery are tested
   across two instances on a real Redis (`docs/sms_validation_process.md`, "State machine").
-  Two bounded races remain open and are stated at the top of `feedback.py`: a reversal (late
-  verification) that is recovered more than about 13 minutes after it arrived can leave the
-  failure it reverses counted, and a correcting receipt that lands between the timeout worker's
-  transition and its bookkeeping loses that send's resolution timeout (its failure is lost, not
-  doubled). Neither is reached by the single-threaded simulation.
+  In 2.8.1 a replayed effect is applied at its transition's time (an outage observation or a
+  reputation increment replayed after a crash lands where it belongs, not at the recovery time),
+  identifiers outlive a late reversal's own replay, the timeout worker removes a timeout only if it
+  was not rescheduled meanwhile, and a request that Step 11 turns into a challenge no longer uses
+  the source's SMS caps. None of these paths is reached by the single-threaded simulation: 102
+  recorded runs replayed with 2.8.1 are identical (`results/reproduction_check.md`).
 - **Containment is a property of a finite window**: a run counts as contained only if leakage
   stays at or below 5 % of the attack rate to the end of the run for at least five minutes;
   60-minute runs report survival curves (section F1) and time to first verdict is reported
@@ -327,8 +330,12 @@ Other things the evaluation established:
   vendors, 1 % two-second timeouts) the floor stops bounding the response time for 24 % of sends
   at concurrency 32 and 81 % at 128; an observer who sees only response times then tells a send
   from a hard-step refusal with a best single-threshold balanced accuracy of 62 % and 88 % (only
-  22 refusals in that mixture, so the estimate is rough and optimistic). No server errors, and
-  every ordinary request was still sent.
+  22 refusals in that mixture; the threshold is fitted and evaluated on the same samples, a
+  descriptive maximum). A held-out check (`python3 scripts/load_test.py --holdout 3`,
+  `results/performance_holdout.md`) fits the threshold on one run and applies it to two others:
+  95 to 99.9 % balanced accuracy on a 2-vCPU machine, where 99 % of sends overran the floor, so
+  the separation is not a fitting artefact there. No server errors, and every ordinary request was
+  still sent.
 - **App Attest enrolment** (`POST /attest/enroll`) follows Apple's published validation steps
   (certificate chain to the App Attest root, nonce, key identifier, RP ID hash, counter, AAGUID);
   it is tested against synthetic certificate chains only, not a real device.
@@ -351,12 +358,13 @@ The biggest single improvement available is to replay real logs through
 `scripts/replay_logs.py` under the schema in `docs/replay_schema.md`; that requires the
 approvals listed in `docs/privacy_and_ethics.md`.
 
-**Testing.** `make test` runs 393 tests (`results/test_report.txt`): unit tests of every
+**Testing.** `make test` runs 418 tests (`results/test_report.txt`): unit tests of every
 step, the state machine's interleavings and crash points on the in-memory store and on
 fakeredis, simulator invariants, and the App Attest enrolment verifier against
 synthetic certificate chains. `tests/integration/test_real_redis.py` repeats the concurrency,
 graded-escalation, crash-recovery, replay and destination-counter cases across two pipeline
-instances on a real `redis-server` when one is available (CI starts one). These are specific
+instances on a real `redis-server` when one is available (CI starts one; sixteen tests), and
+`tests/integration/test_api.py` drives the HTTP application, the stage-1 challenge included. These are specific
 interleavings and crash points, not a proof over all of them. No test calls a real vendor.
 
 **Corrections.** Defects found by review are listed with their effect in
@@ -375,8 +383,9 @@ Erratum: `config/counter_protocol.json` (seed note) and the header of `results/c
 say the 6000-series seeds were never used before that protocol; six of them (6000-6002 and
 6100-6102) had served as the main evaluation's robustness seeds for points 10 and 11
 (`5000 + 100 x point + seed`). The protocol file is kept as committed, because its recorded hash
-would otherwise change; the overlap is stated here, in `CHANGELOG.md`, in `docs/evaluation.md`
-and in a marked line of the generated report. The 300-series seeds are fresh.
+would otherwise change; the overlap is stated here, in `CHANGELOG.md`, in `docs/evaluation.md`,
+in a marked line of the generated report and, dated and next to the protocol, in
+`config/counter_protocol_erratum.md`. The 300-series seeds are fresh.
 
 **Provenance of the results.** `results/evaluation.json` and `results/counter_study.json` record
 the hash of the code that produced every run, the environment, and whether the invocation was
