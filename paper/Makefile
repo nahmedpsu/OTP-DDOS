@@ -5,9 +5,9 @@ main.pdf: main.tex refs.bib figures/*.pdf
 	latexmk -pdf -interaction=nonstopmode main.tex
 figures: ../results/evaluation.json
 	python3 figures.py
-rebuttal: rebuttal_round2.docx
-rebuttal_round2.docx: rebuttal_round2.js
-	node rebuttal_round2.js
+rebuttal: rebuttal_round3.docx
+rebuttal_round3.docx: rebuttal_round3.js
+	node rebuttal_round3.js
 clean:
 	latexmk -C; rm -f *.bbl *.spl
 .PHONY: all figures rebuttal clean
