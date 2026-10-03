@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Provenance of every headline number: which study, configuration, seed set, metric and JSON path
 each figure quoted in the README comes from. Writes results/headline_numbers.md from
-results/evaluation.json and results/performance.json; the README is written from this table.
+results/evaluation.json, results/counter_study.json, results/round5_analyses.json and the
+performance results; the README is written from this table.
 
     python3 scripts/headline_numbers.py [--results results]
 """
@@ -94,12 +95,29 @@ ENTRIES = [
     ("Counter study E3: 360-min human-like carrier, default leaked per hour", "counter_study.json", ("E3", "concentrated_pumper_verifies_humanlike, 360 minutes", "sequential T1000 c1", "leaked_per_hour"), "seeds 300-309"),
     ("Counter study E4: 8 sends/hot block/10 min, attack-free, counter loss among hot-block users (pp)", "counter_study.json", ("E4", "service", "8|0.7|benign|counter graded 4/10 min", "attributable_loss_vs_none", "hot_block", "net_lost_pct_of_group"), "seeds 300-304"),
     ("Robustness claims", "evaluation.json", ("robustness",), "12 points x 3 seeds"),
+    ("Re-selection, 200 blocks: winners under every objective (tuning runs, all eligible settings)", "round5_analyses.json", ("A_selection", "200", "union"), "tuning seeds 100-102"),
+    ("Re-selection, 1000 blocks: winners under every objective", "round5_analyses.json", ("A_selection", "1000", "union"), "tuning seeds 100-102"),
+    ("Re-selection, uniform: winners under every objective", "round5_analyses.json", ("A_selection", "uniform", "union"), "tuning seeds 100-102"),
+    ("Re-selection, 200 blocks: counter 4/10 min on fresh seeds, leaked by carrier", "round5_analyses.json", ("A_evaluation_in_union", "200", "evaluated", "counter graded 4/10 min"), "seeds 300-309"),
+    ("Re-selection, 200 blocks: sequential T300 cinf on fresh seeds, leaked by carrier", "round5_analyses.json", ("A_evaluation_in_union", "200", "evaluated", "sequential T300 cinf"), "seeds 300-309"),
+    ("Re-selection, 1000 blocks: counter 3/60 min margin to the tuning target (pp)", "round5_analyses.json", ("A_evaluation_in_union", "1000", "evaluated", "counter graded 3/60 min", "margin_to_tuning_target"), "seeds 300-309"),
+    ("Claim K4 by attacker", "round5_analyses.json", ("B_claims_by_attacker", "K4", "by_attacker"), "12 points x 3 seeds"),
+    ("E1 200 shared, poisoner: combination's extra harm, % of all users", "round5_analyses.json", ("C_attacked_service", "200 shared", "poisoner", "counter 4/10 min + sequential", "vs_attacked_none", "all", "net_pct"), "seeds 300-309, paired per request"),
+    ("E1 200 shared, poisoner: counter's extra harm, % of all users", "round5_analyses.json", ("C_attacked_service", "200 shared", "poisoner", "counter graded 4/10 min", "vs_attacked_none", "all", "net_pct"), "seeds 300-309, paired per request"),
+    ("E1 200 shared, human-like carrier: counter's extra harm, % of attacked blocks' users", "round5_analyses.json", ("C_attacked_service", "200 shared", "HL", "counter graded 4/10 min", "vs_attacked_none", "attacked_block", "net_pct"), "seeds 300-309, paired per request"),
+    ("E1 200 shared, never-verifying carrier: counter's degradation, % of attacked blocks' users", "round5_analyses.json", ("C_attacked_service", "200 shared", "NV", "counter graded 4/10 min", "vs_attack_free_same_policy", "attacked_block", "net_pct"), "seeds 300-309, paired per request"),
+    ("Timing: threshold fitted on one run, balanced accuracy on other runs (per pair)", "performance_holdout.json", ("pairs",), "3 runs, ordered pairs"),
     ("Performance: in-process send p50 ms", "performance.json", ("phase1_in_process", "end_to_end_ms", "sent", "p50"), "3000 requests"),
     ("Performance: HTTP throughput without the floor (req/s)", "performance.json", ("phase2_http_floor_0", "throughput_rps"), "6000 requests, concurrency 32"),
 ]
 
 
 def fmt(v):
+    if isinstance(v, list) and v and isinstance(v[0], dict) and "held_out_accuracy" in v[0]:
+        h = [p["held_out_accuracy"] for p in v if p["held_out_accuracy"] is not None]
+        return f"held-out {min(h):.3f} to {max(h):.3f} over {len(h)} pairs" if h else "n/a"
+    if isinstance(v, list) and all(isinstance(x, str) for x in v):
+        return "; ".join(v)
     if isinstance(v, (list, tuple)) and len(v) == 4:
         m, lo, hi, n = v
         return "n/a" if m is None else f"{m:.2f} [{lo:.2f}, {hi:.2f}] (n={n})"
@@ -108,6 +126,10 @@ def fmt(v):
             return "; ".join(f"{k}: {x}" for k, x in v.items())
         if "C1" in v:
             return "; ".join(f"{c} {'holds' if v[c]['holds'] else 'fails'} ({v[c]['true']}/{v[c]['cells']})" for c in ("C1", "C2", "C3", "C4", "C5"))
+        if all(isinstance(x, list) and len(x) == 2 for x in v.values()):
+            return "; ".join(f"{k} {x[0]}/{x[1]}" for k, x in v.items())
+        if all(isinstance(x, (int, float, list)) for x in v.values()):
+            return "; ".join(f"{k} {x:.2f}" if isinstance(x, float) else f"{k} {x}" for k, x in v.items())
         if "K1" in v:
             return "; ".join(f"{c} {'holds' if v[c]['holds'] else 'fails'} ({v[c]['true']}/{v[c]['cells']})" for c in ("K1", "K2", "K3", "K4", "K5"))
         return f"{len(v)} cells"
@@ -121,7 +143,7 @@ def main():
     ap.add_argument("--results", default=str(ROOT / "results"))
     a = ap.parse_args()
     res = pathlib.Path(a.results)
-    files = {f: json.loads((res / f).read_text()) for f in ("evaluation.json", "performance.json", "counter_study.json") if (res / f).exists()}
+    files = {f: json.loads((res / f).read_text()) for f in ("evaluation.json", "performance.json", "counter_study.json", "round5_analyses.json", "performance_holdout.json") if (res / f).exists()}
     L = ["# Headline numbers and where they come from", "",
          "Every figure quoted in the README resolves to one entry here: the file under `results/`, the JSON path, the seed set and "
          "the value (mean with 95 % percentile-bootstrap interval and n, where the metric is an interval). Regenerate with `python3 scripts/headline_numbers.py` "

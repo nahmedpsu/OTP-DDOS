@@ -142,7 +142,35 @@ def threshold_accuracy(a, b):
     return best
 
 
-def phase2(n, concurrency, floor_ms, redis_client, latency_ms=0, mix="default", sigma=0.5, timeout_prob=0.0, timeout_ms=2000):
+def fit_threshold(a, b):
+    """The single latency threshold (and direction) with the best balanced accuracy on these samples."""
+    xs = sorted([(v, 0) for v in a] + [(v, 1) for v in b])
+    na, nb = len(a), len(b)
+    best, ca, cb = (0.5, float("-inf"), True), 0, 0
+    for v, lab in xs:
+        if lab == 0:
+            ca += 1
+        else:
+            cb += 1
+        acc = 0.5 * (ca / na + (nb - cb) / nb)          # predict class a at or below v
+        if acc > best[0]:
+            best = (acc, v, True)
+        if 1 - acc > best[0]:
+            best = (1 - acc, v, False)
+    return best[1], best[2]
+
+
+def apply_threshold(a, b, thr, a_below):
+    """Balanced accuracy of a fixed threshold on new samples."""
+    if not a or not b:
+        return None
+    hit_a = sum(1 for v in a if (v <= thr) == a_below) / len(a)
+    hit_b = sum(1 for v in b if (v <= thr) != a_below) / len(b)
+    return 0.5 * (hit_a + hit_b)
+
+
+def phase2(n, concurrency, floor_ms, redis_client, latency_ms=0, mix="default", sigma=0.5, timeout_prob=0.0, timeout_ms=2000,
+           keep_samples=False):
     import httpx
     from otp_guard.evaluation.stats import ks_2samp
     redis_client.flushall()
@@ -246,7 +274,8 @@ def phase2(n, concurrency, floor_ms, redis_client, latency_ms=0, mix="default", 
                 "throughput_note": ("bounded by concurrency / floor = %.1f req/s, not server capacity" % (concurrency / (floor_ms / 1000.0))) if floor_ms else "server capacity at this concurrency",
                 "pipeline_time_over_floor_fraction": over_floor / n if floor_ms else None,
                 "latency_by_outcome_ms": {k: {"p50": pct(v, 50), "p95": pct(v, 95), "p99": pct(v, 99), "mean": statistics.fmean(v), "n": len(v)} for k, v in by_outcome.items()},
-                "ks_tests": ks, "client_over_floor_by_outcome": over_by_outcome}
+                "ks_tests": ks, "client_over_floor_by_outcome": over_by_outcome,
+                **({"samples_ms": {k: v for k, v in by_outcome.items() if k not in UNIFORM_EXCLUDED}} if keep_samples else {})}
     finally:
         api.terminate(); api.wait(timeout=10)
 
@@ -258,8 +287,12 @@ def main():
     ap.add_argument("--concurrency", type=int, default=32)
     ap.add_argument("--vendor-latency-ms", type=float, default=50.0, help="phase 3: median blocking time of each fake vendor call")
     ap.add_argument("--out", default=str(ROOT / "results"))
+    ap.add_argument("--holdout", type=int, default=0, help="only the held-out timing check: this many independent phase-4 runs "
+                    "at concurrency 128; a threshold fitted on one run is evaluated on each of the others")
     a = ap.parse_args()
     out = pathlib.Path(a.out); out.mkdir(exist_ok=True)
+    if a.holdout:
+        return holdout(a, out)
     rp, rc = start_redis()
     try:
         R = {"phase1_in_process": phase1(a.requests, rc)}
@@ -284,6 +317,56 @@ def main():
     (out / "performance.json").write_text(json.dumps(R, indent=1) + "\n")
     write_md(R, out / "performance.md")
     print("wrote", out / "performance.md")
+
+
+def holdout(a, out):
+    """Fifth-round M10: the best-threshold accuracy of phase 4 is fitted and evaluated on the same samples
+    (a descriptive maximum). Here the threshold is fitted on one run and applied to independent runs."""
+    rp, rc = start_redis()
+    runs = []
+    try:
+        for i in range(a.holdout):
+            runs.append(phase2(a.requests, 128, 400, rc, latency_ms=a.vendor_latency_ms, mix="adversarial", sigma=1.2,
+                               timeout_prob=0.01, timeout_ms=2000, keep_samples=True))
+            print(f"holdout run {i + 1} done", flush=True)
+    finally:
+        rp.terminate(); rp.wait(timeout=5)
+    pairs = []
+    for i, ri in enumerate(runs):
+        si = ri["samples_ms"]
+        if "sent" not in si or "step1" not in si:
+            continue
+        thr, below = fit_threshold(si["sent"], si["step1"])
+        fitted = apply_threshold(si["sent"], si["step1"], thr, below)
+        for j, rj in enumerate(runs):
+            if i == j or "step1" not in rj["samples_ms"]:
+                continue
+            sj = rj["samples_ms"]
+            pairs.append({"fit_run": i, "eval_run": j, "threshold_ms": thr, "sent_below": below, "fitted_accuracy": fitted,
+                          "held_out_accuracy": apply_threshold(sj["sent"], sj["step1"], thr, below),
+                          "n_sent": len(sj["sent"]), "n_refused": len(sj["step1"])})
+    R = {"runs": [{k: v for k, v in r.items() if k != "samples_ms"} for r in runs], "pairs": pairs,
+         "cpu_count": os.cpu_count(), "workers": int(os.environ.get("LOAD_TEST_WORKERS", "4"))}
+    (out / "performance_holdout.json").write_text(json.dumps(R, indent=1) + "\n")
+    held = [p["held_out_accuracy"] for p in pairs if p["held_out_accuracy"] is not None]
+    fit = [p["fitted_accuracy"] for p in pairs]
+    lines = ["# Held-out timing check (fifth-round review, M10)", "",
+             f"{a.holdout} independent phase-4 runs (adversarial mixture, heavy-tailed vendors, floor 400 ms, concurrency 128, "
+             f"{a.requests} requests each) on a machine with {os.cpu_count()} CPUs and {R['workers']} API workers. For each ordered pair "
+             "of runs, the single latency threshold that best separates sends from Step 1 refusals (balanced accuracy, either "
+             "direction) is fitted on the first run's client-side end-to-end times and applied unchanged to the second run's. "
+             "Fitted accuracy is the resubstitution value, as reported for the original run in performance.md (a descriptive maximum); held-out accuracy is "
+             "the threshold's accuracy on requests it was not fitted to.", "",
+             f"Fitted (same samples): mean {statistics.fmean(fit):.3f}; held-out (other runs): mean {statistics.fmean(held):.3f}, "
+             f"range {min(held):.3f} to {max(held):.3f}." if held else "No pair had refusals in both runs.", "",
+             "| Fit run | Eval run | Threshold (ms) | Sends below | Fitted | Held-out | Sends / refusals (eval run) | Over floor, sends (eval run, server time) |",
+             "|---:|---:|---:|---|---:|---:|---|---:|"]
+    for p in pairs:
+        over = runs[p["eval_run"]]["client_over_floor_by_outcome"] or {}
+        lines.append(f"| {p['fit_run'] + 1} | {p['eval_run'] + 1} | {p['threshold_ms']:.0f} | {p['sent_below']} | {p['fitted_accuracy']:.3f} | "
+                     f"{p['held_out_accuracy']:.3f} | {p['n_sent']} / {p['n_refused']} | {100 * over.get('sent', 0):.1f} % |")
+    (out / "performance_holdout.md").write_text("\n".join(lines) + "\n")
+    print("wrote", out / "performance_holdout.md")
 
 
 def write_md(R, path):

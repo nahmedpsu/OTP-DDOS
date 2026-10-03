@@ -1,19 +1,27 @@
-........................................................................ [ 18%]
-........................................................................ [ 36%]
-........................................................................ [ 54%]
-........................................................................ [ 73%]
-........................................................................ [ 91%]
-.................................                                        [100%]
+........................................................................ [ 17%]
+........................................................................ [ 34%]
+........................................................................ [ 51%]
+........................................................................ [ 68%]
+........................................................................ [ 86%]
+..........................................................               [100%]
 =============================== warnings summary ===============================
-../../../usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1
-  /usr/local/lib/python3.11/dist-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+../../../tmp/claude-0/venv-otp/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /tmp/claude-0/venv-otp/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/unit/test_app_attest_enrollment.py: 11 warnings
+  /home/claude/OTP-DDOS/src/otp_guard/providers/attestation.py:187: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_before_utc.
+    if not (c.not_valid_before.replace(tzinfo=now.tzinfo) <= now <= c.not_valid_after.replace(tzinfo=now.tzinfo)):
+
+tests/unit/test_app_attest_enrollment.py: 11 warnings
+  /home/claude/OTP-DDOS/src/otp_guard/providers/attestation.py:187: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_after_utc.
+    if not (c.not_valid_before.replace(tzinfo=now.tzinfo) <= now <= c.not_valid_after.replace(tzinfo=now.tzinfo)):
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
 ==================================== PASSES ====================================
 ____________________ test_synthetic_logs_replay_round_trip _____________________
 ----------------------------- Captured stdout call -----------------------------
-wrote 319 rows to /tmp/pytest-of-root/pytest-57/test_synthetic_logs_replay_rou0/logs.csv
+wrote 319 rows to /tmp/pytest-of-root/pytest-41/test_synthetic_logs_replay_rou0/logs.csv
 ______________ test_checkpoint_rows_from_other_code_are_rejected _______________
 ----------------------------- Captured stdout call -----------------------------
   reused 0, resumed 1, running 0 (stale rows rejected: 1)
@@ -54,6 +62,7 @@ PASSED tests/integration/test_api.py::test_attested_app_session_uses_one_time_ch
 PASSED tests/integration/test_api.py::test_legacy_app_session_only_during_grace
 PASSED tests/integration/test_api.py::test_client_ip_ignores_forged_forwarded_for_from_untrusted_peer
 PASSED tests/integration/test_api.py::test_internal_timeout_tick_requires_credential
+PASSED tests/integration/test_api.py::test_stage_one_challenge_over_http
 PASSED tests/integration/test_real_redis.py::test_budget_ceiling_holds_across_instances
 PASSED tests/integration/test_real_redis.py::test_one_number_cannot_be_claimed_twice_across_instances
 PASSED tests/integration/test_real_redis.py::test_concurrent_verification_callbacks_count_once_across_instances
@@ -66,6 +75,10 @@ PASSED tests/integration/test_real_redis.py::test_graded_counter_first_boundary_
 PASSED tests/integration/test_real_redis.py::test_graded_counter_second_tier_across_instances
 PASSED tests/integration/test_real_redis.py::test_replay_after_many_later_block_events_across_instances
 PASSED tests/integration/test_real_redis.py::test_token_bucket_first_boundary_across_instances
+PASSED tests/integration/test_real_redis.py::test_graded_counter_unsolved_at_second_boundary_across_instances
+PASSED tests/integration/test_real_redis.py::test_replayed_outage_event_keeps_its_time_across_instances
+PASSED tests/integration/test_real_redis.py::test_timeout_rescheduled_during_the_timeout_transition_across_instances
+PASSED tests/integration/test_real_redis.py::test_late_reversal_after_thirteen_minutes_across_instances
 PASSED tests/integration/test_replay.py::test_synthetic_logs_replay_round_trip
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[memory]
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[redis]
@@ -106,6 +119,26 @@ PASSED tests/unit/test_evaluation.py::test_variance_components_separate_configur
 PASSED tests/unit/test_factory.py::test_empty_env_builds_all_fakes_and_reports_them
 PASSED tests/unit/test_factory.py::test_full_env_wires_real_adapters
 PASSED tests/unit/test_factory.py::test_kill_switch_and_grace_parsing
+PASSED tests/unit/test_fifth_round.py::test_replayed_outage_event_keeps_its_time[memory]
+PASSED tests/unit/test_fifth_round.py::test_replayed_outage_event_keeps_its_time[redis]
+PASSED tests/unit/test_fifth_round.py::test_replayed_outage_event_inside_its_window_still_counts[memory]
+PASSED tests/unit/test_fifth_round.py::test_replayed_outage_event_inside_its_window_still_counts[redis]
+PASSED tests/unit/test_fifth_round.py::test_replayed_reputation_effect_lands_in_its_own_hour[memory]
+PASSED tests/unit/test_fifth_round.py::test_replayed_reputation_effect_lands_in_its_own_hour[redis]
+PASSED tests/unit/test_fifth_round.py::test_late_reversal_recovered_after_thirteen_minutes_still_finds_the_failure[memory]
+PASSED tests/unit/test_fifth_round.py::test_late_reversal_recovered_after_thirteen_minutes_still_finds_the_failure[redis]
+PASSED tests/unit/test_fifth_round.py::test_timeout_rescheduled_during_the_timeout_transition_survives[memory]
+PASSED tests/unit/test_fifth_round.py::test_timeout_rescheduled_during_the_timeout_transition_survives[redis]
+PASSED tests/unit/test_fifth_round.py::test_step11_challenge_does_not_use_the_source_caps[memory]
+PASSED tests/unit/test_fifth_round.py::test_step11_challenge_does_not_use_the_source_caps[redis]
+PASSED tests/unit/test_fifth_round.py::test_released_claim_after_its_window_does_not_go_negative[memory]
+PASSED tests/unit/test_fifth_round.py::test_released_claim_after_its_window_does_not_go_negative[redis]
+PASSED tests/unit/test_fifth_round.py::test_app_client_at_stage_one_moves_to_non_sms_channels[memory]
+PASSED tests/unit/test_fifth_round.py::test_app_client_at_stage_one_moves_to_non_sms_channels[redis]
+PASSED tests/unit/test_fifth_round.py::test_app_client_at_stage_one_under_concurrency_moves_to_non_sms_channels[memory]
+PASSED tests/unit/test_fifth_round.py::test_app_client_at_stage_one_under_concurrency_moves_to_non_sms_channels[redis]
+PASSED tests/unit/test_fifth_round.py::test_step11_crash_between_entry_and_enqueue_is_conservative[memory]
+PASSED tests/unit/test_fifth_round.py::test_step11_crash_between_entry_and_enqueue_is_conservative[redis]
 PASSED tests/unit/test_fourth_round.py::test_counter_serial_first_boundary[memory]
 PASSED tests/unit/test_fourth_round.py::test_counter_serial_first_boundary[redis]
 PASSED tests/unit/test_fourth_round.py::test_counter_concurrent_first_boundary_is_enforced[memory]
@@ -438,4 +471,4 @@ PASSED tests/unit/test_third_round.py::test_two_baseline_workers_neither_double_
 PASSED tests/unit/test_third_round.py::test_partial_first_hour_is_not_a_sample_and_restart_keeps_the_last_hour[memory]
 PASSED tests/unit/test_third_round.py::test_partial_first_hour_is_not_a_sample_and_restart_keeps_the_last_hour[redis]
 PASSED tests/unit/test_third_round.py::test_weekly_profile_is_learned_in_the_simulation
-393 passed, 1 warning in 192.61s (0:03:12)
+418 passed, 23 warnings in 183.03s (0:03:03)
