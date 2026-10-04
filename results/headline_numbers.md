@@ -90,5 +90,10 @@ Every figure quoted in the README resolves to one entry here: the file under `re
 | E1 200 shared, human-like carrier: counter's extra harm, % of attacked blocks' users | `round5_analyses.json` | `C_attacked_service / 200 shared / HL / counter graded 4/10 min / vs_attacked_none / attacked_block / net_pct` | seeds 300-309, paired per request | 1.92 [0.53, 4.04] (n=10) |
 | E1 200 shared, never-verifying carrier: counter's degradation, % of attacked blocks' users | `round5_analyses.json` | `C_attacked_service / 200 shared / NV / counter graded 4/10 min / vs_attack_free_same_policy / attacked_block / net_pct` | seeds 300-309, paired per request | 2.79 [0.62, 5.20] (n=10) |
 | Timing: threshold fitted on one run, balanced accuracy on other runs (per pair) | `performance_holdout.json` | `pairs` | 3 runs, ordered pairs | held-out 0.953 to 0.999 over 6 pairs |
+| Operating condition from unfitted inputs: decisive E4 cells | `condition_check.json` | `decisive` | E4, seeds 300-304 | 18 |
+| Operating condition from unfitted inputs: decisive cells whose predicted ordering matches | `condition_check.json` | `agree` | E4, seeds 300-304 | 18 |
+| Operating condition: 3 blocks, never verifies, 60 min (tests estimate vs measured) | `condition_check.json` | `cells / 3` | E4, seeds 300-304 | tests: estimate 105 vs measured 110; counter: bound 72 vs measured 71; none 366 |
+| Operating condition: 10 blocks, never verifies, 60 min (tests estimate vs measured) | `condition_check.json` | `cells / 7` | E4, seeds 300-304 | tests: estimate 139 vs measured 144; counter: bound 240 vs measured 240; none 1088 |
+| Operating condition: 30 blocks, never verifies, 60 min (tests estimate vs measured) | `condition_check.json` | `cells / 11` | E4, seeds 300-304 | tests: estimate 240 vs measured 242; counter: bound 720 vs measured 679; none 2014 |
 | Performance: in-process send p50 ms | `performance.json` | `phase1_in_process / end_to_end_ms / sent / p50` | 3000 requests | 13.83 |
 | Performance: HTTP throughput without the floor (req/s) | `performance.json` | `phase2_http_floor_0 / throughput_rps` | 6000 requests, concurrency 32 | 217.29 |

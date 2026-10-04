@@ -498,8 +498,10 @@ class FeedbackLoop:
 
     @staticmethod
     def _seen_times(seen, now):
-        """Normalise the identifier memory to id -> [recorded_at, event_at]. Older documents held a
-        list of ids (2.7.0) or id -> recorded_at (2.8.0, 2.8.1)."""
+        """Normalise the identifier memory to id -> [recorded_at, event_at, test_no] (test_no: the number
+        of the test that counted the event, None if it was not counted). Older documents held a list of
+        ids (2.7.0), id -> recorded_at (2.8.0, 2.8.1) or two-element entries (2.8.2); those keep their
+        shape and a reversal falls back to the event time against `test_since`."""
         if isinstance(seen, list):
             return {i: [now, now] for i in seen}
         return {i: (list(t) if isinstance(t, (list, tuple)) else [t, t]) for i, t in (seen or {}).items()}
@@ -518,12 +520,14 @@ class FeedbackLoop:
         counted, and it cannot cause a crossing. A crossing caused by an event dated `at` issues its
         verdict at `at`, in force until `at + block_verdict_ttl` (a verdict replayed long after its
         event may already have expired, exactly as if the event had been processed on time) and starts
-        the next test at `at`. A reversal (undo, undo_fail_only) names the failure it reverses (undo_of)
-        and subtracts it only if that failure was counted in the current test (its recorded event time
-        is at or after `test_since`); if the failure has not reached the block yet, the reversal records
-        its id as a tombstone, so the failure is ignored when it arrives: the outcome does not depend on
-        the order in which a failure and its reversal are applied. Identifiers are kept by the time they
-        were recorded (processing time), for id_retention_s(). The statistics are floored at
+        the next test at `at`. Every counted event is recorded with the number of the test that counted
+        it (the block's crossing count at the time). A reversal (undo, undo_fail_only) names the failure
+        it reverses (undo_of) and subtracts it only if that failure was counted in the test now running
+        (same test number: a failure counted before a replayed, earlier-dated event concluded the test is
+        not subtracted from the next one; 2.8.3); if the failure has not reached the block yet, the
+        reversal records its id as a tombstone, so the failure is ignored when it arrives: the outcome
+        does not depend on the order in which a failure and its reversal are applied. Identifiers are
+        kept by the time they were recorded (processing time), for id_retention_s(). The statistics are floored at
         -block_credit_thresholds x log(threshold) ('cusum'; 0 is Page's CUSUM) or unbounded ('sprt')."""
         cfg = self.p.cfg
         if "feedback" not in cfg.features:
@@ -544,17 +548,22 @@ class FeedbackLoop:
             if event_id is not None and event_id in seen:
                 return None                                  # already applied
             in_test = at >= st["test_since"]                 # dated inside the test now running
+            test_no = st["verdicts"]                         # the number of the test now running
             if event_id is not None:
-                seen = dict(seen, **{event_id: [now, at]})
+                seen = dict(seen, **{event_id: [now, at, test_no if in_test else None]})
             st["seen"] = seen
             if not in_test:                                  # belongs to a test a crossing has concluded
                 return st
             if undo_of is not None and undo_of not in seen:
-                seen = dict(seen, **{undo_of: [now, at]})    # tombstone: the failure will be ignored
+                seen = dict(seen, **{undo_of: [now, at, None]})   # tombstone: the failure will be ignored
                 st["seen"] = seen
                 reverses = False
+            elif undo_of is not None:
+                e = seen[undo_of]                            # counted in this test? (older entries: by event time)
+                counted_in = e[2] if len(e) > 2 else (test_no if e[1] >= st["test_since"] else None)
+                reverses = counted_in == test_no
             else:
-                reverses = undo_of is not None and seen[undo_of][1] >= st["test_since"]   # counted in this test
+                reverses = False
             if undo_fail_only:
                 if reverses:
                     st["f"] = max(0, st["f"] - 1)

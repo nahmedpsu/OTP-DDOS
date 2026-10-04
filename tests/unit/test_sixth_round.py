@@ -10,9 +10,10 @@ Every test runs on the memory store and on fakeredis; tests/integration/test_rea
 the two principal cases across two instances on a real Redis. The defect tests
 (test_replayed_older_failure_keeps_the_block_newest_time, test_replayed_crossing_is_dated_at_its_transition,
 test_replayed_crossing_escalates_against_the_verdict_active_at_its_time,
-test_event_dated_before_the_last_crossing_is_not_counted_in_the_next_test) fail on 2.8.1; the others
-guard behaviour that must not change (newer failures still raise the block's time, live events are
-unchanged) and the reading of documents written by 2.8.1."""
+test_event_dated_before_the_last_crossing_is_not_counted_in_the_next_test) fail on 2.8.1;
+test_reversal_of_a_failure_the_concluded_test_counted_leaves_the_next_test (2.8.3) fails on 2.8.2; the
+others guard behaviour that must not change (newer failures still raise the block's time, live events
+are unchanged) and the reading of documents written by 2.8.1 and 2.8.2."""
 import pytest
 
 from test_fifth_round import _crash_after_outage_record
@@ -170,10 +171,33 @@ def test_event_dated_before_the_last_crossing_is_not_counted_in_the_next_test(h)
     assert fb.block_llr(key)[2] == (0, 0, 0)
     seen = h.p.store.get(f"blocktest:{key}")["seen"]
     ids = [i for i in seen if i.startswith(f"{r.log_id}:")]
-    assert len(ids) == 1 and seen[ids[0]][1] == t_a                        # recorded with its event time
+    assert len(ids) == 1 and seen[ids[0]][1:] == [t_a, None]               # recorded with its event time, not counted
     rec = h.p.sms_history.get(r.log_id)
     fb._block_event(key, verified=False, event_id=ids[0], at=t_a)          # a second replay
     assert fb.block_llr(key)[2] == (0, 0, 0)
+
+
+def test_reversal_of_a_failure_the_concluded_test_counted_leaves_the_next_test(h):
+    """The edge found after 2.8.2: three failures are counted; a fourth, dated t_a, is recorded but not
+    applied; a fifth, dated after t_a, is counted; the replay of t_a then completes the crossing, dated
+    t_a, so the fifth failure was counted by the test that crossing concluded although it is dated
+    after the crossing. A late verification of the fifth send must add its verification to the new
+    test and not subtract a failure the new test never counted (2.8.2 left the statistic at the verify
+    increment minus a failure, -3.58 instead of -2.08)."""
+    _live(h)
+    fb = h.p.feedback
+    block, key = "96650826", "block:96650826"
+    for i in range(3):
+        _fail(h, i, block)
+    r_a, t_a = _record_failure_without_applying(h, 3, block)
+    r5 = _fail(h, 4, block)                                                # counted (the fourth failure) by the timeout
+    v = fb.block_verdict(key)                                              # sweep, whose recovery pass then replays
+    assert v is not None and v["at"] == t_a                                # t_a and crosses, dated t_a < r5's failure
+    assert fb.block_llr(key)[2] == (0, 0, 0)
+    assert fb.verify(h.p.sms_history[r5.log_id]["session_id"], r5.log_id, fb.code_for(r5.log_id))   # a late code entry
+    conv, _, counts = fb.block_llr(key)
+    assert counts == (1, 0, 0)
+    assert conv == pytest.approx(fb._increments()["verify"])               # -2.08: the verification alone
 
 
 def test_live_events_are_unchanged(h):
@@ -202,3 +226,4 @@ def test_old_documents_without_event_times_are_read(h):
     fb._block_event(key, verified=False, event_id="new:1")
     assert fb.block_llr(key)[2][1] == 2
     assert h.p.store.get(f"blocktest:{key}")["seen"]["old:1"] == [h.clock.now() - 5, h.clock.now() - 5]
+    assert h.p.store.get(f"blocktest:{key}")["seen"]["new:1"] == [h.clock.now(), h.clock.now(), 0]

@@ -364,12 +364,12 @@ The biggest single improvement available is to replay real logs through
 `scripts/replay_logs.py` under the schema in `docs/replay_schema.md`; that requires the
 approvals listed in `docs/privacy_and_ethics.md`.
 
-**Testing.** `make test` runs 418 tests (`results/test_report.txt`): unit tests of every
+**Testing.** `make test` runs 436 tests (`results/test_report.txt`): unit tests of every
 step, the state machine's interleavings and crash points on the in-memory store and on
 fakeredis, simulator invariants, and the App Attest enrolment verifier against
 synthetic certificate chains. `tests/integration/test_real_redis.py` repeats the concurrency,
 graded-escalation, crash-recovery, replay and destination-counter cases across two pipeline
-instances on a real `redis-server` when one is available (CI starts one; sixteen tests), and
+instances on a real `redis-server` when one is available (CI starts one; eighteen tests), and
 `tests/integration/test_api.py` drives the HTTP application, the stage-1 challenge included. These are specific
 interleavings and crash points, not a proof over all of them. No test calls a real vendor.
 

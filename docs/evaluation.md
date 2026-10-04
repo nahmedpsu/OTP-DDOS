@@ -232,9 +232,11 @@ Q1-Q10) are the author's; the repository supplies the corrected analysis and sem
   dated 600 s late. The event's time is now passed in and the semantics are defined at the top of
   `feedback.py`: an event counts toward the test running at its time (one dated before the last
   crossing is recorded, not counted), a crossing issues its verdict at the event's time and escalates
-  against the verdict active then, and a reversal subtracts its failure only if that failure was
-  dated at or after the last crossing (a known edge, not yet repaired: a failure counted in a test that a replayed,
-  earlier-dated event then concludes is reversed against the new test). Tests cover the replayed crossing, escalation near a verdict's expiry,
+  against the verdict active then, and a reversal subtracts its failure only if the test now running
+  is the one that counted it (2.8.3; 2.8.2 compared the failure's event time with the last crossing,
+  which reversed a failure counted before a replayed, earlier-dated crossing against the new test;
+  regression test `test_reversal_of_a_failure_the_concluded_test_counted_leaves_the_next_test`, failing
+  on 2.8.2). Tests cover the replayed crossing, escalation near a verdict's expiry,
   a reordered old event, and documents written by 2.8.1. The live path is unchanged (its event time
   is the clock's), so no simulated number moves.
 - **Operating condition (M2).** Part D of `scripts/run_round5_analyses.py` now caps the counter's

@@ -107,6 +107,11 @@ ENTRIES = [
     ("E1 200 shared, human-like carrier: counter's extra harm, % of attacked blocks' users", "round5_analyses.json", ("C_attacked_service", "200 shared", "HL", "counter graded 4/10 min", "vs_attacked_none", "attacked_block", "net_pct"), "seeds 300-309, paired per request"),
     ("E1 200 shared, never-verifying carrier: counter's degradation, % of attacked blocks' users", "round5_analyses.json", ("C_attacked_service", "200 shared", "NV", "counter graded 4/10 min", "vs_attack_free_same_policy", "attacked_block", "net_pct"), "seeds 300-309, paired per request"),
     ("Timing: threshold fitted on one run, balanced accuracy on other runs (per pair)", "performance_holdout.json", ("pairs",), "3 runs, ordered pairs"),
+    ("Operating condition from unfitted inputs: decisive E4 cells", "condition_check.json", ("decisive",), "E4, seeds 300-304"),
+    ("Operating condition from unfitted inputs: decisive cells whose predicted ordering matches", "condition_check.json", ("agree",), "E4, seeds 300-304"),
+    ("Operating condition: 3 blocks, never verifies, 60 min (tests estimate vs measured)", "condition_check.json", ("cells", 3), "E4, seeds 300-304"),
+    ("Operating condition: 10 blocks, never verifies, 60 min (tests estimate vs measured)", "condition_check.json", ("cells", 7), "E4, seeds 300-304"),
+    ("Operating condition: 30 blocks, never verifies, 60 min (tests estimate vs measured)", "condition_check.json", ("cells", 11), "E4, seeds 300-304"),
     ("Performance: in-process send p50 ms", "performance.json", ("phase1_in_process", "end_to_end_ms", "sent", "p50"), "3000 requests"),
     ("Performance: HTTP throughput without the floor (req/s)", "performance.json", ("phase2_http_floor_0", "throughput_rps"), "6000 requests, concurrency 32"),
 ]
@@ -122,6 +127,9 @@ def fmt(v):
         m, lo, hi, n = v
         return "n/a" if m is None else f"{m:.2f} [{lo:.2f}, {hi:.2f}] (n={n})"
     if isinstance(v, dict):
+        if "tests_estimate" in v:
+            return (f"tests: estimate {v['tests_estimate']:.0f} vs measured {v['tests_measured']:.0f}; "
+                    f"counter: bound {v['counter_bound']:.0f} vs measured {v['counter_measured']:.0f}; none {v['none_measured']:.0f}")
         if all(isinstance(x, str) for x in v.values()):
             return "; ".join(f"{k}: {x}" for k, x in v.items())
         if "C1" in v:
@@ -143,7 +151,7 @@ def main():
     ap.add_argument("--results", default=str(ROOT / "results"))
     a = ap.parse_args()
     res = pathlib.Path(a.results)
-    files = {f: json.loads((res / f).read_text()) for f in ("evaluation.json", "performance.json", "counter_study.json", "round5_analyses.json", "performance_holdout.json") if (res / f).exists()}
+    files = {f: json.loads((res / f).read_text()) for f in ("evaluation.json", "performance.json", "counter_study.json", "round5_analyses.json", "performance_holdout.json", "condition_check.json") if (res / f).exists()}
     L = ["# Headline numbers and where they come from", "",
          "Every figure quoted in the README resolves to one entry here: the file under `results/`, the JSON path, the seed set and "
          "the value (mean with 95 % percentile-bootstrap interval and n, where the metric is an interval). Regenerate with `python3 scripts/headline_numbers.py` "

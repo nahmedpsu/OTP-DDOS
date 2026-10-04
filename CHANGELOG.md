@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.8.3 (2026-10-04)
+
+- **Reversal against the test that counted the failure (the edge found after 2.8.2).** Every
+  counted block-test event is recorded with the number of the test that counted it; a reversal
+  subtracts its failure only when that number is the test now running. Up to 2.8.2 the rule was the
+  failure's event time against the last crossing, so a failure counted by a test that a replayed,
+  earlier-dated event then concluded (dated after that crossing, counted before it) was subtracted
+  from the next test (-3.58 instead of -2.08 in the regression's example). Entries written by 2.8.2
+  keep the old rule. Regression test on memory and fakeredis; fails on 2.8.2. The live path is
+  unchanged (102 recorded runs replayed with 2.8.3 are identical, `results/reproduction_check.md`).
+- `results/CHECKSUMS.sha256`: SHA-256 of every `results/*.json` and `results/*.jsonl.gz`, for the
+  release. Headline map: the operating-condition check from unfitted inputs.
+
 ## 2.8.2 (2026-10-03)
 
 Repository items of the sixth-round review. No simulation run changed: the two repairs are on
@@ -17,10 +30,9 @@ part D of the fifth-round analyses was recomputed from the recorded files.
   time and escalates against the verdict active then, the verdict's lifetime runs from the event's
   time, and a reversal subtracts its failure only if that failure is dated at or after the last
   crossing. Block documents written by earlier versions are read (identifier memory now holds recorded and
-  event times; `test_since` defaults to 0). Four defect tests fail on 2.8.1. Known edge, found after
-  the release and not yet repaired: a failure counted in a test that a replayed, earlier-dated event
-  then concludes is dated after that crossing, so a late reversal of it subtracts from the new test;
-  recording which test counted each failure closes it.
+  event times; `test_since` defaults to 0). Four defect tests fail on 2.8.1. An edge found after
+  the release (a failure counted in a test that a replayed, earlier-dated event then concludes was
+  reversed against the new test) is fixed in 2.8.3, above.
 - **Operating condition as a labelled heuristic (M2).** Part D caps the counter's allowance at the
   offered volume N rather than at the no-policy arm's leakage, caps the first-verdict estimate at N,
   computes the intercept from the 3-block, 60-minute cell and marks that row as the fit and the
