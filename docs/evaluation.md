@@ -233,16 +233,18 @@ Q1-Q10) are the author's; the repository supplies the corrected analysis and sem
   `feedback.py`: an event counts toward the test running at its time (one dated before the last
   crossing is recorded, not counted), a crossing issues its verdict at the event's time and escalates
   against the verdict active then, and a reversal subtracts its failure only if that failure was
-  counted in the current test. Tests cover the replayed crossing, escalation near a verdict's expiry,
+  dated at or after the last crossing (a known edge, not yet repaired: a failure counted in a test that a replayed,
+  earlier-dated event then concludes is reversed against the new test). Tests cover the replayed crossing, escalation near a verdict's expiry,
   a reordered old event, and documents written by 2.8.1. The live path is unchanged (its event time
   is the clock's), so no simulated number moves.
 - **Operating condition (M2).** Part D of `scripts/run_round5_analyses.py` now caps the counter's
   allowance at the volume the pumper offered (N, from the same E4 cells) instead of the no-policy
   arm's leakage, caps the sequential first-verdict estimate at N as well, computes the intercept
   from the 3-block, 60-minute cell and marks that row as the fit and every other row as a check,
-  and states the horizon mismatch (whole attack against first verdict) in the report. Figure 7(b)
-  evaluates both estimates at the sampled spreads only and says so; the intercept's origin and the
-  cap are in its legend. `results/round5_analyses.{md,json}` part D was recomputed from the recorded
+  and states the horizon mismatch (whole attack against first verdict) in the report. Manuscript
+  revision 6 (Figure 4(b), file `fig7_counter_boundary`) draws instead the unfitted per-run estimates
+  of `scripts/check_condition.py` (tau from the configuration, lambda and N from each run), at the
+  sampled spreads only (`results/condition_check.md`). `results/round5_analyses.{md,json}` part D was recomputed from the recorded
   files (`--refresh-d`); no run changed.
 - **Service model (M3).** The share of a block's sends beyond the quota is reported under both
   window models: exogenous fixed windows (E[(n-q)+]/m, the figures the fifth revision quoted) and the
@@ -252,8 +254,10 @@ Q1-Q10) are the author's; the repository supplies the corrected analysis and sem
   store keeps a sorted set's expiry from its creation; the Redis store refreshes it on every write.
   The outage detector's per-carrier sets therefore empty 2 x window after their first write in a
   simulated run and are recreated, which can suppress or delay a suspension that a Redis deployment
-  would have issued. Measured on the 102-run reproduction sample: a store that refreshes changes
-  18 runs, 16 of them only in the outage-alert count. The recorded results and `zadd_max` keep the
+  would have issued. Measured on the 102-run reproduction sample (`results/store_expiry_check.md`):
+  refreshing only the distinct-block set changes 18 runs, 16 of them only in the outage-alert count;
+  refreshing every sorted set as Redis does, which also reaches Step 5's number-pattern sets, changes
+  27, four of them in leakage (a matched-comparison tuning run, 268 messages against 21). The recorded results and `zadd_max` keep the
   memory store's rule; aligning it with Redis means rerunning the outage-related studies
   (`CHANGELOG.md`, 2.8.2).
 

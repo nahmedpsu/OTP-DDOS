@@ -15,9 +15,12 @@ part D of the fifth-round analyses was recomputed from the recorded files.
   an event counts toward the test running at its time (one dated before the last crossing is
   recorded, not counted, and cannot cause a crossing), a crossing issues its verdict at the event's
   time and escalates against the verdict active then, the verdict's lifetime runs from the event's
-  time, and a reversal subtracts its failure only if that failure was counted in the current test.
-  Block documents written by earlier versions are read (identifier memory now holds recorded and
-  event times; `test_since` defaults to 0). Four defect tests fail on 2.8.1.
+  time, and a reversal subtracts its failure only if that failure is dated at or after the last
+  crossing. Block documents written by earlier versions are read (identifier memory now holds recorded and
+  event times; `test_since` defaults to 0). Four defect tests fail on 2.8.1. Known edge, found after
+  the release and not yet repaired: a failure counted in a test that a replayed, earlier-dated event
+  then concludes is dated after that crossing, so a late reversal of it subtracts from the new test;
+  recording which test counted each failure closes it.
 - **Operating condition as a labelled heuristic (M2).** Part D caps the counter's allowance at the
   offered volume N rather than at the no-policy arm's leakage, caps the first-verdict estimate at N,
   computes the intercept from the 3-block, 60-minute cell and marks that row as the fit and the
@@ -34,9 +37,19 @@ part D of the fifth-round analyses was recomputed from the recorded files.
   persist while written to. A first version of `zadd_max` refreshed the expiry and the 102-run
   reproduction sample then differed in 18 runs: 16 only in the outage-alert count, one also in
   the legitimate users hit by verdicts, one in the block-verdict counts (a suspension that did or
-  did not happen). `zadd_max` now follows the memory store's rule so the recorded results stand;
-  aligning the memory store with Redis changes the outage-alert numbers of the recorded studies and
-  is left for a release that reruns them.
+  did not happen). `zadd_max` now follows the memory store's rule so the recorded results stand.
+  The same rule reaches Step 5's number-pattern sets (`numseq:*`, `numpfx:*`). Refreshing every
+  sorted set as Redis does changes 27 of the 102 sample runs: 16 only in outage alerts, 7 in other
+  counts with leakage unchanged, and 4 in leakage (a tuning run of the matched comparison 268
+  messages against 21; `results/store_expiry_check.md`). Aligning the memory store with Redis is
+  left for a release that reruns the studies.
+- **Operating condition from unfitted inputs (manuscript revision 6).** `scripts/check_condition.py`
+  evaluates Equations 2 to 4 for every recorded E4 security run with tau from the configuration
+  (resolution timeout + delivery delay + half the timeout worker's period = 2.55 min) and lambda, N
+  and B from each run's offered requests and requested blocks, nothing fitted to E4
+  (`results/condition_check.md`): the predicted ordering of counter and default matches the
+  measured one in all 18 cells where the two estimates differ (in 2, both equal N). Figure 4(b) of
+  manuscript revision 6 (file `fig7_counter_boundary`) draws these per-run estimates.
 
 ## 2.8.1 (2026-10-03)
 
