@@ -1,36 +1,23 @@
 # Problem Statement: OTP Flood Protection
 
-## 1. Original incident
+## 1. The baseline (v1)
 
-During the initial phase of the registration flow, the SMS-based phone number verification
-system was abused. The registration API was repeatedly triggered with randomly generated
-mobile numbers. Because the system sent an SMS to any unregistered number without
-safeguards, attackers could flood the endpoint and consume SMS resources at scale.
+A registration flow sends an SMS code to any unregistered number. The baseline, v1, puts
+seven controls in front of it:
 
-### Security gaps identified
-
-- No restriction on how many SMS messages could be sent to a single phone number.
-- No validation or limits on SMS body content.
-- No country-level restriction on recipients.
-- No IP-based throttling.
-- No filtering of VPN, proxy or anonymized sources.
-- No bot or automation protection.
-
-### Initial mitigation (v1)
-
-1. Hidden Google reCAPTCHA with score-based validation.
+1. Hidden Google reCAPTCHA with score-based validation (web requests).
 2. Rate limiting per phone number (1 SMS per number per minute).
 3. IP-based throttling (5 requests per IP per minute).
-4. Country whitelisting.
+4. Country allow-list.
 5. SMS body character limits.
 6. VPN and proxy blocking.
-7. Platform- and country-based rate limits tuned to historical usage and marketing peaks.
+7. Platform- and country-based rate limits.
 
-## 2. Evolved abuse
+## 2. Gaps in the baseline
 
-After v1 the abuse adapted. Attackers rotated IPs, spoofed client attributes and stayed
-under individual thresholds. Reviewing v1 against this adapted attacker exposed a second
-set of gaps. These are the problems the v2 design must solve.
+Each gap below is a property of v1's rules that an attacker within the threat model of the
+manuscript (Section 3) can exploit; it is an analysis of the rules, not a report of observed
+abuse. These are the problems the v2 design must solve.
 
 ### Gap A: Platform header spoofing
 
@@ -69,8 +56,8 @@ either spikes.
 ### Gap F: Rate limiting is not atomic
 
 The v1 pseudocode checks the counter, then increments it, as two operations. Across
-multiple application instances two concurrent requests can both pass the check. Under a
-flood this race is hit constantly.
+multiple application instances two concurrent requests can both pass the check, and a flood
+of concurrent requests makes the race easy to reach.
 
 ### Gap G: Bulk and test-server bypasses
 

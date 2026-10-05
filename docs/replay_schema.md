@@ -27,6 +27,6 @@ the replay never needs a real phone number, address or fingerprint.
 | `hlr_assigned` | no | `0` if the lookup said unassigned. |
 | `verified` | yes | `1` if the code was entered correctly. |
 | `verify_delay_s` | yes | Seconds from send to verification (empty if not verified). |
-| `label` | no | `attack`, `legit`, or `unknown`, from the incident investigation. Metrics are reported per label. |
+| `label` | no | `attack`, `legit`, or `unknown`, from an investigation of the logs. Metrics are reported per label. |
 
 Generate a synthetic file in this schema with `scripts/generate_synthetic_logs.py`.

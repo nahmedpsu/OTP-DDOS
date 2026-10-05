@@ -418,15 +418,18 @@ def fig7_counter_boundary(CS, out, runs_path=ROOT / "results" / "counter_study_r
     import matplotlib.gridspec as gridspec
     E4 = CS["E4"]
     cond = json.loads(pathlib.Path(cond_path).read_text()) if cond_path and pathlib.Path(cond_path).exists() else None
-    fig = plt.figure(figsize=(10, 12.6))
-    gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1.1], hspace=0.3, wspace=0.28, left=0.1, right=0.98, top=0.965, bottom=0.145)
+    # Printed at the text width (5.4 in), so the figure is drawn at 7.6 in and fonts of 12-13 pt print at about 9 pt; its
+    # height keeps it within 0.82 of the text height (eighth-round review: legend and panel text enlarged; estimates
+    # drawn hollow and dotted, measurements filled and solid).
+    fig = plt.figure(figsize=(7.6, 8.8))
+    gs = gridspec.GridSpec(2, 2, height_ratios=[0.8, 1.1], hspace=0.42, wspace=0.34, left=0.115, right=0.985, top=0.962, bottom=0.28)
     ax0 = fig.add_subplot(gs[0, :])
     axes = [ax0, fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])]
-    style(axes[0], "(a) service: loss among the hot blocks' users (70 % WhatsApp); dotted line: the quota, 4 per 10 min")
+    style(axes[0], "(a) service: the hot blocks' users (70 % WhatsApp)")
     style(axes[1], "(b) security, 20-minute attack")
     style(axes[2], "(c) security, 60-minute attack")
     for ax in axes:
-        ax.tick_params(labelsize=10.5); ax.title.set_fontsize(12)
+        ax.tick_params(labelsize=11.5); ax._left_title.set_fontsize(12.5); ax._left_title.set_fontweight("bold")
     rates = sorted({float(k.split("|")[0]) for k in E4["service"]})
     for pol, col in (("counter graded 4/10 min", C["green"]), ("sequential T1000 c1", C["blue"])):
         for cnd, ls in (("benign", "--"), ("attacked", "-")):
@@ -437,35 +440,48 @@ def fig7_counter_boundary(CS, out, runs_path=ROOT / "results" / "counter_study_r
                 g = (E4["service"][key]["attributable_loss_vs_none"] or {}).get("hot_block", {}).get("net_lost_pct_of_group", (0, 0, 0, 0))
                 ys.append(g[0]); lo.append(g[1]); hi.append(g[2])
             axes[0].plot(rates, ys, color=col, linestyle=ls, marker="o", markersize=7, linewidth=2,
-                         label=f"{_short(pol)}, {'attack-free' if cnd == 'benign' else 'pumper on the same blocks'}")
+                         label=f"{'counter' if 'counter' in pol else 'tests'}, {'attack-free' if cnd == 'benign' else 'with pumper'}")
             axes[0].fill_between(rates, lo, hi, color=col, alpha=0.12, linewidth=0)
-    axes[0].axvline(4, color=INK2, linestyle=":", linewidth=1.2)
+    axes[0].axvline(4, color=INK2, linestyle=":", linewidth=1.4)
+    axes[0].annotate("quota: 4 per 10 min", (4, axes[0].get_ylim()[0]), textcoords="offset points", xytext=(5, 8), fontsize=12, color=INK)
     axes[0].set_xscale("log"); axes[0].set_xticks(rates); axes[0].set_xticklabels([f"{r:g}" for r in rates])
     axes[0].xaxis.set_minor_formatter(NullFormatter())
-    axes[0].set_xlabel("legitimate sends per hot block per 10 minutes", color=INK, fontsize=11.5)
-    axes[0].set_ylabel("completions lost because of the policy,\npp of the hot blocks' users", color=INK, fontsize=11.5)
-    axes[0].legend(frameon=False, fontsize=10, loc="upper left")
+    axes[0].set_xlabel("legitimate sends per hot block per 10 minutes (log scale)", color=INK, fontsize=12)
+    axes[0].set_ylabel("completions lost, pp\nof the hot blocks' users", color=INK, fontsize=12)
+    axes[0].legend(frameon=False, fontsize=11.5, loc="upper left", ncol=2, columnspacing=1.0, handlelength=1.8)
     blocks = sorted({int(k.split("|")[0]) for k in E4["security"]})
+    measured, estimated = [], []
     for ax, mins in ((axes[1], 20), (axes[2], 60)):
         for pol, col in (("none", INK2), ("sequential T1000 c1", C["blue"]), ("counter graded 4/10 min", C["green"])):
             for kind, mk in (("spreading, never verifies", "o"), ("quota-aware", "s")):
                 v = [E4["security"][f"{b}|{kind}|{mins}|{pol}"]["leaked_total"] for b in blocks]
-                ax.errorbar(blocks, [x[0] for x in v], yerr=[[x[0] - x[1] for x in v], [x[2] - x[0] for x in v]], color=col,
-                            marker=mk, markersize=6, linewidth=1.8, linestyle="-" if mk == "o" else "--", capsize=2,
-                            elinewidth=0.9, label=f"{ {'none': 'no policy', 'sequential T1000 c1': 'tests (default)'}.get(pol, 'counter')}, "
-                                                  f"{'full rate' if mk == 'o' else 'paced to the quota'}")
+                h = ax.errorbar(blocks, [x[0] for x in v], yerr=[[x[0] - x[1] for x in v], [x[2] - x[0] for x in v]], color=col,
+                                marker=mk, markersize=6.5, linewidth=2, linestyle="-" if mk == "o" else "--", capsize=2.5,
+                                elinewidth=1, label=f"{ {'none': 'no policy', 'sequential T1000 c1': 'tests'}.get(pol, 'counter')}, "
+                                                    f"{'full rate' if mk == 'o' else 'paced to the quota'}")
+                if mins == 60:
+                    measured.append(h)
         if cond:
             cells = {c["blocks"]: c for c in cond["cells"] if c["minutes"] == mins and c["pumper"] == "spreading, never verifies"}
-            for key, col, lab, mk in (("tests_estimate", C["blue"], "Eq. 2: tests' estimate, full rate", "x"),
-                                      ("counter_cold", C["green"], "Eq. 3: counter, cold start, full rate", "x"),
-                                      ("counter_warm", C["orange"], "Eq. 4: counter, warm start, full rate", "+")):
-                ax.plot(blocks, [cells[b][key] for b in blocks], color=col, linestyle=":", linewidth=1.5, marker=mk, markersize=9, label=lab)
+            for key, col, lab, mk, ls in (("tests_estimate", C["blue"], "Eq. 2: tests", "D", ":"),
+                                          ("counter_cold", C["green"], "Eq. 3: counter, cold", "^", ":"),
+                                          ("counter_warm", C["orange"], "Eq. 4: counter, warm", "v", "-.")):
+                h, = ax.plot(blocks, [cells[b][key] for b in blocks], color=col, linestyle=ls, linewidth=1.6, marker=mk, markersize=9,
+                             markerfacecolor="none", markeredgewidth=1.6, label=lab)
+                if mins == 60:
+                    estimated.append(h)
         ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xticks(blocks); ax.set_xticklabels([str(b) for b in blocks])
         ax.xaxis.set_minor_formatter(NullFormatter())
-        ax.set_xlabel("blocks the pumper spreads over", color=INK, fontsize=11.5)
-        ax.set_ylabel(f"SMS leaked in {mins} minutes", color=INK, fontsize=11.5)
-    h, l = axes[2].get_legend_handles_labels()
-    fig.legend(h, l, frameon=False, fontsize=10, loc="lower center", ncol=3, bbox_to_anchor=(0.5, 0.0), columnspacing=1.2)
+        ax.set_xlabel("blocks the pumper uses (log)", color=INK, fontsize=12)
+        ax.set_ylabel(f"SMS leaked in {mins} min (log)", color=INK, fontsize=12)
+    order = [0, 2, 4, 1, 3, 5]                     # columns: full rate, paced
+    l1 = fig.legend(handles=[measured[i] for i in order], frameon=False, fontsize=11.5, loc="upper left", ncol=2,
+                    bbox_to_anchor=(0.01, 0.185), title="Measured (filled markers): mean over five seeds, 95 % interval",
+                    title_fontsize=11.5, alignment="left", columnspacing=1.5, handlelength=2.2, labelspacing=0.3)
+    fig.legend(handles=estimated, frameon=False, fontsize=11.5, loc="upper left", ncol=3, bbox_to_anchor=(0.01, 0.068),
+               title="Estimated for the full-rate pumper (hollow markers), from each run's inputs", title_fontsize=11.5,
+               alignment="left", columnspacing=1.0, handlelength=2.2)
+    fig.add_artist(l1)
     save(fig, out, "fig7_counter_boundary", tight=False)
 
 

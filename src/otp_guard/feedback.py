@@ -38,8 +38,12 @@ time. If a late event completes a crossing, the verdict can be dated before evid
 dated 3 s and expires at 3 + 3600 s, whereas in chronological order it would be dated 603 s and expire
 600 s later), its expiry and the start of the next test move with it, escalation is judged against the
 verdict active at that earlier time, and later evidence dated before the crossing is recorded but not
-counted in the next test. On the live path events are processed in time order, so the two coincide;
-in the simulator, which never crashes a process, every recorded run is on that path.
+counted in the next test. The simulator runs one process that never crashes and applies events in time
+order, so in every recorded run the two coincide. Concurrent live instances give no such guarantee
+(eighth-round review, M6): _transition commits a send's transition before _apply applies its effects,
+so one instance can apply a later transition on a block while another, paused between the two steps,
+has yet to apply an earlier one. Live, the same processing-order semantics therefore apply unless the
+effects on a block are serialized.
 Before a transition the caller writes a write-ahead intent (otp:intents);
 run_due_timeouts() sweeps intents older than RECOVER_AFTER_S and applies whatever batches are still
 recorded, so a process that dies between the compare-and-set and the end of its effects leaves work

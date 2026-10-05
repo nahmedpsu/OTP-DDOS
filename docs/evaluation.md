@@ -216,6 +216,25 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
   (`tests/integration/test_real_redis.py`), which is the only place those properties are
   established; vendors remain untested live.
 
+## What changed after the eighth-round report
+
+Release 2.9.1; no simulated result changed (every result comes from 2.9.0, commit 9af3100, and
+`scripts/check_code_identity.py` shows that 2.9.1 runs the same code: `results/code_identity.md`).
+
+- **Live event order (M6).** The simulator is one process that applies events in time order. Concurrent
+  live instances are not: `_transition` commits a send's transition before `_apply` applies its effects,
+  so an instance paused between the two can apply an earlier transition after another instance has
+  applied a later one on the same block. The processing-order semantics of the block statistic (a late
+  event can complete a crossing and backdate the verdict) therefore hold live too, unless a block's
+  effects are serialized. `feedback.py`'s module notes say so; the manuscript's Section 4.2 likewise.
+- **Containment of the human-like carrier.** None of its ten 20-minute runs is contained; over an hour
+  two of ten are, at 47.0 minutes on average (`results/evaluation.md`, pumping table).
+- **Figure 1 key and the auxiliary setting.** `results/figure1_key.md` lists every plotted setting with
+  its roles; the 'matched false alarms, credit inf' role moved from T1000 cinf to T300 cinf in 2.9.0
+  under both protocols, the only selection that changed.
+- **No incident narrative.** The v1 baseline and its gaps are presented as an analysis of v1's rules
+  (`docs/problem_statement.md`).
+
 ## What changed after the seventh-round report
 
 Release 2.9.0. **Every simulated result was regenerated**; the 2.8.x results are kept in
@@ -574,8 +593,8 @@ account the defender now holds.
 
 ## Limitations
 
-- **No production data.** The whole evaluation is simulated. No anonymised logs from the
-  original incident or the v1 period were available to the authors, and no live vendor
+- **No production data.** The whole evaluation is simulated. No anonymised logs of real OTP
+  traffic were available to the authors, and no live vendor
   call was made. `scripts/replay_logs.py` and `docs/replay_schema.md` exist so that logs
   can be replayed through v1 and v2 when they become available; until then every absolute
   number here is conditional on the calibration.

@@ -147,7 +147,7 @@ Each is quantified in [`results/evaluation.md`](results/evaluation.md),
 
 ```
 docs/
-  problem_statement.md          the incident, the v1 mitigation, gaps A to H, v2 objectives
+  problem_statement.md          the v1 baseline, gaps A to H, v2 objectives
   sms_validation_process.md     the v2 design: 12 steps, feedback loop, defaults and reasons
   pseudocode/                   one file per step, extracted from the design, mapped to code
   architecture.md               components, request flow, state keys
@@ -357,10 +357,12 @@ simulated evaluation. Everything in `results/` is reproducible from this reposit
 simulated result: its in-memory store keeps state as Redis does (`tests/unit/test_store_parity.py`;
 seventh-round review), and every study was rerun. The 2.8.x results are kept in
 `results/historical_2.8/`, and `results/store_change_report.md` compares the two run by run (no
-claim, tuning-target eligibility or protocol selection changed).
+claim, tuning-target eligibility or principal selection changed; one auxiliary comparison setting
+did). Release 2.9.1 changes comments, documentation and the manuscript only: it runs the code of 2.9.0
+(`results/code_identity.md`, from `scripts/check_code_identity.py`).
 
-**What it is not.** No production data was used. No anonymised logs from the original
-incident or the v1 period were available, and no live call to any vendor has been made
+**What it is not.** No production data was used. No anonymised logs of real OTP
+traffic were available, and no live call to any vendor has been made
 from this repository. The evaluation is calibrated to published prices and measurements
 where they exist and to stated assumptions where they do not (`docs/evaluation.md`,
 "Calibration"; the full table with sources is at the end of `results/evaluation.md`).
@@ -410,4 +412,4 @@ archives automatically. Record the DOI here once minted: _(none yet)_.
 
 **Ethics and permissions.** See `docs/privacy_and_ethics.md` for the data-retention
 statement and the approvals still to be recorded (ethics approval for any production-log
-replay; employer permission to describe the incident).
+replay).

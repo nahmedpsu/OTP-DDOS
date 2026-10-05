@@ -1,0 +1,5 @@
+Simulation compares counting and testing SMS sends per destination number block
+At a set service target, counters leaked 6-48 SMS; default tests leaked up to 452
+Tests beat the counter against instant verifiers in 13 of 36 held-out cells
+The counter failed its service claims when pumpers shared users' blocks
+Unfitted bounds ordered mean leakage in 18/18 cells (cold start), 17/18 (warm)

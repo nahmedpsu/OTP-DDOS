@@ -3,8 +3,8 @@
 ## Overview
 
 The SMS validation process is a layered security, risk-scoring and rate-limiting pipeline
-that every OTP request passes through before a message is sent. It addresses the original
-OTP flood incident and the evolved attacks described in `problem_statement.md`.
+that every OTP request passes through before a message is sent. It addresses the gaps of the
+v1 baseline described in `problem_statement.md`.
 
 Two principles drive the design:
 

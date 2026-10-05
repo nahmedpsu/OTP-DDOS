@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.9.1 (2026-10-05)
+
+Eighth-round review (minor revision). **No simulated result changes**: every result was produced by
+2.9.0 (commit 9af3100), and 2.9.1 runs the same code. `scripts/check_code_identity.py` compares every
+file that can change a result with 2.9.0 (`results/code_identity.md`): 38 of 39 are byte-identical and
+`feedback.py` differs only in its module notes, so its syntax tree without docstrings is identical. The
+run records keep the 2.9.0 code hash, which covers those bytes.
+
+- **Live event order (M6).** `feedback.py`'s module notes no longer say that the live path processes
+  events in time order. `_transition` commits a send's transition before `_apply` applies its effects,
+  so concurrent instances can apply a later transition on a block before an earlier one; the
+  processing-order semantics of 2.9.0 then hold live too, unless a block's effects are serialized. The
+  simulator is single-process and applies events in time order, so no recorded run is affected.
+- **No incident narrative.** `docs/problem_statement.md` presents the v1 baseline and gaps A-H as an
+  analysis of v1's rules; the narrative of an incident is removed from it, from the README,
+  `docs/privacy_and_ethics.md` and `docs/sms_validation_process.md`, and from the manuscript, and
+  `docs/original/problem_statement.pdf` is removed from the tree. A scenario label in the hashed driving
+  script `scripts/run_scenarios.py` ('original incident: one client, random numbers') and its recorded
+  results are left unchanged, since editing it would change code that produced results.
+- **Supplementary key to Figure 1.** `scripts/paper_tables.py` writes `results/figure1_key.md`: every
+  setting plotted, its completion and summed leakage with intervals, and its roles in the selection
+  (including the auxiliary 'matched false alarms, credit inf' setting that moved from T1000 cinf to T300
+  cinf in 2.9.0, under both protocols). In manuscript revision 8, revision 7's Table 9 is split into Tables 8
+  (pumper) and 9 (poisoner), the study map is supplementary Table S2 (`results/study_map.md`), and Figure 3 is
+  redrawn with larger text and separate legends for measurements and estimates.
+
 ## 2.9.0 (2026-10-05)
 
 Seventh-round review. **Every simulation result changes provenance**: the in-memory store, on which

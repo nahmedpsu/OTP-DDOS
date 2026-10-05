@@ -45,14 +45,14 @@ in hours; 30 days for the audit log to handle billing disputes and incident revi
 
 ## Ethics and permissions
 
-- **Production logs.** The evaluation used no production logs. If logs from the incident
+- **Production logs.** The evaluation used no production logs. If production logs
   are later replayed through `scripts/replay_logs.py`, they must be exported in the hashed
   form of `docs/replay_schema.md`, under an approval from the organisation's data
   protection officer and, where the work is academic, from the institution's research
   ethics board. Record the approval reference here: _(none yet)_.
-- **Description of the incident.** The problem statement describes an incident at a real
-  organisation. Publishing it, and any figures derived from its logs, requires the
-  employer's permission. Record it here: _(pending)_.
+- **No account of a real organisation.** The manuscript and the documentation present the v1
+  baseline and its gaps as an analysis of rules. Any later use of a real organisation's account
+  or logs requires that organisation's permission.
 - **Dual use.** The attacker models in `src/otp_guard/evaluation/` describe techniques
   that are already public (proxy pools, CAPTCHA solving services, SMS pumping). They are
   included so defenders can measure themselves against them; no operational tooling for
