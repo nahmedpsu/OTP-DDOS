@@ -1,14 +1,28 @@
-........................................................................ [ 16%]
-........................................................................ [ 33%]
-........................................................................ [ 49%]
-........................................................................ [ 66%]
-........................................................................ [ 82%]
-........................................................................ [ 99%]
-....                                                                     [100%]
+........................................................................ [ 15%]
+........................................................................ [ 31%]
+........................................................................ [ 47%]
+........................................................................ [ 63%]
+........................................................................ [ 79%]
+........................................................................ [ 95%]
+.....................                                                    [100%]
+=============================== warnings summary ===============================
+../../../tmp/claude-0/venv-otp/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /tmp/claude-0/venv-otp/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/unit/test_app_attest_enrollment.py: 11 warnings
+  /home/claude/OTP-DDOS/src/otp_guard/providers/attestation.py:187: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_before_utc.
+    if not (c.not_valid_before.replace(tzinfo=now.tzinfo) <= now <= c.not_valid_after.replace(tzinfo=now.tzinfo)):
+
+tests/unit/test_app_attest_enrollment.py: 11 warnings
+  /home/claude/OTP-DDOS/src/otp_guard/providers/attestation.py:187: CryptographyDeprecationWarning: Properties that return a naïve datetime object have been deprecated. Please switch to not_valid_after_utc.
+    if not (c.not_valid_before.replace(tzinfo=now.tzinfo) <= now <= c.not_valid_after.replace(tzinfo=now.tzinfo)):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
 ==================================== PASSES ====================================
 ____________________ test_synthetic_logs_replay_round_trip _____________________
 ----------------------------- Captured stdout call -----------------------------
-wrote 319 rows to /tmp/pytest-of-root/pytest-64/test_synthetic_logs_replay_rou0/logs.csv
+wrote 319 rows to /tmp/pytest-of-root/pytest-46/test_synthetic_logs_replay_rou0/logs.csv
 ______________ test_checkpoint_rows_from_other_code_are_rejected _______________
 ----------------------------- Captured stdout call -----------------------------
   reused 0, resumed 1, running 0 (stale rows rejected: 1)
@@ -68,6 +82,7 @@ PASSED tests/integration/test_real_redis.py::test_timeout_rescheduled_during_the
 PASSED tests/integration/test_real_redis.py::test_late_reversal_after_thirteen_minutes_across_instances
 PASSED tests/integration/test_real_redis.py::test_replayed_older_failure_keeps_the_block_newest_time_across_instances
 PASSED tests/integration/test_real_redis.py::test_replayed_crossing_is_dated_at_its_transition_across_instances
+PASSED tests/integration/test_real_redis.py::test_sorted_set_ttl_runs_from_the_latest_write_and_expire_zero_deletes
 PASSED tests/integration/test_replay.py::test_synthetic_logs_replay_round_trip
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[memory]
 PASSED tests/integration/test_scenarios.py::test_original_incident_random_number_flood_from_one_ip[redis]
@@ -235,6 +250,8 @@ PASSED tests/unit/test_second_round.py::test_baseline_job_cold_start_uses_only_r
 PASSED tests/unit/test_second_round.py::test_baseline_job_cold_start_uses_only_recorded_hours[redis]
 PASSED tests/unit/test_second_round.py::test_graded_block_counter_challenges_then_downgrades_first_time_clients[memory]
 PASSED tests/unit/test_second_round.py::test_graded_block_counter_challenges_then_downgrades_first_time_clients[redis]
+PASSED tests/unit/test_seventh_round.py::test_block_statistic_accumulates_in_processing_order[memory]
+PASSED tests/unit/test_seventh_round.py::test_block_statistic_accumulates_in_processing_order[redis]
 PASSED tests/unit/test_simulator_invariants.py::test_offered_workload_is_identical_across_designs
 PASSED tests/unit/test_simulator_invariants.py::test_cohorts_reconcile_and_the_funnel_is_monotone
 PASSED tests/unit/test_simulator_invariants.py::test_gate_losses_are_in_the_denominator
@@ -419,6 +436,20 @@ PASSED tests/unit/test_steps.py::test_relative_baseline_fires_when_a_healthy_key
 PASSED tests/unit/test_steps.py::test_relative_baseline_fires_when_a_healthy_key_drops[redis]
 PASSED tests/unit/test_steps.py::test_session_layer_off_keeps_client_identity[memory]
 PASSED tests/unit/test_steps.py::test_session_layer_off_keeps_client_identity[redis]
+PASSED tests/unit/test_store_parity.py::test_sorted_set_written_with_a_ttl_lives_from_its_latest_write
+PASSED tests/unit/test_store_parity.py::test_zadd_max_refreshes_the_ttl_even_when_the_score_is_not_raised
+PASSED tests/unit/test_store_parity.py::test_a_key_lives_until_the_clock_passes_its_expiry
+PASSED tests/unit/test_store_parity.py::test_ttls_are_whole_seconds_and_zero_means_none
+PASSED tests/unit/test_store_parity.py::test_hincrby_gives_a_ttl_only_to_a_hash_without_one
+PASSED tests/unit/test_store_parity.py::test_an_emptied_sorted_set_is_deleted_and_restarts_with_its_next_write
+PASSED tests/unit/test_store_parity.py::test_members_with_equal_scores_come_in_member_order
+PASSED tests/unit/test_store_parity.py::test_random_operation_sequences_agree[0]
+PASSED tests/unit/test_store_parity.py::test_random_operation_sequences_agree[1]
+PASSED tests/unit/test_store_parity.py::test_random_operation_sequences_agree[2]
+PASSED tests/unit/test_store_parity.py::test_random_operation_sequences_agree[3]
+PASSED tests/unit/test_store_parity.py::test_random_operation_sequences_agree[4]
+PASSED tests/unit/test_store_parity.py::test_random_operation_sequences_agree[5]
+PASSED tests/unit/test_store_parity.py::test_simulation_is_identical_on_both_stores
 PASSED tests/unit/test_third_round.py::test_concurrent_crossings_escalate_to_stage_two[memory]
 PASSED tests/unit/test_third_round.py::test_concurrent_crossings_escalate_to_stage_two[redis]
 PASSED tests/unit/test_third_round.py::test_two_crossings_at_the_same_instant_are_two_events[memory]
@@ -476,4 +507,4 @@ PASSED tests/unit/test_third_round.py::test_two_baseline_workers_neither_double_
 PASSED tests/unit/test_third_round.py::test_partial_first_hour_is_not_a_sample_and_restart_keeps_the_last_hour[memory]
 PASSED tests/unit/test_third_round.py::test_partial_first_hour_is_not_a_sample_and_restart_keeps_the_last_hour[redis]
 PASSED tests/unit/test_third_round.py::test_weekly_profile_is_learned_in_the_simulation
-436 passed in 190.45s (0:03:10)
+453 passed, 23 warnings in 258.98s (0:04:18)

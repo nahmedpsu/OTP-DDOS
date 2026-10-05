@@ -1,0 +1,90 @@
+{
+  "backend": "memory",
+  "results": {
+    "original_incident_single_client": {
+      "requests": 200,
+      "sms_sent": 3,
+      "note": "The original incident: one client, random numbers. Stopped by the per-session cap (3 per 10 min)."
+    },
+    "datacenter_rotation_default_config": {
+      "requests": 300,
+      "sms_sent": 0,
+      "note": "Default config: the web source cap (5/min) bounds it."
+    },
+    "datacenter_rotation_caps_lifted": {
+      "requests": 300,
+      "sms_sent": 0,
+      "note": "Source caps lifted: the datacenter ASN cap (50/min) alone bounds it."
+    },
+    "residential_rotation_feedback_loop": {
+      "requests": 600,
+      "sms_sent": 60,
+      "sms_per_minute": [
+        30,
+        30,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "asn_denylisted": false,
+      "note": "Every static limit removed; unique residential IP per request. Only the verification feedback loop sees it."
+    },
+    "sms_pumping_premium_prefix": {
+      "requests": 50,
+      "sms_sent": 0,
+      "note": "Premium-rate prefix 96699: blocked at Step 5b."
+    },
+    "sequential_number_walk": {
+      "requests": 50,
+      "sms_sent": 40,
+      "phase1_sent": 40,
+      "phase1_flagged_narrow_range": 29,
+      "phase2_sent_after_feedback": 0,
+      "note": "Caps lifted; fresh fingerprint per request (+20). Phase 1: young fingerprint plus the narrow-range signal reach only the delay tier, which still sends. Phase 2, after the 10-minute verification window with zero conversions, the conversion penalty (+25) stacks on top and every further request lands in the challenge tier: no more SMS."
+    },
+    "legitimate_user_journey": {
+      "first_risk_score": 2.5,
+      "verified": true,
+      "return_risk_score": 0.0,
+      "hlr_lookups_on_return": 0,
+      "channel": "sms",
+      "note": "Real user verifies once; a week later they are trusted: lower score, no HLR spend."
+    },
+    "global_circuit_breaker": {
+      "hourly_budget": 10,
+      "sms_sent": 10,
+      "mode_after_each": [
+        "normal",
+        "normal",
+        "normal",
+        "normal",
+        "normal",
+        "normal",
+        "normal",
+        "normal",
+        "elevated",
+        "elevated",
+        "emergency",
+        "emergency"
+      ],
+      "clean_user_in_emergency": null,
+      "risky_user_in_emergency": null,
+      "note": "At 80 % the breaker goes elevated, at 100 % emergency: clean traffic (score < 10) still gets SMS, anything riskier is downgraded."
+    }
+  }
+}

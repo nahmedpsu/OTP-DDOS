@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Replay a stratified sample of the recorded simulation runs with the current code and compare every
-recorded field. Used for 2.8.1, whose implementation repairs (event time on replay, identifier
+recorded field. Used for 2.8.1 to 2.8.3, whose implementation repairs (event time on replay, identifier
 retention, the timeout worker's conditional removal, Step 11 challenges and the source caps) must not
 change any simulated result: the simulator is single-threaded and never crashes a process, so the
 repaired paths are either not reached or reached with identical outcomes.

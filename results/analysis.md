@@ -9,8 +9,8 @@ table shows what the *other* layers do. `stopped_by` counts where each request e
 
 | Attacker | SMS sent / 600 | Last minute with any SMS | Sustained rate after detection (per min) | Stopped by |
 |---|---:|---:|---:|---|
-| `naive_single_client`<br>One IP, one session, random numbers | 6 | 11 | 0.3 | step1 594, sent:sms:allow 5, sent:sms:delay 1 |
-| `datacenter_ip_rotation`<br>Fresh IP and fingerprint per request from a hosting ASN abroad | 0 | 0 | 0.0 | step7 600 |
+| `naive_single_client`<br>One IP, one session, random numbers | 6 | 12 | 0.3 | step1 594, sent:sms:allow 5, sent:sms:delay 1 |
+| `datacenter_ip_rotation`<br>Fresh IP and fingerprint per request from a hosting ASN abroad | 0 | 0 | 0.0 | step7 500, step2 100 |
 | `residential_rotation_bot`<br>Residential proxy pool, fresh fingerprint, reCAPTCHA score 0.6 | 25 | 4 | 0.0 | no_channel 391, step7 184, sent:sms:delay 25 |
 | `residential_captcha_farm`<br>Residential proxy pool, fresh fingerprint, reCAPTCHA score 0.9 | 60 | 2 | 0.0 | step7 540, sent:sms:delay 60 |
 | `residential_aged_unique_fingerprints`<br>Residential pool, unique fingerprints pre-aged 2 h, reCAPTCHA 0.9 | 150 | 5 | 0.0 | step7 450, sent:sms:delay 90, sent:sms:allow 60 |
@@ -27,9 +27,9 @@ Default configuration unless the case says otherwise.
 |---|---|
 | `normal_user`<br>One request, verifies | `{"delivered": true, "tier": "allow", "risk_score": 2.4999999999999996}` |
 | `retry_user`<br>Did not receive the SMS, retries | `{"first": "sms", "retry_after_70s": "sms", "retry_after_20s_more": "step8", "note": "second retry inside the 120 s backoff window is refused"}` |
-| `campaign_burst_default_caps`<br>200 new visitors in 5 min, default source caps (web 5/min) | `{"users": 200, "delivered": 25, "delivered_pct": 12.5, "tiers": {"delay": 200}}` |
+| `campaign_burst_default_caps`<br>200 new visitors in 5 min, default source caps (web 5/min) | `{"users": 200, "delivered": 15, "delivered_pct": 7.5, "tiers": {"delay": 200}}` |
 | `campaign_burst_caps_lifted`<br>200 new visitors in 5 min, caps lifted for the campaign | `{"users": 200, "delivered": 200, "delivered_pct": 100.0, "tiers": {"delay": 200}}` |
-| `cgnat_carrier_default`<br>100 subscribers behind one carrier IP, 10/min (caps lifted to isolate the IP cap) | `{"users": 100, "delivered": 50, "delivered_pct": 50.0, "outcomes": {"sent": 50, "step2": 50}}` |
+| `cgnat_carrier_default`<br>100 subscribers behind one carrier IP, 10/min (caps lifted to isolate the IP cap) | `{"users": 100, "delivered": 25, "delivered_pct": 25.0, "outcomes": {"sent": 25, "step2": 75}}` |
 | `cgnat_carrier_listed`<br>Same, with the carrier ASN listed in CGNAT_ASNS | `{"users": 100, "delivered": 100, "delivered_pct": 100.0, "outcomes": {"sent": 100}}` |
 | `vpn_user`<br>Legitimate user on a VPN | `{"http_status": 403, "delivered": false, "note": "blocked by policy (Step 0)"}` |
 | `corporate_datacenter_egress`<br>Office traffic leaving through a hosting ASN in-country | `{"mature_browser": ["allow", "sms", 17.5], "new_browser": ["challenge", null, 52.5]}` |
@@ -44,7 +44,7 @@ Cost column assumes 0.05 USD per SMS; change with `--sms-unit-cost`.
 
 | Attacker | v1 SMS / 20 min | v2 SMS / 20 min | v1 sustained per hour | v2 sustained per hour | v1 cost | v2 cost |
 |---|---:|---:|---:|---:|---:|---:|
-| `naive_single_client` | 100 | 6 | 300 | 18 | $5.0 | $0.3 |
+| `naive_single_client` | 50 | 6 | 150 | 18 | $2.5 | $0.3 |
 | `datacenter_ip_rotation` | 600 | 0 | 1800 | 0 | $30.0 | $0.0 |
 | `residential_rotation_bot` | 600 | 25 | 1800 | 0 | $30.0 | $1.25 |
 | `residential_captcha_farm` | 600 | 60 | 1800 | 0 | $30.0 | $3.0 |

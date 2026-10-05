@@ -463,3 +463,32 @@ def test_replayed_crossing_is_dated_at_its_transition_across_instances(redis_url
     v = fb1.block_verdict(key)
     assert v is not None and v["stage"] == 1
     assert v["at"] == t_fail and v["until"] == t_fail + h.cfg.block_verdict_ttl
+
+
+def test_sorted_set_ttl_runs_from_the_latest_write_and_expire_zero_deletes(redis_url):
+    """Seventh-round review, M1: on a real Redis a sorted set written with a TTL lives TTL seconds from
+    its latest write, and EXPIRE with a zero TTL deletes the key at once. The memory store, on which
+    the simulations run, follows both rules (tests/unit/test_store_parity.py compares it with fakeredis
+    operation by operation); before 2.9.0 its sorted sets expired TTL seconds after their first write."""
+    import redis
+    from otp_guard.store import Clock, MemoryStore
+    inf = float("inf")
+    clock = Clock()
+    r, m = RedisStore(redis.Redis.from_url(redis_url)), MemoryStore(clock)
+    r.r.delete("parity:z", "parity:s")
+
+    def wait(s):
+        time.sleep(s); clock.advance(s)
+    for s in (r, m):
+        s.zadd("parity:z", 1.0, "a", ttl=2)
+    wait(1.2)
+    for s in (r, m):
+        s.zadd("parity:z", 2.0, "b", ttl=2)
+    wait(1.2)                                   # 2.4 s after the first write, 1.2 s after the latest
+    assert r.zrangebyscore("parity:z", -inf, inf) == m.zrangebyscore("parity:z", -inf, inf) == ["a", "b"]
+    wait(1.0)                                   # 2.2 s after the latest write
+    assert r.zrangebyscore("parity:z", -inf, inf) == m.zrangebyscore("parity:z", -inf, inf) == []
+    for s in (r, m):
+        s.set("parity:s", 1, ttl=100)
+        s.expire("parity:s", 0)
+    assert r.exists("parity:s") is False and m.exists("parity:s") is False

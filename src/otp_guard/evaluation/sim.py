@@ -224,14 +224,16 @@ MAX_SESSION_ATTEMPTS = 10
 
 
 class Simulation:
-    def __init__(self, spec: SimSpec):
+    def __init__(self, spec: SimSpec, backend: str = "memory"):
+        """backend: "memory" (every recorded run) or "redis" (RedisStore on fakeredis, for the
+        differential test of the two stores; the caller drives fakeredis's clock, see run_sim)."""
         self.spec = spec
         if spec.attacker.rate_multiple_of_legit is not None:
             spec.attacker.rate_per_min = spec.attacker.rate_multiple_of_legit * spec.legit.rate_per_min
         self.rng_w = random.Random(spec.seed)                 # workload: the attacker's requests
         self.rng_l = random.Random(f"{spec.seed}:legit")      # workload: legitimate traffic, independent of the attacker
         self.rng_p = random.Random(spec.seed * 1_000_003 + 7)  # policy-dependent decisions
-        h = Harness()
+        h = Harness(backend=backend)
         self.h = h
         h.cfg.features = spec.features
         for k, v in spec.cfg_overrides.items():
@@ -293,6 +295,8 @@ class Simulation:
         self.attacker_sessions_refused = 0
         self.attacker_requests_offered = 0
         self.attacker_blocks_requested, self.attacker_blocks_leaked = set(), set()
+        self.block_state_at_first_attack = []      # [count, seconds left] per block, at the pumper's first attack request
+        self.attacker_sms_exempt = 0               # attack-window SMS to the pumper sent as known-good (exempt from counters)
         self.phase = {ph: collections.Counter() for ph in ("prep", "flood")}    # trust-building attackers
         self.mirror = {}                                                         # threshold-aware carrier's view per block
         self.t_tick0 = self.h.clock.now()                                        # the worker ticks on minute boundaries from here
@@ -695,6 +699,26 @@ class Simulation:
         self.h.p.adaptive.recompute("App/RegisterOTP", "web", "966", observed=observed_per_min,
                                     expected_median=l.rate_per_min, mad=0.25 * l.rate_per_min, conversion=conv)
 
+    def _peek_counter(self, key):
+        """[count, seconds left in its window] of a block's destination counter, read without touching
+        the store (no expiry pass, no round trip): the state a pumper meets on its first request to the
+        block during the attack. [0, 0] when no window is open. Used by scripts/check_condition.py for
+        the warm-start bound (seventh-round review, M2)."""
+        st, now = self.h.p.store, self.h.clock.now()
+        if hasattr(st, "_d"):
+            v = st._d.get(key)
+            if v is None or (v[1] is not None and v[1] < now):
+                return [0, 0.0]
+            return [int(v[0]) if not isinstance(v[0], dict) else 0, round(v[1] - now, 3) if v[1] is not None else None]
+        raw, pttl = st.r.get(key), st.r.pttl(key)
+        if raw is None:
+            return [0, 0.0]
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            n = 0
+        return [n, round(pttl / 1000.0, 3) if pttl and pttl > 0 else None]
+
     # ---- one request ----
     def handle_attacker(self, ctx, minute):
         self.phase[ctx["phase"]]["requests"] += 1
@@ -703,14 +727,21 @@ class Simulation:
             self.stopped_by["session_gate"] += 1
             return 0, 0
         self.h.svc.channels.whatsapp_numbers.discard(ctx["mobile"])
+        if minute >= 0 and ctx["mobile"][:8] not in self.attacker_blocks_requested:
+            self.block_state_at_first_attack.append(self._peek_counter(self.h.p.block_count_key(ctx["mobile"])))
         self.attacker_blocks_requested.add(ctx["mobile"][:8])
-        r = self.send_counting(self.request_from(ctx, tok), True)
+        req = self.request_from(ctx, tok)
+        r = self.send_counting(req, True)
         if r.tier == "challenge" and self.spec.attacker.solves_challenges:
             self.attacker_challenges_solved += 1
-            r = self.send_counting(self.request_from(ctx, tok, challenge=True), True)
+            req = self.request_from(ctx, tok, challenge=True)
+            r = self.send_counting(req, True)
         self.stopped_by[r.rejected_at or f"sent:{r.channel}:{r.tier}"] += 1
         reached_cap = int(r.rejected_at in (None, "step9") and r.tier != "downgrade")
         if r.channel == "sms":
+            if req.known_good and minute >= 0:
+                self.attacker_sms_exempt += 1             # a number or fingerprint with verified history (e.g. a
+                                                           # real user's trusted number inside the pumper's block)
             self.attacker_blocks_leaked.add(ctx["mobile"][:8])
             self.phase[ctx["phase"]]["leaked"] += 1
             self.schedule_delivery(r, ctx, minute)
@@ -942,6 +973,8 @@ class Simulation:
                "attacker_sessions_refused": self.attacker_sessions_refused,
                "attacker_blocks_requested": len(self.attacker_blocks_requested),
                "attacker_blocks_leaked": len(self.attacker_blocks_leaked),
+               "block_state_at_first_attack": self.block_state_at_first_attack,
+               "attacker_sms_exempt": self.attacker_sms_exempt,
                "attack_phase": {ph: dict(c) for ph, c in self.phase.items()},
                "legit_hit_by_verdict": len(hits),           # requests that met any destination-policy intervention
                "legit_hit_stage1": sum(1 for u in hits if u["hit_stage"] == 1),
@@ -1002,8 +1035,17 @@ class Simulation:
                 return k - 1
 
 
-def run_sim(spec: SimSpec):
+def run_sim(spec: SimSpec, backend: str = "memory"):
     t0 = time.perf_counter()
-    out = Simulation(spec).run()
+    sim = Simulation(spec, backend=backend)
+    if backend == "memory":
+        out = sim.run()
+    else:                                    # fakeredis expires keys by time.time(): drive it from the simulated clock
+        real = time.time
+        time.time = sim.h.clock.now
+        try:
+            out = sim.run()
+        finally:
+            time.time = real
     out["wall_s"] = time.perf_counter() - t0
     return out

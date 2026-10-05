@@ -216,6 +216,48 @@ quoted here and in the README has a row in `results/headline_numbers.md`.
   (`tests/integration/test_real_redis.py`), which is the only place those properties are
   established; vendors remain untested live.
 
+## What changed after the seventh-round report
+
+Release 2.9.0. **Every simulated result was regenerated**; the 2.8.x results are kept in
+`results/historical_2.8/`, and `results/store_change_report.md` compares them run by run.
+
+- **The memory store keeps state as Redis does (M1).** Every simulated run executes on
+  `MemoryStore`. Up to 2.8.3 a sorted set written with a TTL kept the expiry of the write that
+  created it, so the outage detector's sets and Step 5c's number-pattern sets emptied a fixed time
+  after their first write while members kept arriving; `RedisStore` refreshes the TTL on every
+  write. Comparing the stores rule by rule found six further differences (expiry at the instant
+  instead of after it, fractional and zero TTLs, EXPIRE NX on hashes, `zadd_max` refreshing even when
+  the score is not raised, emptied sorted sets, member order among equal scores, `scan` order); all
+  now follow Redis. `tests/unit/test_store_parity.py` compares the two stores operation by operation
+  (13 of its 14 tests fail on 2.8.3) and on a whole simulation; `scripts/check_store_parity.py` runs
+  one recorded spec per study on both stores (31 of 31 identical, `results/store_parity_check.md`);
+  `scripts/store_rule_ablation.py` replays 86 recorded runs with one 2.8.x rule restored at a time: the
+  expiry-boundary and tie-order rules change none of them (`results/store_rule_ablation.md`), and
+  `scripts/outage_mechanism_check.py` traces an E5 run whose leakage fell from 115 to 13 to the sorted-set TTL:
+  with the 2.8.x rule the set of known-good verifications emptied, the outage detector saw conversion
+  collapse (1 verification against 9 failures across 24 blocks) and suspended the block tests
+  (`results/outage_mechanism_check.md`).
+- **Rerun.** Of 17,964 matched runs, 11,042 are identical, 5,195 differ only in other counts, 810 in
+  legitimate outcomes and 917 in a leakage count (the total in 855, falling in 805). In 471 of the
+  472 sequential-test runs whose total changed, 2.8.x had raised more outage alerts (761 against 50),
+  each of which suspends the block tests. No claim (C1-C5, K1-K5) changed its count, no setting
+  gained or lost eligibility at a tuning target, and every selection the protocols use is the same;
+  an auxiliary comparison setting (false alarms matched at credit inf, 200 blocks) moved from T1000
+  cinf to T300 cinf. On the E5 evaluation seeds the sequential settings now leak 15 to 19 messages
+  against the instant verifier (49 to 53 in 2.8.x), below the counter's 25; the first protocol's
+  values (19 against 24) were already of that order.
+- **Counter bound with a warm start (M2).** Equation 3 of the manuscript holds only when every
+  attacked block's counter is empty when the pumper arrives; a window opened by a legitimate send
+  adds its residual quota (Equation 4). The simulator records each attacked block's counter state at
+  the pumper's first request and the pumper's exempt sends; `scripts/check_condition.py` checks both
+  bounds on every E4 counter run and the ordering per cell and per seed with paired intervals
+  (`results/condition_check.md`).
+- **Processing-order semantics (M4).** A block's statistic accumulates in processing order and a
+  crossing is dated at the event that completes it; a late event can backdate a verdict containing
+  later evidence (feedback.py module notes; `tests/unit/test_seventh_round.py`).
+- **Generated tables.** The manuscript's result tables are written by `scripts/paper_tables.py`;
+  supplementary Table S1 (every design against every attacker) is `results/design_table.md`.
+
 ## What changed after the sixth-round report
 
 Repository-side items of the sixth-round report (2.8.2). The manuscript's analytical claims (M1,

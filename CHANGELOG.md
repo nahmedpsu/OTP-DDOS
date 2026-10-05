@@ -1,5 +1,69 @@
 # Changelog
 
+## 2.9.0 (2026-10-05)
+
+Seventh-round review. **Every simulation result changes provenance**: the in-memory store, on which
+every simulated run executes, now keeps state as Redis does, and every study was rerun. The 2.8.x
+results are kept unchanged in `results/historical_2.8/`; `results/store_change_report.md` compares
+them with the new ones run by run, and lists the selections, eligibility, claims and headline numbers
+before and after.
+
+- **Memory store aligned with Redis (M1).** Up to 2.8.3 `MemoryStore` kept a sorted set's expiry from
+  the write that created it, so the outage detector's sets (`outage:*`) and Step 5c's number-pattern
+  sets (`numseq:*`, `numpfx:*`) emptied a fixed time after their first write while members kept
+  arriving; `RedisStore` follows every `ZADD` with `EXPIRE`, so on Redis they live TTL seconds from the
+  latest write. The intended semantics are Redis's (the deployed backend, and a detector that forgets
+  observations still inside its window is a defect). `MemoryStore` now also follows Redis where it
+  differed in ways no test had compared: a key lives until the clock passes its expiry time (Redis
+  expires a key when now > expiry; up to 2.8.3 the memory store expired it at that instant); TTLs are
+  whole seconds and a zero TTL means none; `hincrby` with a TTL gives one only to a hash without
+  (EXPIRE NX); `zadd_max` refreshes the TTL even when the score is not raised; a sorted set left empty
+  is deleted; members with equal scores come in member order; `scan` returns keys sorted, on both
+  stores; `expire` with a non-positive TTL deletes the key.
+- **Differential tests.** `tests/unit/test_store_parity.py`: the reviewer's case (members arriving
+  while the first write's TTL runs out), one test per rule above, six random sequences of 400
+  operations over every store method the pipeline uses with clock steps that land on expiry instants,
+  and a whole simulation run on both stores (identical records). 13 of its 14 tests fail on 2.8.3.
+  `tests/integration/test_real_redis.py`: the expiry refresh and EXPIRE 0 on a real redis-server.
+  `scripts/check_store_parity.py` runs recorded study specs on both stores
+  (`results/store_parity_check.md`).
+- **Rerun.** Every study (`scripts/run_evaluation.py`, `scripts/run_counter_study.py`,
+  `scripts/run_round5_analyses.py`, `scripts/run_analysis.py`, `scripts/run_scenarios.py`), clean
+  invocations with the same seeds, protocols and selection rules (the counter study resumed twice from its checkpoint after
+  the container restarted; every run carries its code hash). Of 17,964 runs matched with the 2.8.x records, 11,042 are
+  identical, 5,195 differ only in other counts (outage alerts above all), 810 in legitimate outcomes and 917 in a leakage
+  count (the total in 855, which fell in 805; in 471 of the 472 sequential-test runs among them 2.8.x had raised more
+  outage alerts, 761 against 50, each suspending the block tests); 120 belong to one comparison setting that changed (below). No claim changed (C1-C5 and K1-K5 have the same counts), no
+  setting gained or lost eligibility at a tuning target, and every selection the protocols use is the same; only the
+  auxiliary 'matched false alarms, credit inf' setting at 200 blocks moved from T1000 cinf to T300 cinf. Values that
+  moved: the default's verdict events at 200 blocks and 65 % conversion (5.8 to 6.5 a day), the selected T300 c0's
+  (314 to 334) and its miss of the tuning target on the evaluation seeds (0.16 to 0.18 points); the attacked-service
+  table (E1: no-policy leakage 5,785 to 5,509 messages, harm by up to 0.12 points); and, on the E5 evaluation seeds, the
+  sequential settings' leakage against the instantly verifying carrier (49-53 messages to 15-19), so the counter (25) no longer leaks least of the re-selected
+  winners against that carrier. `results/store_change_report.md` lists every changed headline number.
+- **Which rule mattered.** `scripts/store_rule_ablation.py` replays 86 recorded runs with one 2.8.x rule
+  restored at a time; the expiry-boundary and tie-order rules change none (`results/store_rule_ablation.md`).
+  `scripts/outage_mechanism_check.py` traces an E5 run (leakage 115 in 2.8.x, 13 in 2.9.0) to the sorted-set TTL:
+  restoring only that rule, the set of known-good verifications empties, the outage detector sees conversion collapse
+  (1 verification against 9 failures across 24 blocks) and suspends the block tests (`results/outage_mechanism_check.md`).
+- **Warm-start counter bound (M2).** The simulator records each attacked block's counter state when the
+  pumper first reaches it (`block_state_at_first_attack`) and the pumper's SMS sent as a client with
+  verified history (`attacker_sms_exempt`); neither changes a run. `scripts/check_condition.py` checks
+  the cold-start bound (Equation 3) and the warm-start bound (Equation 4: plus each open window's
+  residual quota) on every E4 counter run, and the ordering per cell and per seed with paired
+  intervals: of 100 counter runs, the 44 that started cold never exceed Equation 3, three warm runs do, none exceeds
+  Equation 4 once 7 exempt SMS (real users' trusted numbers in the pumper's blocks) are set aside; ordering 18 of 18
+  decisive cells (cold) and 17 of 18 (warm), 76 of 78 seeds.
+- **Processing-order semantics documented (M4).** `feedback.py` module notes: a block's statistic
+  accumulates in processing order and a crossing is dated at the event that completes it; a late event
+  can backdate a verdict containing later evidence, moving its expiry. `tests/unit/test_seventh_round.py`
+  pins the reviewer's diagnostic (failures at 0, 1, 2, 603 and 3 s: crossing dated 3 s).
+- **Generated tables.** `scripts/paper_tables.py` writes the manuscript's result tables
+  (`paper/tables/*.tex`) and supplementary Table S1 (`results/design_table.md`) from the results;
+  `scripts/run_round5_analyses.py` adds the four carriers together with intervals (Table 9a).
+- `scripts/compare_store_change.py` (the change report), Figure 2's vertical bars as intervals of the
+  per-seed sum, Figure 4 with both attack durations, intervals and the warm-start estimate.
+
 ## 2.8.3 (2026-10-04)
 
 - **Reversal against the test that counted the failure (the edge found after 2.8.2).** Every

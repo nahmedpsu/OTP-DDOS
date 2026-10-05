@@ -63,7 +63,7 @@ blocks therefore scales with how many blocks the pumper can use.
      twelve shifted points (K3, 127/144),
      and exceeded the default's by more than 0.25 points in 51 of 144 (K5, 93/144).
    - On the same attacked traces (E1, 60 minutes), it held each concentrated pumper to 71 to 158
-     SMS against 20 to 897 for the default; under no policy a pumper on shared blocks also
+     SMS against 20 to 882 for the default; under no policy a pumper on shared blocks also
      exhausts the hourly SMS budget, so the counter *raised* completion among the attacked
      blocks' users (by 11 points against the no-verify pumper).
    - **Where it loses** (E3, E4): a trust-building pumper on random numbers (577 leaked, the same
@@ -89,7 +89,7 @@ blocks therefore scales with how many blocks the pumper can use.
    reports failures and 0.8 when it is silent, against 1.8 send-clocked. A poisoner that floods
    the blocks real users share earns 16 verdict events on 13 blocks and hits 98 requests; the
    completion loss attributable to enforcing those verdicts, against the same trace with
-   verdicts recorded but not enforced, is 12.7 requests (3.1 % of users), 25.8 (6.3 %) without
+   verdicts recorded but not enforced, is 12.7 requests (3.1 % of users), 25.9 (6.3 %) without
    a fallback channel and 97.7 (24 %) under the hard denylist. Verdicts outlive the attack: in
    a 70-minute run whose poisoner stops after 10 minutes, verdicts hit 406 requests after it
    stopped; the loss attributable to enforcement among requests after the stop is 46.2 (48.2
@@ -318,7 +318,7 @@ Other things the evaluation established:
   so these are lower bounds only under the other assumptions). Premium pumping breaks even under
   v1 at 4.3 %; under v2 a carrier that never verifies needs 27 %, an instant verifier more than
   the whole fee (131 %), and the human-like carrier only 5.4 %. Over a 360-minute attack the
-  human-like carrier sustains 789 SMS an hour against the default and 81 against the
+  human-like carrier sustains 753 SMS an hour against the default and 81 against the
   short-window counter (break-even above the whole fee); a pumper spreading over 300 blocks
   sustains about 1 900 an hour against either.
 - **Performance** (`results/performance.md`, real Redis, 4 uvicorn workers on 4 vCPUs, vendors
@@ -353,7 +353,11 @@ overstates containment for residential attackers and is kept for the use-case ta
 
 **What this is.** A design, a working implementation with real vendor adapters, and a
 simulated evaluation. Everything in `results/` is reproducible from this repository with
-`make results`; the simulation is deterministic for a given seed set.
+`make results`; the simulation is deterministic for a given seed set. Release 2.9.0 produced every
+simulated result: its in-memory store keeps state as Redis does (`tests/unit/test_store_parity.py`;
+seventh-round review), and every study was rerun. The 2.8.x results are kept in
+`results/historical_2.8/`, and `results/store_change_report.md` compares the two run by run (no
+claim, tuning-target eligibility or protocol selection changed).
 
 **What it is not.** No production data was used. No anonymised logs from the original
 incident or the v1 period were available, and no live call to any vendor has been made
@@ -364,12 +368,12 @@ The biggest single improvement available is to replay real logs through
 `scripts/replay_logs.py` under the schema in `docs/replay_schema.md`; that requires the
 approvals listed in `docs/privacy_and_ethics.md`.
 
-**Testing.** `make test` runs 436 tests (`results/test_report.txt`): unit tests of every
+**Testing.** `make test` runs 453 tests (`results/test_report.txt`): unit tests of every
 step, the state machine's interleavings and crash points on the in-memory store and on
 fakeredis, simulator invariants, and the App Attest enrolment verifier against
 synthetic certificate chains. `tests/integration/test_real_redis.py` repeats the concurrency,
 graded-escalation, crash-recovery, replay and destination-counter cases across two pipeline
-instances on a real `redis-server` when one is available (CI starts one; eighteen tests), and
+instances on a real `redis-server` when one is available (CI starts one; nineteen tests), and
 `tests/integration/test_api.py` drives the HTTP application, the stage-1 challenge included. These are specific
 interleavings and crash points, not a proof over all of them. No test calls a real vendor.
 

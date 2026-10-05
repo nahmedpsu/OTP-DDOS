@@ -29,8 +29,17 @@ replay (a replayed older failure never lowers it), and a block-test event is app
 too: it counts toward the test that was running then (an event dated before the last crossing
 belongs to a concluded test and is recorded but not counted), a crossing it causes issues its verdict
 at the event's time and escalates against the verdict active at that time, and the verdict's lifetime
-runs from the event's time (see _block_event). So reputation, outage and block-test effects all apply
-at the transition's time; what a replay can still differ in is when the operator learns of a verdict.
+runs from the event's time (see _block_event). Reputation and outage effects land at their own times.
+A block's statistic, however, accumulates in processing order, not in event-time order, and this is
+the defined semantics, not an equivalence to chronological execution (seventh-round review, M4): the
+crossing is the event that takes the processing-order sum over the threshold, dated at that event's
+time. If a late event completes a crossing, the verdict can be dated before evidence it contains
+(failures dated 0, 1, 2 and 603 s processed first, then a replayed failure dated 3 s: the crossing is
+dated 3 s and expires at 3 + 3600 s, whereas in chronological order it would be dated 603 s and expire
+600 s later), its expiry and the start of the next test move with it, escalation is judged against the
+verdict active at that earlier time, and later evidence dated before the crossing is recorded but not
+counted in the next test. On the live path events are processed in time order, so the two coincide;
+in the simulator, which never crashes a process, every recorded run is on that path.
 Before a transition the caller writes a write-ahead intent (otp:intents);
 run_due_timeouts() sweeps intents older than RECOVER_AFTER_S and applies whatever batches are still
 recorded, so a process that dies between the compare-and-set and the end of its effects leaves work
@@ -513,7 +522,8 @@ class FeedbackLoop:
         concurrent events are all counted, a crossing happens once, and its stage is decided from the
         verdict active at the event's time (a crossing while a verdict is active escalates to stage 2).
 
-        Event time (sixth-round review, M5). The document remembers when its current test began
+        Event time (sixth-round review, M5; processing order, seventh-round review, M4: see the module
+        notes). The document remembers when its current test began
         (`test_since`: the time of the last crossing, 0 for a fresh block). An event is counted toward
         the test that was running at its time: one dated before `test_since` belongs to a test that a
         crossing has already concluded, so it is recorded (a later replay is still ignored) but not

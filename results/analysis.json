@@ -22,8 +22,8 @@
         0,
         0,
         0,
-        3,
         0,
+        3,
         0,
         0,
         0,
@@ -33,7 +33,7 @@
         0,
         0
       ],
-      "last_minute_with_sms": 11,
+      "last_minute_with_sms": 12,
       "sustained_rate_last_10_min": 0.3,
       "stopped_by": {
         "step1": 594,
@@ -70,7 +70,8 @@
       "last_minute_with_sms": 0,
       "sustained_rate_last_10_min": 0.0,
       "stopped_by": {
-        "step7": 600
+        "step7": 500,
+        "step2": 100
       }
     },
     "residential_rotation_bot": {
@@ -324,8 +325,8 @@
     "campaign_burst_default_caps": {
       "description": "200 new visitors in 5 min, default source caps (web 5/min)",
       "users": 200,
-      "delivered": 25,
-      "delivered_pct": 12.5,
+      "delivered": 15,
+      "delivered_pct": 7.5,
       "tiers": {
         "delay": 200
       }
@@ -342,11 +343,11 @@
     "cgnat_carrier_default": {
       "description": "100 subscribers behind one carrier IP, 10/min (caps lifted to isolate the IP cap)",
       "users": 100,
-      "delivered": 50,
-      "delivered_pct": 50.0,
+      "delivered": 25,
+      "delivered_pct": 25.0,
       "outcomes": {
-        "sent": 50,
-        "step2": 50
+        "sent": 25,
+        "step2": 75
       }
     },
     "cgnat_carrier_listed": {
@@ -409,11 +410,11 @@
   },
   "v1_vs_v2": {
     "naive_single_client": {
-      "v1_sms": 100,
+      "v1_sms": 50,
       "v2_sms": 6,
-      "v1_sustained_per_hour": 300,
+      "v1_sustained_per_hour": 150,
       "v2_sustained_per_hour": 18,
-      "v1_cost_20min_usd": 5.0,
+      "v1_cost_20min_usd": 2.5,
       "v2_cost_20min_usd": 0.3
     },
     "datacenter_ip_rotation": {

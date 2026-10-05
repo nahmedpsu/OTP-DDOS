@@ -18,10 +18,10 @@
     },
     "residential_rotation_feedback_loop": {
       "requests": 600,
-      "sms_sent": 60,
+      "sms_sent": 30,
       "sms_per_minute": [
         30,
-        30,
+        0,
         0,
         0,
         0,

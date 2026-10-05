@@ -1,0 +1,549 @@
+{
+  "assumptions": {
+    "attack_rate_per_minute": 30,
+    "attack_minutes": 20,
+    "sms_unit_cost_usd": 0.05,
+    "source_caps": "lifted to campaign scale in attacker runs (the blunt cap would otherwise hide every other layer)",
+    "prefix_table": "the sample table covers a few ranges only, so random numbers mostly land on 'unknown' prefixes (+10); a complete table would route them to HLR, which here answers 'assigned' for every number (generous to the attacker)"
+  },
+  "attackers": {
+    "naive_single_client": {
+      "description": "One IP, one session, random numbers",
+      "requests": 600,
+      "sms_sent": 6,
+      "per_minute": [
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "last_minute_with_sms": 11,
+      "sustained_rate_last_10_min": 0.3,
+      "stopped_by": {
+        "step1": 594,
+        "sent:sms:allow": 5,
+        "sent:sms:delay": 1
+      }
+    },
+    "datacenter_ip_rotation": {
+      "description": "Fresh IP and fingerprint per request from a hosting ASN abroad",
+      "requests": 600,
+      "sms_sent": 0,
+      "per_minute": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "last_minute_with_sms": 0,
+      "sustained_rate_last_10_min": 0.0,
+      "stopped_by": {
+        "step7": 600
+      }
+    },
+    "residential_rotation_bot": {
+      "description": "Residential proxy pool, fresh fingerprint, reCAPTCHA score 0.6",
+      "requests": 600,
+      "sms_sent": 25,
+      "per_minute": [
+        11,
+        6,
+        3,
+        5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "last_minute_with_sms": 4,
+      "sustained_rate_last_10_min": 0.0,
+      "stopped_by": {
+        "no_channel": 391,
+        "step7": 184,
+        "sent:sms:delay": 25
+      }
+    },
+    "residential_captcha_farm": {
+      "description": "Residential proxy pool, fresh fingerprint, reCAPTCHA score 0.9",
+      "requests": 600,
+      "sms_sent": 60,
+      "per_minute": [
+        30,
+        30,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "last_minute_with_sms": 2,
+      "sustained_rate_last_10_min": 0.0,
+      "stopped_by": {
+        "step7": 540,
+        "sent:sms:delay": 60
+      }
+    },
+    "residential_aged_unique_fingerprints": {
+      "description": "Residential pool, unique fingerprints pre-aged 2 h, reCAPTCHA 0.9",
+      "requests": 600,
+      "sms_sent": 150,
+      "per_minute": [
+        30,
+        30,
+        30,
+        30,
+        30,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "last_minute_with_sms": 5,
+      "sustained_rate_last_10_min": 0.0,
+      "stopped_by": {
+        "step7": 450,
+        "sent:sms:delay": 90,
+        "sent:sms:allow": 60
+      }
+    },
+    "residential_reused_browser_profile": {
+      "description": "Residential pool, one real 48-hour-old browser profile reused",
+      "requests": 600,
+      "sms_sent": 73,
+      "per_minute": [
+        30,
+        30,
+        13,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "last_minute_with_sms": 3,
+      "sustained_rate_last_10_min": 0.0,
+      "stopped_by": {
+        "step1": 510,
+        "sent:sms:allow": 47,
+        "sent:sms:delay": 26,
+        "step7": 17
+      }
+    },
+    "sequential_numbers": {
+      "description": "Residential pool, numbers 966501000000 upward",
+      "requests": 600,
+      "sms_sent": 60,
+      "per_minute": [
+        30,
+        30,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "last_minute_with_sms": 2,
+      "sustained_rate_last_10_min": 0.0,
+      "stopped_by": {
+        "no_channel": 540,
+        "sent:sms:delay": 60
+      }
+    },
+    "premium_prefix_pumping": {
+      "description": "Residential pool, premium-rate prefix 96699",
+      "requests": 600,
+      "sms_sent": 0,
+      "per_minute": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "last_minute_with_sms": 0,
+      "sustained_rate_last_10_min": 0.0,
+      "stopped_by": {
+        "step5": 600
+      }
+    },
+    "spoofed_platform_header": {
+      "description": "Residential pool, HTTP_PLATFORM: ios without attestation",
+      "requests": 600,
+      "sms_sent": 0,
+      "per_minute": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "last_minute_with_sms": 0,
+      "sustained_rate_last_10_min": 0.0,
+      "stopped_by": {
+        "step0": 600
+      }
+    }
+  },
+  "use_cases": {
+    "normal_user": {
+      "description": "One request, verifies",
+      "delivered": true,
+      "tier": "allow",
+      "risk_score": 2.4999999999999996
+    },
+    "retry_user": {
+      "description": "Did not receive the SMS, retries",
+      "first": "sms",
+      "retry_after_70s": "sms",
+      "retry_after_20s_more": "step8",
+      "note": "second retry inside the 120 s backoff window is refused"
+    },
+    "campaign_burst_default_caps": {
+      "description": "200 new visitors in 5 min, default source caps (web 5/min)",
+      "users": 200,
+      "delivered": 25,
+      "delivered_pct": 12.5,
+      "tiers": {
+        "delay": 200
+      }
+    },
+    "campaign_burst_caps_lifted": {
+      "description": "200 new visitors in 5 min, caps lifted for the campaign",
+      "users": 200,
+      "delivered": 200,
+      "delivered_pct": 100.0,
+      "tiers": {
+        "delay": 200
+      }
+    },
+    "cgnat_carrier_default": {
+      "description": "100 subscribers behind one carrier IP, 10/min (caps lifted to isolate the IP cap)",
+      "users": 100,
+      "delivered": 50,
+      "delivered_pct": 50.0,
+      "outcomes": {
+        "sent": 50,
+        "step2": 50
+      }
+    },
+    "cgnat_carrier_listed": {
+      "description": "Same, with the carrier ASN listed in CGNAT_ASNS",
+      "users": 100,
+      "delivered": 100,
+      "delivered_pct": 100.0,
+      "outcomes": {
+        "sent": 100
+      }
+    },
+    "vpn_user": {
+      "description": "Legitimate user on a VPN",
+      "http_status": 403,
+      "delivered": false,
+      "note": "blocked by policy (Step 0)"
+    },
+    "corporate_datacenter_egress": {
+      "description": "Office traffic leaving through a hosting ASN in-country",
+      "mature_browser": [
+        "allow",
+        "sms",
+        17.5
+      ],
+      "new_browser": [
+        "challenge",
+        null,
+        52.5
+      ]
+    },
+    "roaming_user": {
+      "description": "Saudi number, connecting from the UAE",
+      "tier": "allow",
+      "risk_score": 12.5,
+      "delivered": true
+    },
+    "legacy_app_user": {
+      "description": "App version without attestation, inside the grace window",
+      "tier": "delay",
+      "delivered": true
+    },
+    "returning_trusted_user": {
+      "description": "Verified a month ago, comes back",
+      "risk_score": 0.0,
+      "hlr_lookups": 1,
+      "delivered": true
+    },
+    "legit_user_on_attacked_isp": {
+      "description": "Real customer of an ISP that has hosted a 20-minute flood (caps lifted)",
+      "first_response": "challenge",
+      "first_tier": "challenge",
+      "first_score": 42.5,
+      "after_challenge": [
+        "delay",
+        "sms"
+      ],
+      "isp_denylisted": false,
+      "note": "one interactive challenge, then delivered; the ISP is never denylisted"
+    }
+  },
+  "v1_vs_v2": {
+    "naive_single_client": {
+      "v1_sms": 100,
+      "v2_sms": 6,
+      "v1_sustained_per_hour": 300,
+      "v2_sustained_per_hour": 18,
+      "v1_cost_20min_usd": 5.0,
+      "v2_cost_20min_usd": 0.3
+    },
+    "datacenter_ip_rotation": {
+      "v1_sms": 600,
+      "v2_sms": 0,
+      "v1_sustained_per_hour": 1800,
+      "v2_sustained_per_hour": 0,
+      "v1_cost_20min_usd": 30.0,
+      "v2_cost_20min_usd": 0.0
+    },
+    "residential_rotation_bot": {
+      "v1_sms": 600,
+      "v2_sms": 25,
+      "v1_sustained_per_hour": 1800,
+      "v2_sustained_per_hour": 0,
+      "v1_cost_20min_usd": 30.0,
+      "v2_cost_20min_usd": 1.25
+    },
+    "residential_captcha_farm": {
+      "v1_sms": 600,
+      "v2_sms": 60,
+      "v1_sustained_per_hour": 1800,
+      "v2_sustained_per_hour": 0,
+      "v1_cost_20min_usd": 30.0,
+      "v2_cost_20min_usd": 3.0
+    },
+    "residential_aged_unique_fingerprints": {
+      "v1_sms": 600,
+      "v2_sms": 150,
+      "v1_sustained_per_hour": 1800,
+      "v2_sustained_per_hour": 0,
+      "v1_cost_20min_usd": 30.0,
+      "v2_cost_20min_usd": 7.5
+    },
+    "residential_reused_browser_profile": {
+      "v1_sms": 600,
+      "v2_sms": 73,
+      "v1_sustained_per_hour": 1800,
+      "v2_sustained_per_hour": 0,
+      "v1_cost_20min_usd": 30.0,
+      "v2_cost_20min_usd": 3.65
+    },
+    "sequential_numbers": {
+      "v1_sms": 600,
+      "v2_sms": 60,
+      "v1_sustained_per_hour": 1800,
+      "v2_sustained_per_hour": 0,
+      "v1_cost_20min_usd": 30.0,
+      "v2_cost_20min_usd": 3.0
+    },
+    "premium_prefix_pumping": {
+      "v1_sms": 600,
+      "v2_sms": 0,
+      "v1_sustained_per_hour": 1800,
+      "v2_sustained_per_hour": 0,
+      "v1_cost_20min_usd": 30.0,
+      "v2_cost_20min_usd": 0.0
+    },
+    "spoofed_platform_header": {
+      "v1_sms": 600,
+      "v2_sms": 0,
+      "v1_sustained_per_hour": 1800,
+      "v2_sustained_per_hour": 0,
+      "v1_cost_20min_usd": 30.0,
+      "v2_cost_20min_usd": 0.0
+    }
+  },
+  "sensitivity": [
+    {
+      "otp_ttl_s": 120,
+      "denylist_min_sample": 20,
+      "attacker_sms_20min": 60,
+      "attacker_last_minute_with_sms": 2,
+      "campaign_delivered_pct": 100.0
+    },
+    {
+      "otp_ttl_s": 120,
+      "denylist_min_sample": 50,
+      "attacker_sms_20min": 60,
+      "attacker_last_minute_with_sms": 2,
+      "campaign_delivered_pct": 100.0
+    },
+    {
+      "otp_ttl_s": 120,
+      "denylist_min_sample": 100,
+      "attacker_sms_20min": 60,
+      "attacker_last_minute_with_sms": 2,
+      "campaign_delivered_pct": 100.0
+    },
+    {
+      "otp_ttl_s": 300,
+      "denylist_min_sample": 20,
+      "attacker_sms_20min": 60,
+      "attacker_last_minute_with_sms": 2,
+      "campaign_delivered_pct": 100.0
+    },
+    {
+      "otp_ttl_s": 300,
+      "denylist_min_sample": 50,
+      "attacker_sms_20min": 60,
+      "attacker_last_minute_with_sms": 2,
+      "campaign_delivered_pct": 100.0
+    },
+    {
+      "otp_ttl_s": 300,
+      "denylist_min_sample": 100,
+      "attacker_sms_20min": 60,
+      "attacker_last_minute_with_sms": 2,
+      "campaign_delivered_pct": 100.0
+    },
+    {
+      "otp_ttl_s": 600,
+      "denylist_min_sample": 20,
+      "attacker_sms_20min": 60,
+      "attacker_last_minute_with_sms": 2,
+      "campaign_delivered_pct": 100.0
+    },
+    {
+      "otp_ttl_s": 600,
+      "denylist_min_sample": 50,
+      "attacker_sms_20min": 60,
+      "attacker_last_minute_with_sms": 2,
+      "campaign_delivered_pct": 100.0
+    },
+    {
+      "otp_ttl_s": 600,
+      "denylist_min_sample": 100,
+      "attacker_sms_20min": 60,
+      "attacker_last_minute_with_sms": 2,
+      "campaign_delivered_pct": 100.0
+    }
+  ]
+}

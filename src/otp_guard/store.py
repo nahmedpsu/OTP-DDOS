@@ -135,8 +135,24 @@ class SystemClock:
         return time.time()
 
 
+def _ttl_s(ttl):
+    """A TTL as Redis receives it from RedisStore: whole seconds, and no expiry for None or 0."""
+    return int(ttl) if ttl else None
+
+
 class MemoryStore:
-    """Redis-like store with TTLs driven by the clock. Values are kept as Python objects."""
+    """Redis-like store with TTLs driven by the clock. Values are kept as Python objects.
+
+    Expiry follows Redis (seventh-round review, M1): a key is live until the clock passes its expiry
+    time (Redis expires a key when now > expiry); TTLs are whole seconds; a write that sets a TTL
+    replaces the key's expiry exactly when the Redis command does (SET with EX, EXPIRE, ZADD followed by
+    EXPIRE in RedisStore.zadd and LUA_ZADD_MAX, so a sorted set written with a TTL lives TTL seconds from
+    its latest write), while INCR, HINCRBY on a key that has one, and ZADD without a TTL keep it; a sorted
+    set left empty is deleted, as Redis deletes it; members with equal scores are ordered by member, as
+    in a Redis sorted set; and scan returns keys sorted. Before 2.9.0 a sorted set kept the expiry of the
+    write that created it, so it emptied a fixed time after its first write; the 2.8.x results were
+    produced under that rule (results/historical_2.8/). tests/unit/test_store_parity.py runs the same
+    operations on this store and on Redis and compares every result."""
 
     def __init__(self, clock):
         self.clock = clock
@@ -148,7 +164,7 @@ class MemoryStore:
         v = self._d.get(key)
         if v is None:
             return None
-        if v[1] is not None and v[1] <= self.clock.now():
+        if v[1] is not None and v[1] < self.clock.now():
             del self._d[key]
             return None
         return v
@@ -178,18 +194,18 @@ class MemoryStore:
             new = fn(cur)
             if new is None:
                 return cur, False
-            self._put(key, new, ttl=ttl)
+            self._put(key, new, ttl=_ttl_s(ttl))
             return _copy(new), True
 
     def set(self, key, val, ttl=None):
         with self.lock:
-            self._put(key, val, ttl=ttl)
+            self._put(key, val, ttl=_ttl_s(ttl))
 
     def setnx(self, key, val, ttl=None):
         with self.lock:
             if self._live(key) is not None:
                 return False
-            self._put(key, val, ttl=ttl)
+            self._put(key, val, ttl=_ttl_s(ttl))
             return True
 
     def incr(self, key, by=1):
@@ -206,7 +222,10 @@ class MemoryStore:
         with self.lock:
             v = self._live(key)
             if v is not None:
-                self._put(key, v[0], ttl=ttl)
+                if int(ttl) <= 0:                            # EXPIRE with a non-positive TTL deletes the key
+                    del self._d[key]
+                else:
+                    self._put(key, v[0], ttl=int(ttl))
 
     def exists(self, key):
         with self.lock:
@@ -220,6 +239,7 @@ class MemoryStore:
     # Collections are mutated in place under the lock; every read returns a copy, so no caller can
     # hold a reference into the store.
     def hincrby(self, key, field, by=1, ttl=None):
+        ttl = _ttl_s(ttl)
         with self.lock:
             v = self._live(key)
             if v is None:
@@ -227,6 +247,8 @@ class MemoryStore:
                 return by
             h = v[0]
             h[field] = h.get(field, 0) + by
+            if ttl is not None and v[1] is None:              # EXPIRE NX: only a key without a TTL gets one
+                self._put(key, h, ttl=ttl)
             return h[field]
 
     def hgetall(self, key):
@@ -240,51 +262,65 @@ class MemoryStore:
         with self.lock:
             if self._live(marker) is not None:
                 return False
-            self._put(marker, 1, ttl=marker_ttl)
+            self._put(marker, 1, ttl=int(marker_ttl))
             for key, field, by, ttl in ops:
                 self.hincrby(key, field, by, ttl=ttl)
             return True
 
     def scan(self, prefix):
-        """Live keys starting with `prefix` (SCAN MATCH on Redis)."""
+        """Live keys starting with `prefix` (SCAN MATCH on Redis), sorted: Redis returns them in no fixed
+        order, so both stores sort and callers see the same order."""
         with self.lock:
-            return [k for k in list(self._d) if k.startswith(prefix) and self._live(k) is not None]
+            return sorted(k for k in list(self._d) if k.startswith(prefix) and self._live(k) is not None)
 
     def hgetall_many(self, keys):
         return [self.hgetall(k) for k in keys]
 
     # ---- sorted sets ----
+    def _zset_emptied(self, key, v):
+        if v is not None and not v[0]:
+            del self._d[key]                                 # Redis deletes a sorted set left empty
+
     def zadd(self, key, score, member, ttl=None):
+        """ZADD, then EXPIRE when a TTL is given (RedisStore.zadd): the TTL runs from this write."""
+        ttl = _ttl_s(ttl)
         with self.lock:
             v = self._live(key)
             if v is None:
                 self._put(key, {member: score}, ttl=ttl)
             else:
                 v[0][member] = score
+                if ttl is not None:
+                    self._put(key, v[0], ttl=ttl)
 
     def zadd_max(self, key, score, member, ttl=None):
-        """Add member, or raise its score to `score`; never lower it (see LUA_ZADD_MAX). Like zadd above,
-        the memory store keeps an existing key's expiry (the Redis store refreshes it on every write);
-        the recorded simulation runs were produced under this rule, see the 2.8.2 changelog."""
+        """Add member, or raise its score to `score`; never lower it; then refresh the TTL if one is
+        given, whether or not the score changed (LUA_ZADD_MAX)."""
+        ttl = _ttl_s(ttl)
         with self.lock:
             v = self._live(key)
             if v is None:
                 self._put(key, {member: score}, ttl=ttl)
-            elif member not in v[0] or v[0][member] < score:
+                return
+            if member not in v[0] or v[0][member] < score:
                 v[0][member] = score
+            if ttl is not None:
+                self._put(key, v[0], ttl=ttl)
 
     def zrangebyscore(self, key, lo, hi):
+        """Members with lo <= score <= hi, by score and, for equal scores, by member (Redis order)."""
         with self.lock:
             v = self._live(key)
             if v is None:
                 return []
-            return [m for m, s in sorted(v[0].items(), key=lambda kv: kv[1]) if lo <= s <= hi]
+            return [m for m, s in sorted(v[0].items(), key=lambda kv: (kv[1], kv[0])) if lo <= s <= hi]
 
     def zrem(self, key, member):
         with self.lock:
             v = self._live(key)
             if v is not None:
                 v[0].pop(member, None)
+                self._zset_emptied(key, v)
 
     def zscore(self, key, member):
         with self.lock:
@@ -297,6 +333,7 @@ class MemoryStore:
             v = self._live(key)
             if v is not None and score is not None and v[0].get(member) == score:
                 del v[0][member]
+                self._zset_emptied(key, v)
                 return True
             return False
 
@@ -306,6 +343,7 @@ class MemoryStore:
             if v is not None:
                 for m in [m for m, sc in v[0].items() if lo <= sc <= hi]:
                     del v[0][m]
+                self._zset_emptied(key, v)
 
     def zcount_many(self, keys, lo, hi):
         """Members with lo <= score <= hi, for several keys; one round trip on Redis."""
@@ -494,7 +532,7 @@ class RedisStore:
 
     def scan(self, prefix):
         self.round_trips += 1
-        return [k.decode() if isinstance(k, bytes) else k for k in self.r.scan_iter(match=prefix + "*", count=1000)]
+        return sorted(k.decode() if isinstance(k, bytes) else k for k in self.r.scan_iter(match=prefix + "*", count=1000))
 
     def hgetall_many(self, keys):
         self.round_trips += 1
