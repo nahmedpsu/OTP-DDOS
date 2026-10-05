@@ -1,7 +1,8 @@
 # Manuscript
 
-`main.tex` is the manuscript for Computers & Security (Elsevier `elsarticle` class and
-`elsarticle-num` style, vendored here), with `refs.bib`. `make` builds `main.pdf`; `make rebuttal`
+`main.tex` is the manuscript for Computers & Security (Elsevier `elsarticle` class in its
+two-column `5p` layout with the author-year `elsarticle-harv` style, both vendored here; the
+`elsarticle-num` styles are kept for earlier revisions), with `refs.bib`. `make` builds `main.pdf`; `make rebuttal`
 builds the current response letter (`rebuttal_round6.js` -> `rebuttal_round6.docx`, with Node and
 the `docx` package). Earlier letters are kept as `rebuttal*.js` / `.docx`.
 

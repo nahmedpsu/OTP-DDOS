@@ -49,20 +49,20 @@ def labels_and_cites():
     labels = {}
     for m in re.finditer(r"\\newlabel\{([^}]*)\}\{\{([^}]*)\}", aux):
         labels[m.group(1)] = m.group(2)
-    cites = {m.group(1): int(m.group(2)) for m in re.finditer(r"\\bibcite\{([^}]*)\}\{\{(\d+)\}", aux)}
+    # natbib author-year entries: \bibcite{key}{{n}{year}{{short author}}{{full author list}}}
+    cites = {}
+    for m in re.finditer(r"\\bibcite\{([^}]*)\}\{\{(\d+)\}\{([^}]*)\}\{\{([^}]*)\}\}", aux):
+        cites[m.group(1)] = (int(m.group(2)), m.group(4).replace("~", " "), m.group(3))
     return labels, cites
 
 
-def cite_text(keys, cites):
-    nums = sorted(cites[k.strip()] for k in keys.split(","))
-    out, i = [], 0
-    while i < len(nums):
-        j = i
-        while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
-            j += 1
-        out.append(f"{nums[i]}--{nums[j]}" if j - i >= 2 else ", ".join(str(n) for n in nums[i:j + 1]))
-        i = j + 1
-    return "[" + ", ".join(out) + "]"
+def cite_text(keys, cites, textual=False):
+    """Author-year citations as the elsarticle-harv style prints them: (Huh et al., 2025; Page, 1954)
+    in parentheses, or Huh et al. (2025) when the authors are part of the sentence."""
+    items = [cites[k.strip()] for k in keys.split(",")]
+    if textual:
+        return "; ".join(f"{a} ({y})" for _, a, y in items)
+    return "(" + "; ".join(f"{a}, {y}" for _, a, y in items) + ")"
 
 
 def table_rows(path):
@@ -88,7 +88,10 @@ def body_latex():
     fm = s[s.index("\\begin{frontmatter}"):s.index("\\end{frontmatter}") + len("\\end{frontmatter}")]
     title, _ = braced(fm, fm.index("\\title{") + 6)
     org = re.search(r"organization=\{([^}]*)\}", fm).group(1)
+    city = re.search(r"city=\{([^}]*)\}", fm)
     country = re.search(r"country=\{([^}]*)\}", fm).group(1)
+    if city:
+        country = f"{city.group(1)}, {country}"
     email = re.search(r"\\ead\{([^}]*)\}", fm).group(1)
     author = re.search(r"\\author\[[^\]]*\]\{([^\\}]*)", fm).group(1).strip()
     abstract = fm[fm.index("\\begin{abstract}") + 16:fm.index("\\end{abstract}")].strip()
@@ -107,7 +110,8 @@ def body_latex():
         s = s.replace(cmd + " ", " ").replace(cmd, "\\hline" if cmd in ("\\toprule", "\\midrule", "\\bottomrule") else "")
     s = re.sub(r"\\setlength\{[^}]*\}\{[^}]*\}", "", s)
     s = re.sub(r"\\cmidrule(\([a-z]*\))?\{[^}]*\}", "", s)
-    s = re.sub(r"\\begin\{(table|figure)\}\[[^\]]*\]", r"\\begin{\1}", s)
+    s = re.sub(r"\\begin\{(table|figure)\*?\}\[[^\]]*\]", r"\\begin{\1}", s)
+    s = re.sub(r"\\end\{(table|figure)\*\}", r"\\end{\1}", s)
     s = re.sub(r"%[^\n]*", lambda m: "" if not m.string[m.start() - 1:m.start()] == "\\" else m.group(0), s)
 
     # captions get their numbers; labels are dropped
@@ -115,10 +119,11 @@ def body_latex():
         env, inner = m.group(1), m.group(2)
         lab = re.search(r"\\label\{([^}]*)\}", inner)
         num = labels.get(lab.group(1), "?") if lab else "?"
-        name = "Table" if env == "table" else "Figure"
         i = inner.index("\\caption{")
         cap, end = braced(inner, i + 8)
-        inner = inner[:i] + "\\caption{" + f"\\textbf{{{name} {num}.}} " + cap + "}" + inner[end:]
+        # Elsevier captions: "Table 1" on its own line above the table; "Fig. 1." run in below the figure
+        head = f"\\textbf{{Table {num}}} TBLBRK " if env == "table" else f"\\textbf{{Fig. {num}.}} "
+        inner = inner[:i] + "\\caption{" + head + cap + "}" + inner[end:]
         return f"\\begin{{{env}}}{inner}\\end{{{env}}}"
     s = re.sub(r"\\begin\{(table|figure)\}(.*?)\\end\{\1\}", number_caption, s, flags=re.S)
 
@@ -128,6 +133,9 @@ def body_latex():
         lab = re.search(r"\\label\{([^}]*)\}", inner)
         num = labels.get(lab.group(1), "?") if lab else ""
         inner = re.sub(r"\\label\{[^}]*\}", "", inner).strip().rstrip(",").rstrip(".")
+        inner = re.sub(r"\\(begin|end)\{split\}", "", inner)              # one-line equations in Word
+        inner = re.sub(r"\\\\\s*", " ", inner).replace("&", "")
+        inner = inner.strip().rstrip(",").rstrip(".")
         for a, b in (("\\Bigl(", "\\left("), ("\\Bigr)", "\\right)"), ("\\bigl(", "\\left("), ("\\bigr)", "\\right)"),
                      ("\\textstyle", ""), ("b\\ \\mathrm{open}", "b \\text{ open}"), ("\\;", " "), ("\\,", " ")):
             inner = inner.replace(a, b)
@@ -148,7 +156,8 @@ def body_latex():
     # cross-references and citations
     s = re.sub(r"\\eqref\{([^}]*)\}", lambda m: f"({labels.get(m.group(1), '?')})", s)
     s = re.sub(r"\\ref\{([^}]*)\}", lambda m: labels.get(m.group(1), "?"), s)
-    s = re.sub(r"\\cite[pt]?\{([^}]*)\}", lambda m: cite_text(m.group(1), cites), s)
+    s = re.sub(r"\\citet\{([^}]*)\}", lambda m: cite_text(m.group(1), cites, textual=True), s)
+    s = re.sub(r"~?\\citep?\{([^}]*)\}", lambda m: " " + cite_text(m.group(1), cites), s)
     s = re.sub(r"\\label\{[^}]*\}", "", s)
 
     # run-in paragraph headings, as in the PDF
@@ -156,14 +165,19 @@ def body_latex():
 
     # references from the bibliography of the LaTeX run
     bbl = BBL.read_text()
-    items = re.split(r"\\bibitem\{([^}]*)\}", bbl)
+    bbl = re.sub(r"%[^\n]*\n", "", bbl)
+    items = re.split(r"\\bibitem\[\{(?:[^{}]|\{[^{}]*\})*\}\]\{([^}]*)\}", bbl)
     refs = []
     for k in range(1, len(items), 2):
         key, text = items[k], items[k + 1]
         text = text.split("\\end{thebibliography}")[0].replace("\\newblock", " ")
+        text = re.sub(r"\\bibinfo\{[^}]*\}", "", text)
         text = re.sub(r"\\href\s*\{([^}]*)\}\s*\{\\path\{([^}]*)\}\}", r"\\url{\1}", text)
+        text = re.sub(r"\\DOIprefix\\doi\{([^}]*)\}", r"https://doi.org/\1", text)
+        text = re.sub(r"\\doi\{([^}]*)\}", r"https://doi.org/\1", text)
+        text = text.replace("\\URLprefix", "URL: ").replace("\\ArXivprefix", "arXiv:")
         text = re.sub(r"\s+", " ", text).strip()
-        refs.append(f"REFMARK [{cites[key]}] {text}")
+        refs.append(f"REFMARK {text}")
     s = re.sub(r"\\bibliographystyle\{[^}]*\}\s*\\bibliography\{[^}]*\}",
                lambda m: "\\section*{References}\n\n" + "\n\n".join(refs) + "\n", s)
     return "\\documentclass{article}\n\\begin{document}\n" + s + "\n\\end{document}\n"
@@ -318,6 +332,10 @@ def style_document(path):
                     if mark.strip() in r.text:
                         r.text = r.text.replace(mark, "").replace(mark.strip(), "")
                         break
+                for r in p.runs:                                       # and any space it left behind
+                    if r.text:
+                        r.text = r.text.lstrip()
+                        break
                 for r in p._p.iter(qn("w:r")):                           # runs inside hyperlinks too
                     rpr = r.find(qn("w:rPr"))
                     if rpr is None:
@@ -341,6 +359,16 @@ def style_document(path):
                     pf.line_spacing, pf.space_after = 1.0, Pt(3)
                 if kind == "abstract":
                     pf.line_spacing = 1.5
+                break
+    for p in doc.paragraphs:                       # "Table n" on its own line above its caption text
+        for r in p.runs:
+            if "TBLBRK" in r.text:
+                before, after = r.text.split("TBLBRK", 1)
+                r.text = before.rstrip()
+                br = OxmlElement("w:br")
+                r._r.append(br)
+                t = OxmlElement("w:t"); t.text = after.lstrip(); t.set(qn("xml:space"), "preserve")
+                r._r.append(t)
                 break
     for tbl in doc.tables:
         fit_table(tbl)

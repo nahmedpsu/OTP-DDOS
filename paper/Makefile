@@ -1,5 +1,5 @@
 # Build the manuscript. Needs a TeX Live with latexmk; elsarticle.cls and the
-# elsarticle-num style are vendored here from the Elsevier distribution.
+# elsarticle-harv style are vendored here from the Elsevier distribution.
 all: main.pdf
 main.pdf: main.tex refs.bib figures/*.pdf
 	latexmk -pdf -interaction=nonstopmode main.tex

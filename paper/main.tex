@@ -2,7 +2,10 @@
 % Revision 8, after the eighth Reviewer 2 report. Every number comes from
 % ../results/evaluation.json, ../results/counter_study.json, ../results/round5_analyses.json, ../results/condition_check.json
 % or ../results/performance*.json (results produced by release 2.9.0, whose code 2.9.1 runs unchanged; the 2.8.0 results are in ../results/historical_2.8/); ../results/headline_numbers.md maps headline figures to their JSON paths.
-\documentclass[preprint,12pt]{elsarticle}
+% Two-column Computers & Security layout with author-year references.
+% For a line-numbered single-column review copy use
+% \documentclass[preprint,12pt,authoryear]{elsarticle} and \linenumbers.
+\documentclass[5p,twocolumn,times,authoryear]{elsarticle}
 
 \usepackage{amsmath}
 \usepackage{booktabs}
@@ -10,15 +13,44 @@
 \usepackage{float}
 \usepackage{array}
 \usepackage{xurl}
-\usepackage[hidelinks]{hyperref}
+\usepackage[colorlinks]{hyperref}
 \usepackage{lineno}
 \usepackage{placeins}
+\usepackage{stfloats}
 \graphicspath{{figures/}}
+% DOIs in the reference list as https://doi.org/... links, as the journal prints them
+\newcommand{\DOIprefix}{}
+\newcommand{\doi}[1]{\href{https://doi.org/#1}{\path{https://doi.org/#1}}}
+% Elsevier captions: "Table 1" in bold on its own line above the table;
+% "Fig. 1." in bold followed by the text below the figure.
+\renewcommand{\figurename}{Fig.}
+\makeatletter
+\def\els@tablecaptype{table}
+\long\def\@makecaption#1#2{%
+  \footnotesize
+  \ifx\@captype\els@tablecaptype
+    {\bfseries #1}\par\vskip 1pt
+    {\raggedright #2\par}\vskip 3pt
+  \else
+    \vskip\abovecaptionskip
+    \sbox\@tempboxa{{\bfseries #1.} #2}%
+    \ifdim \wd\@tempboxa >\hsize
+      {\bfseries #1.} #2\par
+    \else
+      \global \@minipagefalse
+      \hb@xt@\hsize{\hfil\box\@tempboxa\hfil}%
+    \fi
+    \vskip\belowcaptionskip
+  \fi}
+\makeatother
 \makeatletter\newcommand{\tablerows}[1]{\@@input #1 }\makeatother % generated rows: scripts/paper_tables.py
 \renewcommand{\topfraction}{0.95}
+\renewcommand{\dbltopfraction}{0.95}
 \renewcommand{\textfraction}{0.05}
-\renewcommand{\floatpagefraction}{0.8}
+\renewcommand{\floatpagefraction}{0.9}
+\renewcommand{\dblfloatpagefraction}{0.9}
 \setcounter{topnumber}{3}
+\setcounter{dbltopnumber}{3}
 \setlength{\emergencystretch}{2em}
 
 \journal{Computers \& Security}
@@ -33,6 +65,7 @@
 \ead{nahmed@psu.edu.sa}
 \cortext[cor1]{Corresponding author.}
 \affiliation[inst1]{organization={College of Computer and Information Science, Prince Sultan University},
+            city={Riyadh},
             country={Saudi Arabia}}
 
 \begin{abstract}
@@ -40,50 +73,58 @@ Endpoints that send one-time passwords via SMS are abused to waste money (floodi
 \end{abstract}
 
 \begin{keyword}
-SMS pumping \sep artificially inflated traffic \sep one-time password \sep rate limiting \sep sequential tests \sep fraud prevention
+SMS pumping \sep Artificially inflated traffic \sep One-time password \sep Rate limiting \sep Sequential tests \sep Fraud prevention
 \end{keyword}
 
 \end{frontmatter}
 
-\linenumbers
+%\linenumbers
 
 % ---------------------------------------------------------------------------
 \section{Introduction}
 \label{sec:intro}
 
-Most online services verify a phone number by sending a code via SMS from an endpoint reachable before any account exists, at a tenth of a cent to twenty cents per message. A flooder makes the service send to numbers it does not own; a pumper sends to a range whose operator shares the termination fee, turning the service's SMS budget into its income~\cite{mitre_t1496_003}. Twitter's owner said in 2023 that pumping had cost the company approximately \$60 million a year~\cite{commsrisk2023twitter}, and Huh et al.\ found as many attack requests as genuine ones in three months of one large service's logs~\cite{huh2025ait}.
+Most online services verify a phone number by sending a code via SMS from an endpoint reachable before any account exists, at a tenth of a cent to twenty cents per message. A flooder makes the service send to numbers it does not own; a pumper sends to a range whose operator shares the termination fee, turning the service's SMS budget into its income~\citep{mitre_t1496_003}. Twitter's owner said in 2023 that pumping had cost the company approximately \$60 million a year~\citep{commsrisk2023twitter}, and \citet{huh2025ait} found as many attack requests as genuine ones in three months of one large service's logs.
 
 We study the defenses of a registration flow: a baseline of seven controls (v1) and a twelve-step redesign with attested platforms, signed sessions, number checks before a message is paid for, reputation from whether codes were entered, a five-response risk score, and a hard budget. We ask in simulation which attacks it contains against simpler designs, at what cost in completed registrations (RQ1); which layer is responsible (RQ2); when outcome-based reputation separates an attacker from simulated users (RQ3); what rationing costs when it does not (RQ4); and what destination policies cost legitimate users, with and without an attack (RQ5).
 
-Because a pumper is paid only on its partner's ranges, the study focuses on the destination: under a predeclared comparison, a plain counter of sends per number block leaked less than our sequential tests of code outcomes, and a second predeclared protocol mapped where that holds and fails. We contribute an analysis of eight gaps in the baseline, the design, and an open implementation, measurements of where reputation stops separating and what rationing depends on, both destination-policy comparisons with their failures and collateral damage, and unfitted estimates of when counting leaks less than our tests; Sections 7.1--7.4 provide context.
+Because a pumper is paid only on its partner's ranges, the study focuses on the destination: under a predeclared comparison, a plain counter of sends per number block leaked less than our sequential tests of code outcomes, and a second predeclared protocol mapped where that holds and fails. This paper makes the following contributions:
+\begin{itemize}
+\item an analysis of eight gaps in the baseline, a twelve-step design, and an open implementation;
+\item measurements of where outcome-based reputation stops separating an attacker from users, and of what rationing then costs and depends on;
+\item two predeclared comparisons of destination policies, a send counter against sequential tests of code outcomes, with their failures and collateral damage;
+\item unfitted estimates of when counting leaks less than our tests, checked against the measurements.
+\end{itemize}
+Section~\ref{sec:related} reviews related work; Sections~\ref{sec:baseline}--\ref{sec:method} give the baseline and threat model, the design with its leakage estimates, and the methodology; Section~\ref{sec:results} reports the results; Sections~\ref{sec:discussion}--\ref{sec:conclusion} discuss them, state the limitations, and conclude.
 
 % ---------------------------------------------------------------------------
-\section{Background and related work}
+\section{Related work}
 \label{sec:related}
 
-\paragraph{Revenue-share fraud}
-In international revenue-share fraud, traffic is generated to an advertised number range, and the termination fee is split along the route~\cite{sahin2017sok}. Sahin and Francillon's 3.14 million test numbers from twelve providers show that the range is the fraudster's managed asset~\cite{sahin2021irsf}.
+\subsection{Revenue-share fraud}
+In international revenue-share fraud, traffic is generated to an advertised number range, and the termination fee is split along the route~\citep{sahin2017sok}. The 3.14 million test numbers from twelve providers collected by \citet{sahin2021irsf} show that the range is the fraudster's managed asset.
 
-\paragraph{Detecting artificially inflated SMS}
-Huh et al.\ trained gradient-boosted trees on 9.4 million SMS authentication logs from nineteen countries, reaching 89.6\% recall at 0.19\% false positives on web traffic~\cite{huh2025ait}. Approximately 73\% of web attacks sent four or fewer requests per identity a day, defeating per-entity limits, and destination signals were the strongest: about 92\% zero conversion for attacks against 21\% for genuine traffic. Their detector requires labeled traffic and acts per request. Their data show that destination aggregation is informative; we add a controlled comparison of two label-free ways to act on it per block, from send counts or code outcomes, and of their cost to users sharing a block. Theirs was not reproduced, so the two are not ranked. Zaliskyi and Odarchenko count A2P sends per prefix (a number less its last three digits) in fixed or rolling five-minute windows and quarantine a prefix for 24 hours past a day or night threshold~\cite{zaliskyi2026ait}. On metadata of two confirmed incidents fixed windows blocked 95\% and 63\% of the traffic, and 58\% of a legitimate marketing campaign; counting unique recipients blocked 2\% of the campaign and none of the first incident. Theirs is a send counter judged on real traffic by messages blocked; ours compares a counter with outcome tests at a service target, in simulation, by what users sharing a block lose; the numbers are not comparable.
+\subsection{Detecting artificially inflated SMS}
+\citet{huh2025ait} trained gradient-boosted trees on 9.4 million SMS authentication logs from nineteen countries, reaching 89.6\% recall at 0.19\% false positives on web traffic. Approximately 73\% of web attacks sent four or fewer requests per identity a day, defeating per-entity limits, and destination signals were the strongest: about 92\% zero conversion for attacks against 21\% for genuine traffic. Their detector requires labeled traffic and acts per request. Their data show that destination aggregation is informative; we add a controlled comparison of two label-free ways to act on it per block, from send counts or code outcomes, and of their cost to users sharing a block. Theirs was not reproduced, so the two are not ranked. \citet{zaliskyi2026ait} count A2P sends per prefix (a number less its last three digits) in fixed or rolling five-minute windows and quarantine a prefix for 24 hours past a day or night threshold. On metadata of two confirmed incidents fixed windows blocked 95\% and 63\% of the traffic, and 58\% of a legitimate marketing campaign; counting unique recipients blocked 2\% of the campaign and none of the first incident. Theirs is a send counter judged on real traffic by messages blocked; ours compares a counter with outcome tests at a service target, in simulation, by what users sharing a block lose; the numbers are not comparable.
 
-\paragraph{Defenses in practice}
-Twilio's Fraud Guard blocks regions known for pumping~\cite{twilio_fraudguard}, and its SMS Pumping Risk Score advises friction from 60 and refusal above 90~\cite{twilio_pumping_risk}, so graded destination action is established; no product was benchmarked. CAPTCHA solving is a labor market at approximately \$1 per thousand~\cite{motoyama2010captcha}, open where machine solvers fail~\cite{dionysiou2020captcha}; client puzzles~\cite{dean2001puzzles} were not evaluated. Residential proxy addresses rotate within minutes~\cite{mi2019resip}, and carrier-grade NAT makes address reputation on cellular networks ``all but infeasible''~\cite{richter2016cgn}.
+\subsection{Defenses in practice}
+Twilio's Fraud Guard blocks regions known for pumping~\citep{twilio_fraudguard}, and its SMS Pumping Risk Score advises friction from 60 and refusal above 90~\citep{twilio_pumping_risk}, so graded destination action is established; no product was benchmarked. CAPTCHA solving is a labor market at approximately \$1 per thousand~\citep{motoyama2010captcha}, open where machine solvers fail~\citep{dionysiou2020captcha}; client puzzles~\citep{dean2001puzzles} were not evaluated. Residential proxy addresses rotate within minutes~\citep{mi2019resip}, and carrier-grade NAT makes address reputation on cellular networks ``all but infeasible''~\citep{richter2016cgn}.
 
-\paragraph{Identity and change detection}
-One entity can present many identities~\cite{douceur2002sybil}, and a signed session provides continuity, not scarcity. Our block tests are Wald's sequential tests~\cite{wald1945sprt} run as Page's cumulative sums~\cite{page1954cusum}. Quickest change detection minimizes delay under false-alarm constraints~\cite{veeravalli2012qcd}, and a CUSUM's parameters follow from the error rates it must meet~\cite{nist_cusum}; windowed statistics and confidence sequences~\cite{howard2021confseq} were not evaluated, so `testing' below means our conversion and speed tests only. Step~7 resembles risk-based authentication~\cite{wiefling2019rba}, and attacks on the code once sent are a separate problem~\cite{mulliner2013smsotp,siadati2017sms}.
+\subsection{Identity and change detection}
+One entity can present many identities~\citep{douceur2002sybil}, and a signed session provides continuity, not scarcity. Our block tests are Wald's sequential tests~\citep{wald1945sprt} run as Page's cumulative sums~\citep{page1954cusum}. Quickest change detection minimizes delay under false-alarm constraints~\citep{veeravalli2012qcd}, and a CUSUM's parameters follow from the error rates it must meet~\citep{nist_cusum}; windowed statistics and confidence sequences~\citep{howard2021confseq} were not evaluated, so `testing' below means our conversion and speed tests only. Step~7 resembles risk-based authentication~\citep{wiefling2019rba}, and attacks on the code once sent are a separate problem~\citep{mulliner2013smsotp,siadati2017sms}.
 
 % ---------------------------------------------------------------------------
 \section{Baseline and threat model}
 \label{sec:baseline}
 
+\subsection{The v1 baseline}
 The baseline, v1, sends a code to any unregistered number behind seven controls: reCAPTCHA v3 on web requests only, one message per number per minute, five requests per address per minute, a country allow-list, a body-length limit, a proxy block, and per-platform caps; bulk and test paths skip some checks. Table~\ref{tab:v1} lists eight assumptions behind these rules and how an attacker within the threat model breaks each; the gaps follow from the rules, not observed abuse.
 
-\begin{table}[H]
-\caption{v1 Assumptions and how they fail}
+\begin{table}[!t]
+\caption{v1 Assumptions and how they fail.}
 \label{tab:v1}
 \footnotesize
-\begin{tabular}{cp{5.2cm}p{5.6cm}}
+\begin{tabular}{@{}c>{\raggedright\arraybackslash}p{3.45cm}>{\raggedright\arraybackslash}p{3.95cm}@{}}
 \toprule
 Gap & v1 assumes & How it fails \\
 \midrule
@@ -99,7 +140,7 @@ H & Each check says which check failed & Thresholds can be probed one at a time 
 \end{tabular}
 \end{table}
 
-\paragraph{Threat model}
+\subsection{Threat model}
 \label{sec:threat}
 The attacker wants as many messages sent as possible, or sent to numbers that pay it. It buys residential proxies and human-like reCAPTCHA tokens (about 0.3 cents each), mints fingerprints, generates numbers, and knows the thresholds. A pumper also has a colluding operator's ranges, where it may enter codes, report deliveries as failed, build verified history, spread over blocks, and buy challenge solutions. It cannot forge an attestation, use ranges its partner does not terminate, or make a stranger enter a code.
 
@@ -113,11 +154,11 @@ No message is paid for before every check passes, and cheap checks run first. Tr
 
 A request passes the steps of Table~\ref{tab:steps}, which lists in brackets the gaps of Table~\ref{tab:v1} each step addresses (FB: the feedback loop), until it is refused. Step~0 takes the platform only from a valid App Attest or Play Integrity result. Each limit and reservation is one atomic Redis operation, but the enclosing steps are not one transaction: on the normal path, a refused request returns its per-number claims and counter slot, and the hourly budget is reserved only for a message about to be enqueued, a reservation rather than a completed dispatch; a crash between them can leak reservations (Section~\ref{sec:method}). Address limits and source caps count requests, except that a request Step~11 challenges returns its source-cap count. Every outcome after Step~0, except the challenge, returns one HTTP~200 body after at least 400\,ms, a floor that cannot hide longer work.
 
-\begin{table}[H]
-\caption{Twelve Steps and the v1 Gaps They Address}
+\begin{table*}[!t]
+\caption{Twelve Steps and the v1 Gaps They Address.}
 \label{tab:steps}
 \footnotesize
-\begin{tabular}{cp{11.6cm}}
+\begin{tabular}{@{}cp{16.5cm}@{}}
 \toprule
 Step & Check \\
 \midrule
@@ -135,14 +176,17 @@ Step & Check \\
 FB & Outcomes per key; destination-block tests; denylist of fine keys \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
 Step~7 computes
 \begin{equation}
-s = \sum_i w_i x_i + w_c\,\frac{\max(0,\theta - r_{\min})}{\theta} + w_s\,f + w_m\,i - w_v\,v_n - w_f\,v_f,
+\begin{split}
+s = \sum_i w_i x_i &+ w_c\,\frac{\max(0,\theta - r_{\min})}{\theta} + w_s\,f + w_m\,i \\
+ &- w_v\,v_n - w_f\,v_f,
+\end{split}
 \label{eq:score}
 \end{equation}
-where the $x_i$ are request signals (CAPTCHA score, hosting ASN, fingerprint age, session requests, country mismatch, number class), $r_{\min}$ is the lowest conversion ratio over the request's keys (address to destination block), $\theta=0.3$, $w_c=25$, $f$ and $i$ flag a flooded key and one whose codes are entered within seconds, and $v_n$, $v_f$ mark a number and fingerprint with verified history; other weights are 5 to 25~\cite{otpguard2026}. Tiers start at 20, 40, 60, and 80: \emph{allow}, \emph{delay} (a doubling wait), \emph{challenge} ($-20$ when solved), \emph{downgrade} (push or WhatsApp), and \emph{block}.
+where the $x_i$ are request signals (CAPTCHA score, hosting ASN, fingerprint age, session requests, country mismatch, number class), $r_{\min}$ is the lowest conversion ratio over the request's keys (address to destination block), $\theta=0.3$, $w_c=25$, $f$ and $i$ flag a flooded key and one whose codes are entered within seconds, and $v_n$, $v_f$ mark a number and fingerprint with verified history; other weights are 5 to 25~\citep{otpguard2026}. Tiers start at 20, 40, 60, and 80: \emph{allow}, \emph{delay} (a doubling wait), \emph{challenge} ($-20$ when solved), \emph{downgrade} (push or WhatsApp), and \emph{block}.
 
 \subsection{The feedback loop}
 \label{sec:feedback}
@@ -154,26 +198,25 @@ A send resolves as \emph{verified} when its code is entered, \emph{fails} after 
 
 A pumper is confined to its partner's ranges but can rotate numbers and blocks within them. Destination policies are keyed on the 8-digit block (10\,000 numbers); therefore, protection weakens as a pumper spreads.
 
-\paragraph{Sequential tests}
-The conversion statistic assumes that users verify with $p_\ell = 0.8$ and a flooder with $p_a = 0.1$: a failure adds $\ln\frac{1-p_a}{1-p_\ell} = 1.50$, a verification $\ln\frac{p_a}{p_\ell} = -2.08$. The speed statistic assumes that a machine enters a verified code within five seconds with $q_a = 0.9$ and a person with $q_\ell = 0.2$, because autofill removes the keystroke~\cite{google_smsretriever,wicg_webotp}; it adds $1.50$ or $-2.08$. A verdict is issued, and the statistic is reset when either exceeds $h = \ln 1000 = 6.91$. The floor $S_t = \max(-ch,\, S_{t-1} + \text{increment})$ sets the memory: unbounded $c$ is Wald's test, $c = 0$ Page's cumulative sum; the default is $c = 1$. A first verdict makes the block's first-time clients pass a challenge for an hour; a second within the hour moves them off SMS, refusing those without another channel.
+\subsubsection{Sequential tests}
+The conversion statistic assumes that users verify with $p_\ell = 0.8$ and a flooder with $p_a = 0.1$: a failure adds $\ln\frac{1-p_a}{1-p_\ell} = 1.50$, a verification $\ln\frac{p_a}{p_\ell} = -2.08$. The speed statistic assumes that a machine enters a verified code within five seconds with $q_a = 0.9$ and a person with $q_\ell = 0.2$, because autofill removes the keystroke~\citep{google_smsretriever,wicg_webotp}; it adds $1.50$ or $-2.08$. A verdict is issued, and the statistic is reset when either exceeds $h = \ln 1000 = 6.91$. The floor $S_t = \max(-ch,\, S_{t-1} + \text{increment})$ sets the memory: unbounded $c$ is Wald's test, $c = 0$ Page's cumulative sum; the default is $c = 1$. A first verdict makes the block's first-time clients pass a challenge for an hour; a second within the hour moves them off SMS, refusing those without another channel.
 
-\paragraph{Counters}
-A counter limits the number of SMS sent per block in a daily or short refilling window. Step~11 reserves a slot and decides the stage in one atomic operation when an SMS is about to be sent, so concurrent requests cannot skip the challenge. Past the limit, a graded counter challenges first-time clients, and past twice the limit moves them off SMS; a refusing counter refuses. Clients with verified history are exempt from both policies; therefore, a code entered on a pumper's number can buy that number an exemption. A token bucket of the same rate (burst 4 or 12; its challenge-tier bucket refills independently, unlike RFC~2697's~\cite{rfc2697}) and the counter combined with the tests were also explored.
+\subsubsection{Counters}
+A counter limits the number of SMS sent per block in a daily or short refilling window. Step~11 reserves a slot and decides the stage in one atomic operation when an SMS is about to be sent, so concurrent requests cannot skip the challenge. Past the limit, a graded counter challenges first-time clients, and past twice the limit moves them off SMS; a refusing counter refuses. Clients with verified history are exempt from both policies; therefore, a code entered on a pumper's number can buy that number an exemption. A token bucket of the same rate (burst 4 or 12; its challenge-tier bucket refills independently, unlike RFC~2697's~\citep{rfc2697}) and the counter combined with the tests were also explored.
 
 \subsection{Capacity controls}
 
 Step~9 multiplies its caps by 0.25 to 1.5 according to a baseline job comparing each key with its expected rate, learned from the pipeline's hourly counters; without history, the static cap stands. Verified history avoids adaptive reduction, not the static caps or the budget, which bounds SMS count and spend, not vendor or fallback costs.
 
-% ---------------------------------------------------------------------------
-\section{Leakage estimates and a heuristic crossover}
+\subsection{Leakage estimates and a heuristic crossover}
 \label{sec:model}
 
 We compare the SMS sent to a pumper's number over an attack of $T \le 60$ minutes, by a pumper that solves no challenge and holds no verified history. Against the sequential tests, one reaching $B$ blocks with $N$ requests at rate $\lambda$ leaks about
 \begin{equation}
-L \approx \min\bigl(N,\; kB + \lambda\,\tau\bigr), \qquad k = \lceil h/1.50 \rceil = 5,
+L \approx \min\bigl(N,\; kB + \lambda\,\tau\bigr),
 \label{eq:leak}
 \end{equation}
-before its first verdict, where $\tau$, the time a send stays unresolved, is the resolution timeout plus the delivery delay plus half the timeout worker's period (2.55 minutes) if the carrier never verifies, and seconds if it verifies at once. Judged, such a pumper is held for the verdict's hour; therefore, for $T \le 60$ Equation~\eqref{eq:leak} also estimates the attack's total, ignoring prior credit and outage suspension. A carrier verifying a share $\sigma$ of codes with a human-like delay gives the conversion statistic an expected increment of $\sigma(-2.08) + (1-\sigma)(1.50)$, zero at $\sigma^{*} = 0.42$; above it, the statistic drifts away from a verdict.
+before its first verdict, where $k = \lceil h/1.50 \rceil = 5$ and $\tau$, the time a send stays unresolved, is the resolution timeout plus the delivery delay plus half the timeout worker's period (2.55 minutes) if the carrier never verifies, and seconds if it verifies at once. Judged, such a pumper is held for the verdict's hour; therefore, for $T \le 60$ Equation~\eqref{eq:leak} also estimates the attack's total, ignoring prior credit and outage suspension. A carrier verifying a share $\sigma$ of codes with a human-like delay gives the conversion statistic an expected increment of $\sigma(-2.08) + (1-\sigma)(1.50)$, zero at $\sigma^{*} = 0.42$; above it, the statistic drifts away from a verdict.
 
 A counter of $q$ sends per block opens a window with the block's first reserved SMS and closes it after the window length. A pumper that finds its blocks' counters empty (a cold start) sends at most
 \begin{equation}
@@ -182,7 +225,10 @@ L_c \le \min\bigl(N,\; q B w\bigr), \qquad w = \lceil T / \text{window} \rceil,
 \end{equation}
 whatever its carrier does with the codes. If a legitimate send has already opened a window on block $b$, using $c_b \ge 1$ slots, the pumper can also take the remaining $(q-c_b)^+$ before at most $w$ further windows open, so in general
 \begin{equation}
-L_c \le \min\Bigl(N,\; q B w + \textstyle\sum_{b\ \mathrm{open}} (q - c_b)^+\Bigr) \le \min\bigl(N,\; B\,(q w + q - 1)\bigr).
+\begin{split}
+L_c &\le \min\Bigl(N,\; q B w + \textstyle\sum_{b\ \mathrm{open}} (q - c_b)^+\Bigr) \\
+    &\le \min\bigl(N,\; B\,(q w + q - 1)\bigr).
+\end{split}
 \label{eq:counterwarm}
 \end{equation}
 Solving challenges doubles these bounds, and a verified history exempts a client from them. While neither policy's estimate reaches $N$, the cold-start bound lies below the tests' estimate when
@@ -195,30 +241,30 @@ and a warm start adds the residual quota to the left side. Equation~\eqref{eq:cr
 In the code, every send takes a slot, verified clients' included. If a block's sends arrive as a Poisson stream with mean $m$ per window and all reach the counter, a window holds $1 + X$ of them, $X \sim \mathrm{Poisson}(m)$, and the idealized share beyond the quota is $E[(1+X-q)^+]/(1+m)$: 7.3\% at $m = q/2$ and 27\% at $m = q$ for $q = 4$. This is not a challenge rate: exempt clients take slots without challenge, and challenge failures, the second tier and earlier gates are ignored. The estimates use only the rules, configuration, and attack rate; what an excess send costs a user needs the simulation.
 
 % ---------------------------------------------------------------------------
-\section{Implementation and evaluation method}
+\section{Methodology}
 \label{sec:method}
 
-\paragraph{Implementation}
+\subsection{Implementation}
 Approximately 4\,000 lines of Python implement the pipeline on in-memory and Redis backends. Up to release 2.8.3, the simulator's in-memory store let a sorted set expire a fixed time after its first write, whereas Redis kept it while written to; therefore, the simulated outage detector and Step~5 lost recent observations. Release 2.9.0 follows Redis in every rule compared, checked by differential tests, and every study was rerun with it; earlier releases repaired seven replay and concurrency defects, each with a regression test. Of 453 tests, 19 used a real \texttt{redis-server}, 18 tested specific interleavings of two instances, not all. Step~11 was still not one transaction: a crash after its reservations leaked reserved slots or resolved the send as undelivered. The implementation was a research prototype.
 
-\paragraph{Simulation}
+\subsection{Simulation}
 \label{sec:sim}
 The pipeline runs against scripted vendor fakes on a simulated clock. After a warm-up of ten minutes (30 or 130 for pumping), attacks run over legitimate traffic at 20 requests per minute. Simulated users verify 80\% of codes after a lognormal delay (median 22\,s; 2\,s for the 20\% using autofill); 70\% of numbers are reachable on WhatsApp; 90\% of users complete a challenge; 20\% are returning account holders with a stable fingerprint, a trusted number, and verified history; thus, the results for returning users describe trusted identities only. Separate random streams provide all scenarios at the same seed with the same users.
 
-Three behavioral parameters have published counterparts: genuine conversion (one provider's 68\% or more~\cite{twilio_verify}; ours 60\%--90\%) and the never-converting destinations and identity churn of Section~\ref{sec:related}; the rest are assumptions. Table~\ref{tab:attackers} groups the attacker profiles by capability and marks the destination policies each faced (S, sequential tests; C, counters; B, block-limit; parameters in \texttt{results/\allowbreak attacker\_profiles.md}). Attackers draw pool size, rate, and CAPTCHA class per seed, which explains 92\% [80, 98] of the variance of the farm's leakage in a nested design (ten configurations, three seeds each). Brackets in the text and tables, and bars and bands in the figures, are 95\% percentile-bootstrap intervals over seeds, paired per seed for differences; they describe variation under this generator, not uncertainty about real traffic.
+Three behavioral parameters have published counterparts: genuine conversion (one provider's 68\% or more~\citep{twilio_verify}; ours 60\%--90\%) and the never-converting destinations and identity churn of Section~\ref{sec:related}; the rest are assumptions. Table~\ref{tab:attackers} groups the attacker profiles by capability and marks the destination policies each faced (S, sequential tests; C, counters; B, block-limit; parameters in \texttt{results/\allowbreak attacker\_profiles.md}). Attackers draw pool size, rate, and CAPTCHA class per seed, which explains 92\% [80, 98] of the variance of the farm's leakage in a nested design (ten configurations, three seeds each). Brackets in the text and tables, and bars and bands in the figures, are 95\% percentile-bootstrap intervals over seeds, paired per seed for differences; they describe variation under this generator, not uncertainty about real traffic.
 
-\paragraph{Two protocols and their chronology}
+\subsection{Two protocols and their chronology}
 A supplementary map (\texttt{results/\allowbreak study\_map.md}) gives each study's seeds. The first protocol, committed before its runs, fixed the matched comparison and a robustness study over 12 Latin-hypercube points (conversion 0.6--0.9 and five other behavioral parameters) and a held-out family (60 to 120 attack requests a minute, 50\,000 to 500\,000 addresses, heterogeneous legitimate traffic), with claims C1--C5 that hold if true in 90\% of cells, a benchmark convention, not a confidence level. The matched comparison changes only the destination policy and, at three block densities, selects on tuning seeds the least leakage summed over four concentrated pumpers among settings at or above the \emph{tuning target}, the default's completion minus 0.5 points. The robustness study's first run failed C1 in 32 of 108 cells because attack and no-attack runs drew different users; we fixed the pairing, a fix that followed a result, and reran every study. The second protocol (claims K1--K5) was written after the matched comparison had selected three counters and committed before its runs; six of its seed values had served other robustness points, never selection. Both were rerun unchanged with 2.9.0 (9\,919, 7\,925 and 240 runs, each carrying its code hash); against 2.8.0, total leakage changed in 855 of 17\,964 comparable runs, but the principal selections, eligibility decisions, and claim counts did not; one auxiliary setting (false alarms matched at unbounded credit) moved from $T1000$ to $T300$ under both protocols (artifact change report).
 
 
-\paragraph{Designs and metrics}
+\subsection{Designs and metrics}
 Seven designs: \textbf{v1}, \textbf{v1-corrected} (attested platform), \textbf{budget-only} (sessions, static caps, budget), \textbf{block-limit} (a refusing counter of five sends per block per day), \textbf{conversion-only} and \textbf{speed-only} (v2 minus one block test), and \textbf{v2}. A seed is \emph{contained} when leakage stays at most 5\% of the attack rate from some minute to the window's end, for five minutes or more. \emph{Attributable} loss compares the same requests with the policy enforced and absent, net of the reverse, in points of offered users: on attack-free traffic it is the \emph{benign cost}, on the attacked trace the \emph{extra harm} relative to the attacked no-policy arm. \emph{Degradation} compares the attacked trace with attack-free operation under the same policy.
 
-\begin{table}[t]
-\caption{Attacker Profiles, Capabilities, and Policies}
+\begin{table*}[!t]
+\caption{Attacker Profiles, Capabilities, and Policies.}
 \label{tab:attackers}
-\scriptsize
-\begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.4cm}>{\raggedright\arraybackslash}p{9.4cm}l@{}}
+\footnotesize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{12.4cm}l@{}}
 \toprule
 Capability & Profiles & Policies \\
 \midrule
@@ -231,7 +277,7 @@ Concentrated on the destination (5) & Four pumpers on three blocks (carrier neve
 Spread (generated) & 3 to 300 blocks, at full rate or at most the counter's quota per block & S, C \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
 % ---------------------------------------------------------------------------
 \section{Results}
@@ -240,10 +286,11 @@ Spread (generated) & 3 to 300 blocks, at full rate or at most the counter's quot
 \subsection{RQ1: what is contained, and at what cost}
 \label{sec:rq1}
 
-\begin{table}[t]
-\caption{Leakage and User Impact Across Designs}
+\begin{table}[!t]
+\caption{Leakage and User Impact Across Designs.}
 \label{tab:headline}
 \footnotesize
+\setlength{\tabcolsep}{2.8pt}
 \begin{tabular}{@{}lrrrrrr@{}}
 \toprule
 & \multicolumn{3}{c}{caps lifted: leaked} & \multicolumn{3}{c}{caps on, v2} \\
@@ -268,7 +315,7 @@ In the ablation grid (90 effects, each conditional on all other layers, unadjust
 \subsection{RQ3: where reputation stops separating}
 \label{sec:separability}
 
-A farmed-CAPTCHA attacker uses an address and fingerprint once and shares its country, prefix, and residential ASN with every legitimate user; thus, its failures penalize everyone: over an hour with caps lifted (five seeds), up to twice the legitimate rate, 99 to 100\% of it leaks, since a shared key stays above 0.3 conversion until failures outnumber legitimate sends about 1.7 to one. At ten times, 70\% leaks while 17\% of legitimate users are challenged and 3.2\% refused (claim C2, at least 90\% leaked with caps lifted, held in 34 of 36 cells). No single score change separates better: a fresh-fingerprint weight of 40 stops it only by challenging 47\% of legitimate users. In the settings run, reputation separated an attacker only on keys its sends dominated~\cite{douceur2002sybil}.
+A farmed-CAPTCHA attacker uses an address and fingerprint once and shares its country, prefix, and residential ASN with every legitimate user; thus, its failures penalize everyone: over an hour with caps lifted (five seeds), up to twice the legitimate rate, 99 to 100\% of it leaks, since a shared key stays above 0.3 conversion until failures outnumber legitimate sends about 1.7 to one. At ten times, 70\% leaks while 17\% of legitimate users are challenged and 3.2\% refused (claim C2, at least 90\% leaked with caps lifted, held in 34 of 36 cells). No single score change separates better: a fresh-fingerprint weight of 40 stops it only by challenging 47\% of legitimate users. In the settings run, reputation separated an attacker only on keys its sends dominated~\citep{douceur2002sybil}.
 
 \subsection{RQ4: what rationing costs, and what it depends on}
 \label{sec:rationing}
@@ -281,11 +328,10 @@ When separation fails, the cap is the lever: over ten seeds, the default lets 47
 \subsection{Pumping against the sequential tests}
 \label{sec:pumping}
 
-\begin{table}[H]
-\caption{Containment Results for Concentrated Pumping Attacks}
+\begin{table*}[!t]
+\caption{Containment Results for Concentrated Pumping Attacks.}
 \label{tab:pumping}
-\scriptsize
-\setlength{\tabcolsep}{2.5pt}
+\footnotesize
 \begin{tabular}{@{}lllllr@{}}
 \toprule
 Carrier, design & Leaked & Contained & Containment & First verdict & Codes \\
@@ -294,7 +340,7 @@ Carrier, design & Leaked & Contained & Containment & First verdict & Codes \\
 \tablerows{tables/pumping.tex}
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
 Table~\ref{tab:pumping} covers concentrated pumpers on three blocks with caps lifted over ten seeds: messages leaked of about 574 requests in 20 minutes, seeds contained, mean minutes to containment (contained seeds) and to the first verdict (seeds with one), and codes entered. The speed test catches a carrier verifying within a second at 19 messages, while the carrier verifying 60\% with human-like delay is contained in none of the ten 20-minute runs: its first verdict comes at minute 11.6 on average and 452 messages leak; in an hour, 1\,067 leak and two of ten runs are contained, at minute 47.0 on average. Claim C3 (containment with at most 30\% leaked) held in 36 of 36 cells.
 
@@ -303,11 +349,10 @@ Across 18 spread configurations, leakage follows the blocks touched: with 30 blo
 \subsection{Destination policies: where the counter wins, and where it fails}
 \label{sec:matched}
 
-\begin{table}[H]
-\caption{Leakage and Benign-User Impact Across Carrier Types}
+\begin{table*}[!t]
+\caption{Leakage and Benign-User Impact Across Carrier Types.}
 \label{tab:matched}
-\scriptsize
-\setlength{\tabcolsep}{3pt}
+\footnotesize
 \begin{tabular}{@{}lrrrrrrrr@{}}
 \toprule
 Setting (selected as) & NV & IV & HL & CB & Compl. & Benign & Chall. & Events \\
@@ -315,46 +360,45 @@ Setting (selected as) & NV & IV & HL & CB & Compl. & Benign & Chall. & Events \\
 \tablerows{tables/matched.tex}
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-\paragraph{At a benign service target}
+\subsubsection{At a benign service target}
 Table~\ref{tab:matched} reports the first protocol at 200 blocks (144 legitimate sends per block a day; tuning seeds 100--102, evaluation seeds 0--9): 20-minute leakage against the never-verifying (NV), instant (IV), human-like (HL) and challenge-buying (CB) carriers and, from 24-hour attack-free runs at 65\% conversion, completion, benign cost (points), users challenged and verdict events a day; the tuning target is 63.95\%. Figure~\ref{fig:matched} plots each setting's completion against its leakage summed over the four pumpers' runs of a seed (not one combined attack), with the tuning target dotted; its unlabeled points are sequential settings matched to the default's false alarms at other credits (key: \texttt{results/\allowbreak figure1\_key.md}). Figure~\ref{fig:matchedpaired} gives each selected setting's leakage minus the default's, paired per seed (negative: leaks less). The sequential setting selected at the tuning target holds the human-like carrier to 126 messages only by raising 334 false verdict events a day, and misses the target by 0.18 points on seeds 0--9. The graded counter of four sends per block per ten minutes leaks 24 against each outcome-reading carrier and 48 against the challenge buyer, at 0.06 points; counters selected at the sparser settings leak 6 to 18 at 0.15 to 0.35 points (up to 0.43 at 80\%). With the full grid and density-specific attacks (E5) the rule selects the same counters, and so do other objectives on the tuning runs (worst-case leakage, a first-time-loss constraint, each attacker alone, 2\,000 random mixes), except the instant verifier alone and 3 mixes at 200 blocks; on fresh seeds the counter leaked least of the winners against every attacker but the instant verifier (25, against 15 and 16). On seeds 300--309 the 1\,000-block counter falls 0.12 points below its target, yet no seed-and-conversion cell fails the paired check (the evaluation default minus 0.5 points).
 
-\begin{figure}[!tbp]
+\begin{figure*}[!t]
 \centering
-\includegraphics[width=\textwidth]{fig6_matched_a}
-\caption{Leakage vs.\ Legitimate-User Completion Across Settings}
+\includegraphics[width=0.82\textwidth]{fig6_matched_a}
+\caption{Leakage vs.\ Legitimate-User Completion Across Settings.}
 \label{fig:matched}
-\end{figure}
+\end{figure*}
 
-\begin{figure}[!tbp]
+\begin{figure*}[!t]
 \centering
-\includegraphics[width=\textwidth]{fig6_matched_b}
-\caption{Leakage Difference from the Default Across Attack Types}
+\includegraphics[width=0.82\textwidth]{fig6_matched_b}
+\caption{Leakage Difference from the Default Across Attack Types.}
 \label{fig:matchedpaired}
-\end{figure}
+\end{figure*}
 
-\begin{table}[t]
-\caption{Held-Out Evaluation of the Principal Counter}
+\begin{table*}[!t]
+\caption{Held-Out Evaluation of the Principal Counter.}
 \label{tab:claims}
-\scriptsize
-\begin{tabular}{@{}lp{5.0cm}rr>{\raggedright\arraybackslash}p{2.5cm}@{}}
+\footnotesize
+\begin{tabular}{@{}l>{\raggedright\arraybackslash}p{7.6cm}rr>{\raggedright\arraybackslash}p{4.6cm}@{}}
 \toprule
 Claim & Statement & True / cells & IV & Result \\
 \midrule
 \tablerows{tables/claims.tex}
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-\paragraph{Under a second protocol}
+\subsubsection{Under a second protocol}
 Table~\ref{tab:claims} covers 12 shifted points of the held-out family, with held-out attack rates and pools, three seeds each and a 20-minute pumper on three blocks real users share; a claim holds if true in 90\% of cells, which share workloads and seeds and are not independent, and IV marks the instant verifier's cells. Frozen and run on this family, the counter leaked 33, 34, 33, and 62 messages against the four carriers, where the default leaked 287, 36, 344, and 287, and no policy 451 to 1\,857, at a benign cost of 0.13 [0.09, 0.17] points, and failed both service-under-attack claims: 13 of the 17 cells that broke K3 lie at the three points with the most legitimate traffic, where users and pumper compete for one quota; K5 failed in 51 cells over 11 of 12 points. The counters selected for sparser traffic cost 4.7 and 5.8 points here even without an attack: the quota must match the traffic.
 
-\begin{table}[t]
-\caption{Leakage and User Harm Under Shared-Block Pumping}
+\begin{table*}[!b]
+\caption{Leakage and User Harm Under Shared-Block Pumping.}
 \label{tab:attacked}
 \footnotesize
-\setlength{\tabcolsep}{1.7pt}
 \begin{tabular}{@{}lrrrrrr@{}}
 \toprule
  & & \multicolumn{2}{c}{Extra harm against} & \multicolumn{2}{c}{Degradation against} & Benign \\
@@ -366,17 +410,19 @@ Policy & (SMS) & ($\approx$1\,200) & blocks ($\approx$18) & & blocks & users \\
 \tablerows{tables/attacked_a.tex}
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-\begin{table}[t]
-\caption{User Harm Under a Full-Block Poisoning Attack}
+\begin{table}[!t]
+\caption{User Harm Under a Full-Block Poisoning Attack.}
 \label{tab:poisoner}
 \footnotesize
+\setlength{\tabcolsep}{3pt}
 \begin{tabular}{@{}lrrr@{}}
 \toprule
- & & \multicolumn{2}{c}{Extra harm against attacked, no policy} \\
+ & Leaked & \multicolumn{2}{c}{Extra harm against attacked,} \\
+ & & \multicolumn{2}{c}{no policy} \\
 \cmidrule(lr){3-4}
-Policy & Leaked (SMS) & all users & first-time users \\
+Policy & (SMS) & all users & first-time users \\
 \midrule
 \tablerows{tables/attacked_b.tex}
 \bottomrule
@@ -386,20 +432,18 @@ Policy & Leaked (SMS) & all users & first-time users \\
 Tables~\ref{tab:attacked} and~\ref{tab:poisoner} report E1 at 200 blocks (60-minute attacks, seeds 300--309): a pumper on three blocks real users share, and a poisoner flooding all 200 blocks. Leakage under the pumper is summed over the four carriers' runs of a seed, which can hide a carrier on which a policy loses (per carrier: artifact); harm is net completions lost in points, averaged over the carriers (negative: a gain), with intervals for leakage and the attacked blocks in Table~\ref{tab:attacked} and for all users' extra harm in Table~\ref{tab:poisoner}. In Table~\ref{tab:attacked}, against the attacked no-policy arm, the counter cost all users nothing on average and gained the attacked blocks' users three points on average, since without a destination policy, the pumper exhausts their blocks and the hourly budget; with the human-like carrier alone, it cost them 1.9. Against the attack-free operation, every evaluated policy left those users 5 to 9 points worse off on average (2 to 12 per carrier; 8 with none): none shields a block an attacker shares. Counter and tests together, explored outside the frozen claims, leaked least summed over the four carriers but not against the instant verifier (28; $T300$, $c0$: 22), and under the poisoner (Table~\ref{tab:poisoner}) cost all users most of the counters and buckets and leaked more than $T300$, $c0$. A token bucket with a burst of 4 spared the poisoner's users only by letting almost everything through; with two untuned settings, neither limiter dominated, and we ranked only the implemented policies. Returning users, all simulated with verified history, lost nothing.
 
 
-\FloatBarrier
-
+\subsubsection{The operating boundary and adaptive attackers}
 Figure~\ref{fig:boundary} shows the counter's operating boundary (E4, seeds 300--304): in (a), the attributable loss of the three hot blocks' users against their legitimate rate, attack-free and with a never-verifying pumper on those blocks; in (b, c), leakage in 20 and 60 minutes against the blocks a pumper uses, at full rate or paced, with Equations~\eqref{eq:leak}--\eqref{eq:counterwarm} for the full-rate pumper as hollow markers. All horizontal axes and the vertical axes of (b, c) are logarithmic, and lines join sampled settings without locating a crossover. Attack-free, the counter costs a block's users nothing at one send per ten minutes, 2.3 points at four and 5.5 at eight, far below the idealized share beyond the quota (27\% at four), since most challenged users complete or switch to WhatsApp; without WhatsApp, eight sends cost 13.2. A 30-minute launch at three times the normal rate costs its blocks' users 16 points. Over 60 minutes (Figure~\ref{fig:boundary}c) the default leaked 110, 144 and 242 messages on 3, 10 and 30 blocks, against 105, 139 and 240 from Equation~\eqref{eq:leak} ($\lambda\tau \approx 90$), and the counter 71, 240 and 679 against its cold-start bound of 72, 240 and 720. Once 7 messages sent, exempt, to real users' trusted numbers are set aside, no counter run that started cold (44 of 100) exceeded Equation~\eqref{eq:counter}; three warm ones did, by 5 or 6 messages, and none exceeded Equation~\eqref{eq:counterwarm}. With these unfitted inputs Equation~\eqref{eq:cross} ordered the policies' mean leakage in 18 of 18 decisive cells (two ties at $N$), and with the warm-start term in 17, missing where the estimates differ by 0.8 messages (30 blocks, 20 minutes; measured difference 6.6 [$-$27.2, 42.4]); per seed, 76 of 78 decisive comparisons agree. The algebraic crossing lies near five blocks for an hour and 30 for twenty minutes, where the nearest measured differences (three and 30 blocks) do not exclude zero; it is not a measured switching point. Paced to the quota, a pumper leaks about as much under the counter as with no policy (71 against 72 on three blocks in an hour), and 23 under the tests.
 
-\begin{figure}[!tbp]
+\begin{figure*}[!t]
 \centering
-\includegraphics[width=\textwidth,height=0.84\textheight,keepaspectratio]{fig7_counter_boundary}
+\includegraphics[width=\textwidth,height=0.8\textheight,keepaspectratio]{fig7_counter_boundary}
 \caption{Operating Boundary of the Counter.}
 \label{fig:boundary}
-\end{figure}
+\end{figure*}
 
 Against adaptive attackers (E3), the counter held the threshold-aware carrier, receipt faker, and concentrated trust builder to 24 to 36 messages (502 to 665 under the default), but not trust builders on random numbers (577, as under the default); over 360 minutes, the human-like carrier gained 81 messages an hour under the counter, and 753 under the default.
 
-\FloatBarrier
 \subsection{RQ5: what destination policies cost legitimate users}
 \label{sec:fp}
 
@@ -421,17 +465,24 @@ On a real Redis (four vCPUs, four workers), sends cost 13.8\,ms (median) and 21.
 \section{Discussion}
 \label{sec:discussion}
 
-\paragraph{Lessons}
 In the scripted workloads, carriers that verify with human-like delay, fake receipts, or know the thresholds defeated our outcome tests but not a short-window counter. Within an hour of a verdict, the counter's allowance, unlike the tests', grows with the windows an attack spans; over longer campaigns, verdicts expire and the tests leak again. Equation~\eqref{eq:cross} summarizes this for pumpers that solve no challenge and hold no exemption. Its inputs are in an operator's logs; the cost of an excess send, competition under attack, and exemption abuse come only from the simulation. The counter and tests together, with a quota set from each block's traffic, is a hypothesis for real traffic, not a recommendation.
 
-\paragraph{Limitations}
-Everything was simulated, and calibration was assumed. Both protocols were written by the author for the author's generator, the second knowing which counters had won. Some results follow from the generator (a perfect premium list, a datacenter attacker that declines challenges, returning users who always present verified history), and selection used an unweighted sum of four scripted pumpers' leakage and a mean service target met on tuning seeds, which guarantees no service level elsewhere. Close rankings rest on ten or fewer seeds, and costs that round to zero are not shown equivalent. Per-client quotas within a block, carrier spend ceilings, bounded exemptions, tuned token buckets, and other sequential statistics lie outside the evaluated policies. Vendor adapters are untested live, and the timing result holds only for the observer tested. Destination policies challenge people for what strangers sharing their block did, and deployment under the GDPR or Saudi Arabia's PDPL needs a lawful basis and a route for refused users. Replaying real traffic is the experiment this paper most needs.
+% ---------------------------------------------------------------------------
+\section{Limitations}
+\label{sec:limitations}
+
+Everything was simulated, and calibration was assumed. Both protocols were written by the author for the author's generator, the second knowing which counters had won. Some results follow from the generator (a perfect premium list, a datacenter attacker that declines challenges, returning users who always present verified history), and selection used an unweighted sum of four scripted pumpers' leakage and a mean service target met on tuning seeds, which guarantees no service level elsewhere. Close rankings rest on ten or fewer seeds, and costs that round to zero are not shown equivalent. Per-client quotas within a block, carrier spend ceilings, bounded exemptions, tuned token buckets, and other sequential statistics lie outside the evaluated policies. Vendor adapters are untested live, and the timing result holds only for the observer tested. Destination policies challenge people for what strangers sharing their block did, and deployment under the GDPR or Saudi Arabia's PDPL needs a lawful basis and a route for refused users.
 
 % ---------------------------------------------------------------------------
-\section{Conclusion}
+\section{Conclusions and future work}
 \label{sec:conclusion}
 
 In this simulation, the design contains attacks that carry a signature at a low cost to simulated users and rations, rather than separates, residential attackers that resemble people. Counting sends on the destination leaked less in aggregate than our outcome tests against concentrated pumpers, although not reliably against an instantly verifying carrier; a frozen counter failed its service claims when the attacker shared blocks with real users and lost its advantage against wide, paced, and trust-building pumpers. Within an hour, unfitted estimates ordered the policies' mean leakage in 18 of 18 decisive boundary cells with the cold-start bound and 17 with the warm-start bound, missing a near tie; the crossing was algebraic, not a measured switching point.
+
+Replaying real traffic is the experiment this paper most needs: it would test the assumed calibration, the cost of an excess send to users who share a block, and the quota a counter needs per block.
+
+\section*{Declaration of generative AI and AI-assisted technologies in the writing process}
+The author used Claude (Anthropic) for code, evaluation, drafting and editing; checked numbers against the recorded results and claims against the code; and takes full responsibility for the content.
 
 \section*{CRediT authorship contribution statement}
 \textbf{Naveed Ahmed:} Conceptualization, Methodology, Software, Validation, Investigation, Writing -- original draft, Writing -- review \& editing.
@@ -439,13 +490,10 @@ In this simulation, the design contains attacks that carry a signature at a low 
 \section*{Declaration of competing interest}
 The author declares no known competing financial interests or personal relationships that could have appeared to influence this work.
 
-\section*{Declaration of generative AI and AI-assisted technologies in the writing process}
-The author used Claude (Anthropic) for code, evaluation, drafting and editing; checked numbers against the recorded results and claims against the code; and takes full responsibility for the content.
-
 \section*{Data availability}
 {\raggedright No human or real traffic data was used. Code, protocols (\texttt{config/}), every run's configuration and outcome and the sources of headline numbers (\texttt{results/}) are at \url{https://github.com/nahmedpsu/OTP-DDOS}, release 2.9.1 (tag v2.9.1), which runs unchanged the code of release 2.9.0 (tag v2.9.0, commit 9af3100) that produced the results (\texttt{code\_identity.md}); the 2.8.0 results are in \texttt{results/\allowbreak historical\_2.8}. These files are the supplementary material.\par}
 
-\bibliographystyle{elsarticle-num}
+\bibliographystyle{elsarticle-harv}
 \bibliography{refs}
 
 \end{document}
