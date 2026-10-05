@@ -124,7 +124,7 @@ The baseline, v1, sends a code to any unregistered number behind seven controls:
 \caption{v1 Assumptions and how they fail.}
 \label{tab:v1}
 \footnotesize
-\begin{tabular}{@{}c>{\raggedright\arraybackslash}p{3.45cm}>{\raggedright\arraybackslash}p{3.95cm}@{}}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}c>{\raggedright\arraybackslash}p{3.45cm}>{\raggedright\arraybackslash}p{3.95cm}@{}}
 \toprule
 Gap & v1 assumes & How it fails \\
 \midrule
@@ -137,7 +137,7 @@ F & Check-then-increment is a rate limit & Two racing instances both pass \\
 G & Bulk and test flags are internal & Neither needs stronger authentication \\
 H & Each check says which check failed & Thresholds can be probed one at a time \\
 \bottomrule
-\end{tabular}
+\end{tabular*}
 \end{table}
 
 \subsection{Threat model}
@@ -158,7 +158,7 @@ A request passes the steps of Table~\ref{tab:steps}, which lists in brackets the
 \caption{Twelve Steps and the v1 Gaps They Address.}
 \label{tab:steps}
 \footnotesize
-\begin{tabular}{@{}cp{16.5cm}@{}}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}cp{16.6cm}@{}}
 \toprule
 Step & Check \\
 \midrule
@@ -175,7 +175,7 @@ Step & Check \\
 11 & Reserve hourly count, spend and any destination slot; write state; enqueue; uniform response [E, H] \\
 FB & Outcomes per key; destination-block tests; denylist of fine keys \\
 \bottomrule
-\end{tabular}
+\end{tabular*}
 \end{table*}
 
 Step~7 computes
@@ -264,7 +264,7 @@ Seven designs: \textbf{v1}, \textbf{v1-corrected} (attested platform), \textbf{b
 \caption{Attacker Profiles, Capabilities, and Policies.}
 \label{tab:attackers}
 \footnotesize
-\begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{12.4cm}l@{}}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{12.4cm}l@{}}
 \toprule
 Capability & Profiles & Policies \\
 \midrule
@@ -276,7 +276,7 @@ Games outcomes or trust (8) & Pumpers on elevated-cost or standard ranges verify
 Concentrated on the destination (5) & Four pumpers on three blocks (carrier never verifies, verifies within 1\,s or 60\% after 30\,s, or buys challenges); a poisoner on users' blocks & S, C \\
 Spread (generated) & 3 to 300 blocks, at full rate or at most the counter's quota per block & S, C \\
 \bottomrule
-\end{tabular}
+\end{tabular*}
 \end{table*}
 
 % ---------------------------------------------------------------------------
@@ -291,7 +291,7 @@ Spread (generated) & 3 to 300 blocks, at full rate or at most the counter's quot
 \label{tab:headline}
 \footnotesize
 \setlength{\tabcolsep}{2.8pt}
-\begin{tabular}{@{}lrrrrrr@{}}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrrrr@{}}
 \toprule
 & \multicolumn{3}{c}{caps lifted: leaked} & \multicolumn{3}{c}{caps on, v2} \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
@@ -299,7 +299,7 @@ Attacker & v1 & BL & v2 & leaked & refused & completed \\
 \midrule
 \tablerows{tables/headline.tex}
 \bottomrule
-\end{tabular}
+\end{tabular*}
 \end{table}
 
 Table~\ref{tab:headline} gives the leaked share (\%, mean of per-run shares) of about 600 attack requests in 20 minutes over 30 seeds under v1, block-limit (BL) and v2 with source caps lifted, and under v2 with caps on, with the first-time users refused and all users completing (\%); supplementary Table~S1 (\texttt{results/\allowbreak design\_table.md}) gives every design with intervals. Datacenter rotation leaks nothing under v2 because it scores in the challenge tier and declines challenges; Step~5 refuses the premium range, and the session cap holds the single client to two messages (Table~\ref{tab:headline}); in all 108 robustness cells, these attacks leaked under 5\% at completion within two points of the paired no-attack run (claim C1). The walk leaks 61 [53, 70] messages before its block's verdict (block-limit: five), and the reused profile 89 [83, 95].
@@ -332,14 +332,14 @@ When separation fails, the cap is the lever: over ten seeds, the default lets 47
 \caption{Containment Results for Concentrated Pumping Attacks.}
 \label{tab:pumping}
 \footnotesize
-\begin{tabular}{@{}lllllr@{}}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lllllr@{}}
 \toprule
 Carrier, design & Leaked & Contained & Containment & First verdict & Codes \\
  & (msgs) & (seeds) & (min) & (min) & entered \\
 \midrule
 \tablerows{tables/pumping.tex}
 \bottomrule
-\end{tabular}
+\end{tabular*}
 \end{table*}
 
 Table~\ref{tab:pumping} covers concentrated pumpers on three blocks with caps lifted over ten seeds: messages leaked of about 574 requests in 20 minutes, seeds contained, mean minutes to containment (contained seeds) and to the first verdict (seeds with one), and codes entered. The speed test catches a carrier verifying within a second at 19 messages, while the carrier verifying 60\% with human-like delay is contained in none of the ten 20-minute runs: its first verdict comes at minute 11.6 on average and 452 messages leak; in an hour, 1\,067 leak and two of ten runs are contained, at minute 47.0 on average. Claim C3 (containment with at most 30\% leaked) held in 36 of 36 cells.
@@ -353,13 +353,13 @@ Across 18 spread configurations, leakage follows the blocks touched: with 30 blo
 \caption{Leakage and Benign-User Impact Across Carrier Types.}
 \label{tab:matched}
 \footnotesize
-\begin{tabular}{@{}lrrrrrrrr@{}}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lrrrrrrrr@{}}
 \toprule
 Setting (selected as) & NV & IV & HL & CB & Compl. & Benign & Chall. & Events \\
 \midrule
 \tablerows{tables/matched.tex}
 \bottomrule
-\end{tabular}
+\end{tabular*}
 \end{table*}
 
 \subsubsection{At a benign service target}
@@ -383,13 +383,13 @@ Table~\ref{tab:matched} reports the first protocol at 200 blocks (144 legitimate
 \caption{Held-Out Evaluation of the Principal Counter.}
 \label{tab:claims}
 \footnotesize
-\begin{tabular}{@{}l>{\raggedright\arraybackslash}p{7.6cm}rr>{\raggedright\arraybackslash}p{4.6cm}@{}}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}l>{\raggedright\arraybackslash}p{7.6cm}rr>{\raggedright\arraybackslash}p{4.6cm}@{}}
 \toprule
 Claim & Statement & True / cells & IV & Result \\
 \midrule
 \tablerows{tables/claims.tex}
 \bottomrule
-\end{tabular}
+\end{tabular*}
 \end{table*}
 
 \subsubsection{Under a second protocol}
@@ -399,7 +399,7 @@ Table~\ref{tab:claims} covers 12 shifted points of the held-out family, with hel
 \caption{Leakage and User Harm Under Shared-Block Pumping.}
 \label{tab:attacked}
 \footnotesize
-\begin{tabular}{@{}lrrrrrr@{}}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lrrrrrr@{}}
 \toprule
  & & \multicolumn{2}{c}{Extra harm against} & \multicolumn{2}{c}{Degradation against} & Benign \\
  & & \multicolumn{2}{c}{attacked, no policy} & \multicolumn{2}{c}{attack-free, same policy} & cost \\
@@ -409,7 +409,7 @@ Policy & (SMS) & ($\approx$1\,200) & blocks ($\approx$18) & & blocks & users \\
 \midrule
 \tablerows{tables/attacked_a.tex}
 \bottomrule
-\end{tabular}
+\end{tabular*}
 \end{table*}
 
 \begin{table}[!t]
@@ -417,7 +417,7 @@ Policy & (SMS) & ($\approx$1\,200) & blocks ($\approx$18) & & blocks & users \\
 \label{tab:poisoner}
 \footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrr@{}}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrr@{}}
 \toprule
  & Leaked & \multicolumn{2}{c}{Extra harm against attacked,} \\
  & & \multicolumn{2}{c}{no policy} \\
@@ -426,7 +426,7 @@ Policy & (SMS) & all users & first-time users \\
 \midrule
 \tablerows{tables/attacked_b.tex}
 \bottomrule
-\end{tabular}
+\end{tabular*}
 \end{table}
 
 Tables~\ref{tab:attacked} and~\ref{tab:poisoner} report E1 at 200 blocks (60-minute attacks, seeds 300--309): a pumper on three blocks real users share, and a poisoner flooding all 200 blocks. Leakage under the pumper is summed over the four carriers' runs of a seed, which can hide a carrier on which a policy loses (per carrier: artifact); harm is net completions lost in points, averaged over the carriers (negative: a gain), with intervals for leakage and the attacked blocks in Table~\ref{tab:attacked} and for all users' extra harm in Table~\ref{tab:poisoner}. In Table~\ref{tab:attacked}, against the attacked no-policy arm, the counter cost all users nothing on average and gained the attacked blocks' users three points on average, since without a destination policy, the pumper exhausts their blocks and the hourly budget; with the human-like carrier alone, it cost them 1.9. Against the attack-free operation, every evaluated policy left those users 5 to 9 points worse off on average (2 to 12 per carrier; 8 with none): none shields a block an attacker shares. Counter and tests together, explored outside the frozen claims, leaked least summed over the four carriers but not against the instant verifier (28; $T300$, $c0$: 22), and under the poisoner (Table~\ref{tab:poisoner}) cost all users most of the counters and buckets and leaked more than $T300$, $c0$. A token bucket with a burst of 4 spared the poisoner's users only by letting almost everything through; with two untuned settings, neither limiter dominated, and we ranked only the implemented policies. Returning users, all simulated with verified history, lost nothing.
