@@ -80,7 +80,7 @@ One entity can present many identities~\cite{douceur2002sybil}, and a signed ses
 The baseline, v1, sends a code to any unregistered number behind seven controls: reCAPTCHA v3 on web requests only, one message per number per minute, five requests per address per minute, a country allow-list, a body-length limit, a proxy block, and per-platform caps; bulk and test paths skip some checks. Table~\ref{tab:v1} lists eight assumptions behind these rules and how an attacker within the threat model breaks each; the gaps follow from the rules, not observed abuse.
 
 \begin{table}[H]
-\caption{\textbf{v1 Assumptions and How They Fail.}}
+\caption{v1 Assumptions and how they fail}
 \label{tab:v1}
 \footnotesize
 \begin{tabular}{cp{5.2cm}p{5.6cm}}
@@ -111,10 +111,10 @@ No message is paid for before every check passes, and cheap checks run first. Tr
 
 \subsection{The pipeline and the risk score}
 
-A request passes the steps of Table~\ref{tab:steps} until it is refused. Step~0 takes the platform only from a valid App Attest or Play Integrity result. Each limit and reservation is one atomic Redis operation, but the enclosing steps are not one transaction: on the normal path, a refused request returns its per-number claims and counter slot, and the hourly budget is reserved only for a message about to be enqueued, a reservation rather than a completed dispatch; a crash between them can leak reservations (Section~\ref{sec:method}). Address limits and source caps count requests, except that a request Step~11 challenges returns its source-cap count. Every outcome after Step~0, except the challenge, returns one HTTP~200 body after at least 400\,ms, a floor that cannot hide longer work.
+A request passes the steps of Table~\ref{tab:steps}, which lists in brackets the gaps of Table~\ref{tab:v1} each step addresses (FB: the feedback loop), until it is refused. Step~0 takes the platform only from a valid App Attest or Play Integrity result. Each limit and reservation is one atomic Redis operation, but the enclosing steps are not one transaction: on the normal path, a refused request returns its per-number claims and counter slot, and the hourly budget is reserved only for a message about to be enqueued, a reservation rather than a completed dispatch; a crash between them can leak reservations (Section~\ref{sec:method}). Address limits and source caps count requests, except that a request Step~11 challenges returns its source-cap count. Every outcome after Step~0, except the challenge, returns one HTTP~200 body after at least 400\,ms, a floor that cannot hide longer work.
 
 \begin{table}[H]
-\caption{\textbf{Twelve Steps and the v1 Gaps They Address.} Gaps of Table~\ref{tab:v1} in brackets; FB: feedback loop.}
+\caption{Twelve Steps and the v1 Gaps They Address}
 \label{tab:steps}
 \footnotesize
 \begin{tabular}{cp{11.6cm}}
@@ -205,7 +205,7 @@ Approximately 4\,000 lines of Python implement the pipeline on in-memory and Red
 \label{sec:sim}
 The pipeline runs against scripted vendor fakes on a simulated clock. After a warm-up of ten minutes (30 or 130 for pumping), attacks run over legitimate traffic at 20 requests per minute. Simulated users verify 80\% of codes after a lognormal delay (median 22\,s; 2\,s for the 20\% using autofill); 70\% of numbers are reachable on WhatsApp; 90\% of users complete a challenge; 20\% are returning account holders with a stable fingerprint, a trusted number, and verified history; thus, the results for returning users describe trusted identities only. Separate random streams provide all scenarios at the same seed with the same users.
 
-Three behavioral parameters have published counterparts: genuine conversion (one provider's 68\% or more~\cite{twilio_verify}; ours 60\%--90\%) and the never-converting destinations and identity churn of Section~\ref{sec:related}; the rest are assumptions. Attackers (Table~\ref{tab:attackers}) draw pool size, rate, and CAPTCHA class per seed, which explains 92\% [80, 98] of the variance of the farm's leakage in a nested design (ten configurations, three seeds each). Brackets are 95\% percentile-bootstrap intervals, paired per seed for differences; they describe variation under this generator, not uncertainty about real traffic.
+Three behavioral parameters have published counterparts: genuine conversion (one provider's 68\% or more~\cite{twilio_verify}; ours 60\%--90\%) and the never-converting destinations and identity churn of Section~\ref{sec:related}; the rest are assumptions. Table~\ref{tab:attackers} groups the attacker profiles by capability and marks the destination policies each faced (S, sequential tests; C, counters; B, block-limit; parameters in \texttt{results/\allowbreak attacker\_profiles.md}). Attackers draw pool size, rate, and CAPTCHA class per seed, which explains 92\% [80, 98] of the variance of the farm's leakage in a nested design (ten configurations, three seeds each). Brackets in the text and tables, and bars and bands in the figures, are 95\% percentile-bootstrap intervals over seeds, paired per seed for differences; they describe variation under this generator, not uncertainty about real traffic.
 
 \paragraph{Two protocols and their chronology}
 A supplementary map (\texttt{results/\allowbreak study\_map.md}) gives each study's seeds. The first protocol, committed before its runs, fixed the matched comparison and a robustness study over 12 Latin-hypercube points (conversion 0.6--0.9 and five other behavioral parameters) and a held-out family (60 to 120 attack requests a minute, 50\,000 to 500\,000 addresses, heterogeneous legitimate traffic), with claims C1--C5 that hold if true in 90\% of cells, a benchmark convention, not a confidence level. The matched comparison changes only the destination policy and, at three block densities, selects on tuning seeds the least leakage summed over four concentrated pumpers among settings at or above the \emph{tuning target}, the default's completion minus 0.5 points. The robustness study's first run failed C1 in 32 of 108 cells because attack and no-attack runs drew different users; we fixed the pairing, a fix that followed a result, and reran every study. The second protocol (claims K1--K5) was written after the matched comparison had selected three counters and committed before its runs; six of its seed values had served other robustness points, never selection. Both were rerun unchanged with 2.9.0 (9\,919, 7\,925 and 240 runs, each carrying its code hash); against 2.8.0, total leakage changed in 855 of 17\,964 comparable runs, but the principal selections, eligibility decisions, and claim counts did not; one auxiliary setting (false alarms matched at unbounded credit) moved from $T1000$ to $T300$ under both protocols (artifact change report).
@@ -215,7 +215,7 @@ A supplementary map (\texttt{results/\allowbreak study\_map.md}) gives each stud
 Seven designs: \textbf{v1}, \textbf{v1-corrected} (attested platform), \textbf{budget-only} (sessions, static caps, budget), \textbf{block-limit} (a refusing counter of five sends per block per day), \textbf{conversion-only} and \textbf{speed-only} (v2 minus one block test), and \textbf{v2}. A seed is \emph{contained} when leakage stays at most 5\% of the attack rate from some minute to the window's end, for five minutes or more. \emph{Attributable} loss compares the same requests with the policy enforced and absent, net of the reverse, in points of offered users: on attack-free traffic it is the \emph{benign cost}, on the attacked trace the \emph{extra harm} relative to the attacked no-policy arm. \emph{Degradation} compares the attacked trace with attack-free operation under the same policy.
 
 \begin{table}[t]
-\caption{\textbf{Attacker Profiles, Capabilities, and Policies.} Policies faced: S, sequential tests; C, counters; B, block-limit. Parameters: \texttt{results/\allowbreak attacker\_profiles.md}.}
+\caption{Attacker Profiles, Capabilities, and Policies}
 \label{tab:attackers}
 \scriptsize
 \begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.4cm}>{\raggedright\arraybackslash}p{9.4cm}l@{}}
@@ -241,7 +241,7 @@ Spread (generated) & 3 to 300 blocks, at full rate or at most the counter's quot
 \label{sec:rq1}
 
 \begin{table}[t]
-\caption{\textbf{Leakage and User Impact Across Designs.} Leaked share (\%, mean of per-run shares) of about 600 attack requests in 20 minutes, 30 seeds, under v1, block-limit (BL) and v2 with source caps lifted, and under v2 with caps on, with first-time users refused and all users completing (\%). All designs, with intervals: supplementary Table~S1 (\texttt{results/\allowbreak design\_table.md}).}
+\caption{Leakage and User Impact Across Designs}
 \label{tab:headline}
 \footnotesize
 \begin{tabular}{@{}lrrrrrr@{}}
@@ -255,7 +255,7 @@ Attacker & v1 & BL & v2 & leaked & refused & completed \\
 \end{tabular}
 \end{table}
 
-Datacenter rotation leaks nothing under v2 because it scores in the challenge tier and declines challenges; Step~5 refuses the premium range, and the session cap holds the single client to two messages (Table~\ref{tab:headline}); in all 108 robustness cells, these attacks leaked under 5\% at completion within two points of the paired no-attack run (claim C1). The walk leaks 61 [53, 70] messages before its block's verdict (block-limit: five), and the reused profile 89 [83, 95].
+Table~\ref{tab:headline} gives the leaked share (\%, mean of per-run shares) of about 600 attack requests in 20 minutes over 30 seeds under v1, block-limit (BL) and v2 with source caps lifted, and under v2 with caps on, with the first-time users refused and all users completing (\%); supplementary Table~S1 (\texttt{results/\allowbreak design\_table.md}) gives every design with intervals. Datacenter rotation leaks nothing under v2 because it scores in the challenge tier and declines challenges; Step~5 refuses the premium range, and the session cap holds the single client to two messages (Table~\ref{tab:headline}); in all 108 robustness cells, these attacks leaked under 5\% at completion within two points of the paired no-attack run (claim C1). The walk leaks 61 [53, 70] messages before its block's verdict (block-limit: five), and the reused profile 89 [83, 95].
 
 
 The farm leaks 99.5\% with caps lifted under every design; v2's adaptive cap holds it to 229 [215, 244] messages, 46\%, by refusing 54\% [47, 60] of first-time users, so 45.5\% complete instead of 76.4\% under v1: rationing (claim C5 held in 36 of 36 cells).
@@ -282,7 +282,7 @@ When separation fails, the cap is the lever: over ten seeds, the default lets 47
 \label{sec:pumping}
 
 \begin{table}[H]
-\caption{\textbf{Containment Results for Concentrated Pumping Attacks.} Three blocks, caps lifted, ten seeds: messages leaked of about 574 requests in twenty minutes; seeds contained; mean minutes to containment (contained seeds) and to the first verdict (seeds with one); codes entered.}
+\caption{Containment Results for Concentrated Pumping Attacks}
 \label{tab:pumping}
 \scriptsize
 \setlength{\tabcolsep}{2.5pt}
@@ -296,7 +296,7 @@ Carrier, design & Leaked & Contained & Containment & First verdict & Codes \\
 \end{tabular}
 \end{table}
 
-In Table~\ref{tab:pumping}, the speed test catches a carrier verifying within a second at 19 messages, while the carrier verifying 60\% with human-like delay is contained in none of the ten 20-minute runs: its first verdict comes at minute 11.6 on average and 452 messages leak; in an hour, 1\,067 leak and two of ten runs are contained, at minute 47.0 on average. Claim C3 (containment with at most 30\% leaked) held in 36 of 36 cells.
+Table~\ref{tab:pumping} covers concentrated pumpers on three blocks with caps lifted over ten seeds: messages leaked of about 574 requests in 20 minutes, seeds contained, mean minutes to containment (contained seeds) and to the first verdict (seeds with one), and codes entered. The speed test catches a carrier verifying within a second at 19 messages, while the carrier verifying 60\% with human-like delay is contained in none of the ten 20-minute runs: its first verdict comes at minute 11.6 on average and 452 messages leak; in an hour, 1\,067 leak and two of ten runs are contained, at minute 47.0 on average. Claim C3 (containment with at most 30\% leaked) held in 36 of 36 cells.
 
 Across 18 spread configurations, leakage follows the blocks touched: with 30 blocks, five to seven runs in ten are still contained. Unsaturated, Equation~\eqref{eq:leak} errs by 1.6 to 7.9 messages per run (1\%--13\%, ten configurations); saturated, it overstates by up to 91.
 
@@ -304,7 +304,7 @@ Across 18 spread configurations, leakage follows the blocks touched: with 30 blo
 \label{sec:matched}
 
 \begin{table}[H]
-\caption{\textbf{Leakage and Benign-User Impact Across Carrier Types.} First protocol, 200 blocks (144 legitimate sends per block a day), tuning seeds 100--102, evaluation seeds 0--9: 20-minute leakage (messages) by never-verifying (NV), instant (IV), human-like (HL) and challenge-buying (CB) carriers; from 24-hour attack-free runs at 65\% conversion, completion, benign cost (points), users challenged and verdict events a day. Tuning target: 63.95\%.}
+\caption{Leakage and Benign-User Impact Across Carrier Types}
 \label{tab:matched}
 \scriptsize
 \setlength{\tabcolsep}{3pt}
@@ -318,24 +318,24 @@ Setting (selected as) & NV & IV & HL & CB & Compl. & Benign & Chall. & Events \\
 \end{table}
 
 \paragraph{At a benign service target}
-Under the first protocol (Table~\ref{tab:matched}, Figures~\ref{fig:matched} and~\ref{fig:matchedpaired}), the sequential setting selected at the tuning target holds the human-like carrier to 126 messages only by raising 334 false verdict events a day, and misses the target by 0.18 points on seeds 0--9. The graded counter of four sends per block per ten minutes leaks 24 against each outcome-reading carrier and 48 against the challenge buyer, at 0.06 points; counters selected at the sparser settings leak 6 to 18 at 0.15 to 0.35 points (up to 0.43 at 80\%). With the full grid and density-specific attacks (E5) the rule selects the same counters, and so do other objectives on the tuning runs (worst-case leakage, a first-time-loss constraint, each attacker alone, 2\,000 random mixes), except the instant verifier alone and 3 mixes at 200 blocks; on fresh seeds the counter leaked least of the winners against every attacker but the instant verifier (25, against 15 and 16). On seeds 300--309 the 1\,000-block counter falls 0.12 points below its target, yet no seed-and-conversion cell fails the paired check (the evaluation default minus 0.5 points).
+Table~\ref{tab:matched} reports the first protocol at 200 blocks (144 legitimate sends per block a day; tuning seeds 100--102, evaluation seeds 0--9): 20-minute leakage against the never-verifying (NV), instant (IV), human-like (HL) and challenge-buying (CB) carriers and, from 24-hour attack-free runs at 65\% conversion, completion, benign cost (points), users challenged and verdict events a day; the tuning target is 63.95\%. Figure~\ref{fig:matched} plots each setting's completion against its leakage summed over the four pumpers' runs of a seed (not one combined attack), with the tuning target dotted; its unlabeled points are sequential settings matched to the default's false alarms at other credits (key: \texttt{results/\allowbreak figure1\_key.md}). Figure~\ref{fig:matchedpaired} gives each selected setting's leakage minus the default's, paired per seed (negative: leaks less). The sequential setting selected at the tuning target holds the human-like carrier to 126 messages only by raising 334 false verdict events a day, and misses the target by 0.18 points on seeds 0--9. The graded counter of four sends per block per ten minutes leaks 24 against each outcome-reading carrier and 48 against the challenge buyer, at 0.06 points; counters selected at the sparser settings leak 6 to 18 at 0.15 to 0.35 points (up to 0.43 at 80\%). With the full grid and density-specific attacks (E5) the rule selects the same counters, and so do other objectives on the tuning runs (worst-case leakage, a first-time-loss constraint, each attacker alone, 2\,000 random mixes), except the instant verifier alone and 3 mixes at 200 blocks; on fresh seeds the counter leaked least of the winners against every attacker but the instant verifier (25, against 15 and 16). On seeds 300--309 the 1\,000-block counter falls 0.12 points below its target, yet no seed-and-conversion cell fails the paired check (the evaluation default minus 0.5 points).
 
 \begin{figure}[!tbp]
 \centering
 \includegraphics[width=\textwidth]{fig6_matched_a}
-\caption{\textbf{Leakage vs.\ Legitimate-User Completion Across Settings.} First protocol, 200 blocks, evaluation seeds 0--9: each setting's completion in 24-hour attack-free runs at 65\% conversion against its 20-minute leakage summed over the four concentrated pumpers' runs of a seed (not one combined attack). Bars: 95\% bootstrap intervals over seeds. Dotted line: the tuning target. Unlabeled points: sequential settings matched to the default's false alarms at other credits (key: \texttt{results/\allowbreak figure1\_key.md}).}
+\caption{Leakage vs.\ Legitimate-User Completion Across Settings}
 \label{fig:matched}
 \end{figure}
 
 \begin{figure}[!tbp]
 \centering
 \includegraphics[width=\textwidth]{fig6_matched_b}
-\caption{\textbf{Leakage Difference from the Default Across Attack Types.} First protocol, 200 blocks, evaluation seeds 0--9, 20-minute attacks: for each selected setting and concentrated pumper, leakage minus the default's, paired per seed (negative: leaks less), with 95\% bootstrap intervals over seeds.}
+\caption{Leakage Difference from the Default Across Attack Types}
 \label{fig:matchedpaired}
 \end{figure}
 
 \begin{table}[t]
-\caption{\textbf{Held-Out Evaluation of the Principal Counter.} Second-protocol claims for the graded counter of 4 per 10 min on the held-out family: 12 shifted points, held-out attack rates and pools, three seeds each, a 20-minute pumper on three blocks real users share. A claim holds if true in 90\% of cells; cells share workloads and seeds and are not independent. IV: the instant verifier's cells.}
+\caption{Held-Out Evaluation of the Principal Counter}
 \label{tab:claims}
 \scriptsize
 \begin{tabular}{@{}lp{5.0cm}rr>{\raggedright\arraybackslash}p{2.5cm}@{}}
@@ -348,10 +348,10 @@ Claim & Statement & True / cells & IV & Result \\
 \end{table}
 
 \paragraph{Under a second protocol}
-Frozen and run on the held-out family (Table~\ref{tab:claims}), the counter leaked 33, 34, 33, and 62 messages against the four carriers, where the default leaked 287, 36, 344, and 287, and no policy 451 to 1\,857, at a benign cost of 0.13 [0.09, 0.17] points, and failed both service-under-attack claims: 13 of the 17 cells that broke K3 lie at the three points with the most legitimate traffic, where users and pumper compete for one quota; K5 failed in 51 cells over 11 of 12 points. The counters selected for sparser traffic cost 4.7 and 5.8 points here even without an attack: the quota must match the traffic.
+Table~\ref{tab:claims} covers 12 shifted points of the held-out family, with held-out attack rates and pools, three seeds each and a 20-minute pumper on three blocks real users share; a claim holds if true in 90\% of cells, which share workloads and seeds and are not independent, and IV marks the instant verifier's cells. Frozen and run on this family, the counter leaked 33, 34, 33, and 62 messages against the four carriers, where the default leaked 287, 36, 344, and 287, and no policy 451 to 1\,857, at a benign cost of 0.13 [0.09, 0.17] points, and failed both service-under-attack claims: 13 of the 17 cells that broke K3 lie at the three points with the most legitimate traffic, where users and pumper compete for one quota; K5 failed in 51 cells over 11 of 12 points. The counters selected for sparser traffic cost 4.7 and 5.8 points here even without an attack: the quota must match the traffic.
 
 \begin{table}[t]
-\caption{\textbf{Leakage and User Harm Under Shared-Block Pumping.} E1: a pumper on three blocks that real users share; 200 blocks, 60-minute attacks, seeds 300--309, four carriers. Leaked: SMS to the attacker's numbers, summed over the four carriers' runs of a seed, which can hide a carrier on which a policy loses (per carrier: artifact). Harm: net completions lost, in points, averaged over the carriers; negative: a gain. Brackets, on leakage and the attacked blocks only: 95\% bootstrap intervals over seeds.}
+\caption{Leakage and User Harm Under Shared-Block Pumping}
 \label{tab:attacked}
 \footnotesize
 \setlength{\tabcolsep}{1.7pt}
@@ -369,7 +369,7 @@ Policy & (SMS) & ($\approx$1\,200) & blocks ($\approx$18) & & blocks & users \\
 \end{table}
 
 \begin{table}[t]
-\caption{\textbf{User Harm Under a Full-Block Poisoning Attack.} E1: a poisoner flooding all 200 blocks; 60-minute attacks, seeds 300--309. Extra harm: net completions lost, in points of all users (with 95\% bootstrap intervals over seeds) and of first-time users.}
+\caption{User Harm Under a Full-Block Poisoning Attack}
 \label{tab:poisoner}
 \footnotesize
 \begin{tabular}{@{}lrrr@{}}
@@ -383,17 +383,17 @@ Policy & Leaked (SMS) & all users & first-time users \\
 \end{tabular}
 \end{table}
 
-In Table~\ref{tab:attacked}, against the attacked no-policy arm, the counter cost all users nothing on average and gained the attacked blocks' users three points on average, since without a destination policy, the pumper exhausts their blocks and the hourly budget; with the human-like carrier alone, it cost them 1.9. Against the attack-free operation, every evaluated policy left those users 5 to 9 points worse off on average (2 to 12 per carrier; 8 with none): none shields a block an attacker shares. Counter and tests together, explored outside the frozen claims, leaked least summed over the four carriers but not against the instant verifier (28; $T300$, $c0$: 22), and under the poisoner (Table~\ref{tab:poisoner}) cost all users most of the counters and buckets and leaked more than $T300$, $c0$. A token bucket with a burst of 4 spared the poisoner's users only by letting almost everything through; with two untuned settings, neither limiter dominated, and we ranked only the implemented policies. Returning users, all simulated with verified history, lost nothing.
+Tables~\ref{tab:attacked} and~\ref{tab:poisoner} report E1 at 200 blocks (60-minute attacks, seeds 300--309): a pumper on three blocks real users share, and a poisoner flooding all 200 blocks. Leakage under the pumper is summed over the four carriers' runs of a seed, which can hide a carrier on which a policy loses (per carrier: artifact); harm is net completions lost in points, averaged over the carriers (negative: a gain), with intervals for leakage and the attacked blocks in Table~\ref{tab:attacked} and for all users' extra harm in Table~\ref{tab:poisoner}. In Table~\ref{tab:attacked}, against the attacked no-policy arm, the counter cost all users nothing on average and gained the attacked blocks' users three points on average, since without a destination policy, the pumper exhausts their blocks and the hourly budget; with the human-like carrier alone, it cost them 1.9. Against the attack-free operation, every evaluated policy left those users 5 to 9 points worse off on average (2 to 12 per carrier; 8 with none): none shields a block an attacker shares. Counter and tests together, explored outside the frozen claims, leaked least summed over the four carriers but not against the instant verifier (28; $T300$, $c0$: 22), and under the poisoner (Table~\ref{tab:poisoner}) cost all users most of the counters and buckets and leaked more than $T300$, $c0$. A token bucket with a burst of 4 spared the poisoner's users only by letting almost everything through; with two untuned settings, neither limiter dominated, and we ranked only the implemented policies. Returning users, all simulated with verified history, lost nothing.
 
 
 \FloatBarrier
 
-Attack-free (Figure~\ref{fig:boundary}a), the counter costs a block's users nothing at one send per ten minutes, 2.3 points at four and 5.5 at eight, far below the idealized share beyond the quota (27\% at four), since most challenged users complete or switch to WhatsApp; without WhatsApp, eight sends cost 13.2. A 30-minute launch at three times the normal rate costs its blocks' users 16 points. Over 60 minutes (Figure~\ref{fig:boundary}c) the default leaked 110, 144 and 242 messages on 3, 10 and 30 blocks, against 105, 139 and 240 from Equation~\eqref{eq:leak} ($\lambda\tau \approx 90$), and the counter 71, 240 and 679 against its cold-start bound of 72, 240 and 720. Once 7 messages sent, exempt, to real users' trusted numbers are set aside, no counter run that started cold (44 of 100) exceeded Equation~\eqref{eq:counter}; three warm ones did, by 5 or 6 messages, and none exceeded Equation~\eqref{eq:counterwarm}. With these unfitted inputs Equation~\eqref{eq:cross} ordered the policies' mean leakage in 18 of 18 decisive cells (two ties at $N$), and with the warm-start term in 17, missing where the estimates differ by 0.8 messages (30 blocks, 20 minutes; measured difference 6.6 [$-$27.2, 42.4]); per seed, 76 of 78 decisive comparisons agree. The algebraic crossing lies near five blocks for an hour and 30 for twenty minutes, where the nearest measured differences (three and 30 blocks) do not exclude zero; it is not a measured switching point. Paced to the quota, a pumper leaks about as much under the counter as with no policy (71 against 72 on three blocks in an hour), and 23 under the tests.
+Figure~\ref{fig:boundary} shows the counter's operating boundary (E4, seeds 300--304): in (a), the attributable loss of the three hot blocks' users against their legitimate rate, attack-free and with a never-verifying pumper on those blocks; in (b, c), leakage in 20 and 60 minutes against the blocks a pumper uses, at full rate or paced, with Equations~\eqref{eq:leak}--\eqref{eq:counterwarm} for the full-rate pumper as hollow markers. All horizontal axes and the vertical axes of (b, c) are logarithmic, and lines join sampled settings without locating a crossover. Attack-free, the counter costs a block's users nothing at one send per ten minutes, 2.3 points at four and 5.5 at eight, far below the idealized share beyond the quota (27\% at four), since most challenged users complete or switch to WhatsApp; without WhatsApp, eight sends cost 13.2. A 30-minute launch at three times the normal rate costs its blocks' users 16 points. Over 60 minutes (Figure~\ref{fig:boundary}c) the default leaked 110, 144 and 242 messages on 3, 10 and 30 blocks, against 105, 139 and 240 from Equation~\eqref{eq:leak} ($\lambda\tau \approx 90$), and the counter 71, 240 and 679 against its cold-start bound of 72, 240 and 720. Once 7 messages sent, exempt, to real users' trusted numbers are set aside, no counter run that started cold (44 of 100) exceeded Equation~\eqref{eq:counter}; three warm ones did, by 5 or 6 messages, and none exceeded Equation~\eqref{eq:counterwarm}. With these unfitted inputs Equation~\eqref{eq:cross} ordered the policies' mean leakage in 18 of 18 decisive cells (two ties at $N$), and with the warm-start term in 17, missing where the estimates differ by 0.8 messages (30 blocks, 20 minutes; measured difference 6.6 [$-$27.2, 42.4]); per seed, 76 of 78 decisive comparisons agree. The algebraic crossing lies near five blocks for an hour and 30 for twenty minutes, where the nearest measured differences (three and 30 blocks) do not exclude zero; it is not a measured switching point. Paced to the quota, a pumper leaks about as much under the counter as with no policy (71 against 72 on three blocks in an hour), and 23 under the tests.
 
 \begin{figure}[!tbp]
 \centering
 \includegraphics[width=\textwidth,height=0.84\textheight,keepaspectratio]{fig7_counter_boundary}
-\caption{\textbf{Operating Boundary of the Counter.} E4, seeds 300--304; lines join sampled settings and do not locate a crossover. (a) Attributable loss in points of the three hot blocks' users against their legitimate rate, attack-free and with a never-verifying pumper on those blocks. (b, c) Leakage in 20 and 60 minutes against the blocks a pumper uses, at full rate or paced, and Equations~\eqref{eq:leak}--\eqref{eq:counterwarm} for the full-rate pumper (hollow markers). All horizontal axes and the vertical axes of (b, c) are logarithmic. Bands and bars: 95\% bootstrap intervals over seeds.}
+\caption{Operating Boundary of the Counter.}
 \label{fig:boundary}
 \end{figure}
 
