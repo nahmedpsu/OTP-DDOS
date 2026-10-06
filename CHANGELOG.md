@@ -30,7 +30,7 @@ run records keep the 2.9.0 code hash, which covers those bytes.
 - **Manuscript in the journal's article structure (after the 2.9.1 tag; paper only, no code or
   result change).** Author-year references, two-column layout, Elsevier captions; sections
   Introduction, Related work (with a comparison table and a figure of the request path,
-  `paper/figures/fig8_defense_path.tex`), Baseline and threat model, Design, Methodology, Results,
+  `paper/figures/fig8_defense_path.tex`), Threat model and design, Methodology, Results,
   Discussion, Limitations, Conclusions and future work. Final revision 8 numbering: Tables 1-10,
   Figures 1-4; `results/study_map.md` uses it.
 

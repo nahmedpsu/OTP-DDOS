@@ -226,7 +226,7 @@ Release 2.9.1; no simulated result changed (every result comes from 2.9.0, commi
   so an instance paused between the two can apply an earlier transition after another instance has
   applied a later one on the same block. The processing-order semantics of the block statistic (a late
   event can complete a crossing and backdate the verdict) therefore hold live too, unless a block's
-  effects are serialized. `feedback.py`'s module notes say so; the manuscript's Section 4.2 likewise.
+  effects are serialized. `feedback.py`'s module notes say so; the manuscript's Section 3.4 likewise.
 - **Containment of the human-like carrier.** None of its ten 20-minute runs is contained; over an hour
   two of ten are, at 47.0 minutes on average (`results/evaluation.md`, pumping table).
 - **Figure 2 key and the auxiliary setting.** `results/figure1_key.md` (named for the figure's earlier number) lists every plotted setting with

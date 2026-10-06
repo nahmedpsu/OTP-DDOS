@@ -24,8 +24,8 @@
 \node[note, below=1.25cm of client] (nclient) {\textbf{What the attacker can buy}\\
 residential proxy addresses (Mi et al., 2019); shared addresses behind carrier-grade NAT (Richter et al., 2016); CAPTCHA solutions (Motoyama et al., 2010; Dionysiou and Athanasopoulos, 2020); as many identities as it likes (Douceur, 2002)};
 \node[note, below=1.25cm of service] (nservice) {\textbf{Controls at the service}\\
-per-entity limits, CAPTCHA, proxy and country lists (v1, Section 3); risk-based scoring of logins (Wiefling et al., 2019); supervised per-request detection on labeled logs (Huh et al., 2025)\\[2pt]
-\textbf{This study:} twelve source-side steps and two label-free destination policies keyed on the number block, a send counter and outcome tests (Section 4)};
+per-entity limits, CAPTCHA, proxy and country lists (v1, Section 3.1); risk-based scoring of logins (Wiefling et al., 2019); supervised per-request detection on labeled logs (Huh et al., 2025)\\[2pt]
+\textbf{This study:} twelve source-side steps and two label-free destination policies keyed on the number block, a send counter and outcome tests (Sections 3.3--3.5)};
 \node[note, below=1.25cm of vendor] (nvendor) {\textbf{Controls at the vendor}\\
 prefix and country blocking from an account's history, a per-number pumping risk score (Twilio Inc., 2026a, 2026c); sends per prefix in five-minute windows with a 24-hour quarantine (Zaliskyi and Odarchenko, 2026)};
 \node[note, below=1.25cm of operator] (noperator) {\textbf{Where the money is made}\\

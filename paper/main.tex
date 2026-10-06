@@ -103,7 +103,7 @@ We ask which attacks the design contains against simpler designs, and at what co
 \item two predeclared comparisons of destination policies, a send counter against sequential tests of code outcomes, selected at a stated service target and charged with their failures and with their collateral damage to users who share a block with the attacker;
 \item unfitted estimates of when counting leaks less than testing, derived from the rules and the attack rate alone and checked against the measurements over attacks of up to an hour.
 \end{itemize}
-Section~\ref{sec:related} reviews related work; Sections~\ref{sec:baseline}--\ref{sec:method} give the baseline and threat model, the design with its leakage estimates, and the methodology; Section~\ref{sec:results} reports the results; Sections~\ref{sec:discussion}--\ref{sec:conclusion} discuss them, state the limitations, and conclude.
+Section~\ref{sec:related} reviews related work; Section~\ref{sec:design} gives the baseline, the threat model and the design with its leakage estimates; Section~\ref{sec:method} the methodology; Section~\ref{sec:results} reports the results; Sections~\ref{sec:discussion}--\ref{sec:conclusion} discuss them, state the limitations, and conclude.
 
 % ---------------------------------------------------------------------------
 \section{Related work}
@@ -164,10 +164,13 @@ This study & Simulation: 25 attacker profiles, seven designs, two predeclared pr
 \end{table*}
 
 % ---------------------------------------------------------------------------
-\section{Baseline and threat model}
-\label{sec:baseline}
+\section{Threat model and design}
+\label{sec:design}
 
-\subsection{The v1 baseline}
+This section describes the baseline that the design replaces, the attacker it must resist, the twelve steps and two destination policies of the design, and the estimates of leakage that follow from its rules.
+
+\subsection{The v1 baseline and its gaps}
+\label{sec:baseline}
 The baseline, v1, sends a code to any unregistered number behind seven controls: reCAPTCHA v3 on web requests only, one message per number per minute, five requests per address per minute, a country allow-list, a body-length limit, a proxy block, and per-platform caps; bulk and test paths skip some checks. Table~\ref{tab:v1} lists eight assumptions behind these rules and how an attacker within the threat model breaks each; the gaps follow from the rules, not observed abuse.
 
 \begin{table}[!t]
@@ -194,15 +197,9 @@ H & Each check says which check failed & Thresholds can be probed one at a time 
 \label{sec:threat}
 The attacker wants as many messages sent as possible, or sent to numbers that pay it. It buys residential proxies and human-like reCAPTCHA tokens (about 0.3 cents each), mints fingerprints, generates numbers, and knows the thresholds. A pumper also has a colluding operator's ranges, where it may enter codes, report deliveries as failed, build verified history, spread over blocks, and buy challenge solutions. It cannot forge an attestation, use ranges its partner does not terminate, or make a stranger enter a code.
 
-% ---------------------------------------------------------------------------
-\section{Design}
-\label{sec:design}
-
-No message is paid for before every check passes, and cheap checks run first. Trust comes from evidence the client cannot forge, an attestation, a server-signed session, and the fate of earlier codes, though such evidence can be manufactured (Section~\ref{sec:adaptive}).
-
 \subsection{The pipeline and the risk score}
-
-A request passes the steps of Table~\ref{tab:steps}, which lists in brackets the gaps of Table~\ref{tab:v1} each step addresses (FB: the feedback loop), until it is refused. Step~0 takes the platform only from a valid App Attest or Play Integrity result. Each limit and reservation is one atomic Redis operation, but the enclosing steps are not one transaction: on the normal path, a refused request returns its per-number claims and counter slot, and the hourly budget is reserved only for a message about to be enqueued, a reservation rather than a completed dispatch; a crash between them can leak reservations (Section~\ref{sec:method}). Address limits and source caps count requests, except that a request Step~11 challenges returns its source-cap count. Every outcome after Step~0, except the challenge, returns one HTTP~200 body after at least 400\,ms, a floor that cannot hide longer work.
+\label{sec:pipeline}
+No message is paid for before every check passes, and cheap checks run first. Trust comes from evidence the client cannot forge, an attestation, a server-signed session, and the fate of earlier codes, though such evidence can be manufactured (Section~\ref{sec:adaptive}). A request passes the steps of Table~\ref{tab:steps}, which lists in brackets the gaps of Table~\ref{tab:v1} each step addresses (FB: the feedback loop), until it is refused. Step~0 takes the platform only from a valid App Attest or Play Integrity result. Each limit and reservation is one atomic Redis operation, but the enclosing steps are not one transaction: on the normal path, a refused request returns its per-number claims and counter slot, and the hourly budget is reserved only for a message about to be enqueued, a reservation rather than a completed dispatch; a crash between them can leak reservations (Section~\ref{sec:method}). Address limits and source caps count requests, except that a request Step~11 challenges returns its source-cap count. Every outcome after Step~0, except the challenge, returns one HTTP~200 body after at least 400\,ms, a floor that cannot hide longer work.
 
 \begin{table*}[!t]
 \caption{Twelve Steps and the v1 Gaps They Address.}
