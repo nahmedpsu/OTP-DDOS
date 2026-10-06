@@ -21,6 +21,7 @@
 \usepackage{algorithm}
 \usepackage[noend]{algpseudocode}
 \renewcommand{\algorithmicrequire}{\textbf{Input:}}
+\newcommand{\scoreeq}{Equation~\eqref{eq:score}}
 \graphicspath{{figures/}}
 % DOIs in the reference list as https://doi.org/... links, as the journal prints them
 \newcommand{\DOIprefix}{}
@@ -54,7 +55,8 @@
 \renewcommand{\floatpagefraction}{0.9}
 \renewcommand{\dblfloatpagefraction}{0.9}
 \setcounter{topnumber}{3}
-\setcounter{dbltopnumber}{3}
+\setcounter{dbltopnumber}{4}
+\setcounter{totalnumber}{4}
 \setlength{\emergencystretch}{2em}
 % a little vertical stretch between paragraphs lets the two columns end flush without visible gaps
 \setlength{\parskip}{0pt plus 1.5pt}
@@ -113,9 +115,9 @@ Section~\ref{sec:related} reviews related work; Section~\ref{sec:design} gives t
 \section{Related work}
 \label{sec:related}
 
-We group prior work by where it acts on the path of an OTP request, from the client through the service and its messaging vendor to the operator that terminates the message (Figure~\ref{fig:path}), and close with the gap this study addresses (Table~\ref{tab:related}).
+We group prior work by where it acts on the path of an OTP request, from the client through the service and its messaging vendor to the operator that terminates the message, and close with the gap this study addresses (Table~\ref{tab:related}). Figure~\ref{fig:path} draws that path with the works placed where they act. Two loops matter for what follows: the termination fee that flows back from the operator to a pumper, which is why the destination is the one key a pumper cannot change, and the code that a recipient enters or does not enter, which flows back to the service as the outcome signal that one of our two destination policies uses. The studies at the left of the figure measure what an attacker can buy; those in the middle and right are the defenses it meets.
 
-\begin{figure*}[!t]
+\begin{figure*}[!b]
 \centering
 \includegraphics[width=0.96\textwidth]{fig8_defense_path}
 \caption{Defenses Along the Path of an OTP Request.}
@@ -180,7 +182,7 @@ The baseline, v1, is the registration endpoint before this work: it sends a code
 
 Each control rests on an assumption that an attacker within the threat model of Section~\ref{sec:threat} breaks, and the eight gaps below follow from the rules, not from observed abuse; Algorithm~\ref{alg:v1} marks where each opens. (A) The platform exemptions trust a client claim, so any request can send the header for iOS and skip the reCAPTCHA and origin checks. (B) Five requests per address assume that addresses are scarce; a residential proxy pool supplies a fresh address per request, nothing throttles a subnet or an autonomous system, and no client identity survives an address change. (C) A number is sent to without validation, so numbers that cannot exist, numbers on dead ranges and generated sequences cost the same as a real message. (D) The country allow-list is the only notion of destination cost; premium-rate and revenue-share prefixes inside an allowed country cost many times a standard message, and a pumper targets exactly those. (E) Every limit is per key, so a wide attack that stays under each cap burns the budget without bound; nothing watches total volume or spend. (F) A limit checks its counter and increments it as two operations, so two concurrent requests on different instances both pass. (G) The bulk and test paths skip checks but need no stronger authentication than a normal request, so a leaked flag is a bypass. (H) Every decision is pass or fail and the response names the control that refused, so an attacker can probe each threshold, stay under it, and enumerate registered numbers.
 
-\begin{algorithm}[!t]
+\begin{algorithm}[!htb]
 \caption{The v1 baseline, as the evaluated pipeline applies it to a code request; each comment names the gap the preceding rule opens.}
 \label{alg:v1}
 \footnotesize
@@ -206,7 +208,7 @@ Three things it cannot do. It cannot forge an app attestation, so a platform est
 
 \subsection{The pipeline and the risk score}
 \label{sec:pipeline}
-No message is paid for before every check passes, and cheap checks run first. Trust comes from evidence the client cannot forge, an attestation, a server-signed session, and the fate of earlier codes, though such evidence can be manufactured (Section~\ref{sec:adaptive}). A request passes the twelve steps of Figure~\ref{fig:steps}, which marks on each step the gaps of Section~\ref{sec:baseline} it closes (FB: the feedback loop), until it is refused. Step~0 takes the platform only from a valid App Attest or Play Integrity result. Each limit and reservation is one atomic Redis operation, but the enclosing steps are not one transaction: on the normal path, a refused request returns its per-number claims and counter slot, and the hourly budget is reserved only for a message about to be enqueued, a reservation rather than a completed dispatch; a crash between them can leak reservations (Section~\ref{sec:method}). Address limits and source caps count requests, except that a request Step~11 challenges returns its source-cap count. Every outcome after Step~0, except the challenge, returns one HTTP~200 body after at least 400\,ms, a floor that cannot hide longer work.
+No message is paid for before every check passes, and cheap checks run first. Trust comes from evidence the client cannot forge, an attestation, a server-signed session, and the fate of earlier codes, though such evidence can be manufactured (Section~\ref{sec:adaptive}). A request passes the twelve steps of Figure~\ref{fig:steps}, which marks on each step the gaps of Section~\ref{sec:baseline} it closes (FB: the feedback loop), until it is refused; Algorithm~\ref{alg:v2} gives the same pipeline as implemented, with the feedback loop of Section~\ref{sec:feedback} and the block statistics of Section~\ref{sec:blocks} as its second procedure. Read against Algorithm~\ref{alg:v1}, it differs in four ways: the platform is established before anything else and from evidence, every limit is taken atomically and released on refusal, the number is priced and checked before it is paid for, and the outcome of each send flows back into the keys and the destination block that the next request will be judged on. Step~0 takes the platform only from a valid App Attest or Play Integrity result. Each limit and reservation is one atomic Redis operation, but the enclosing steps are not one transaction: on the normal path, a refused request returns its per-number claims and counter slot, and the hourly budget is reserved only for a message about to be enqueued, a reservation rather than a completed dispatch; a crash between them can leak reservations (Section~\ref{sec:method}). Address limits and source caps count requests, except that a request Step~11 challenges returns its source-cap count. Every outcome after Step~0, except the challenge, returns one HTTP~200 body after at least 400\,ms, a floor that cannot hide longer work.
 
 \begin{figure*}[!t]
 \centering
@@ -214,6 +216,13 @@ No message is paid for before every check passes, and cheap checks run first. Tr
 \caption{The Twelve Steps of the Design and the Feedback Loop.}
 \label{fig:steps}
 \end{figure*}
+
+\begin{algorithm*}[!t]
+\caption{The v2 pipeline and its feedback loop, as implemented (release 2.9.0); the steps are those of Figure~\ref{fig:steps}.}
+\label{alg:v2}
+\footnotesize
+\input{figures/alg2_v2_body}
+\end{algorithm*}
 
 Step~7 computes
 \begin{equation}
@@ -386,6 +395,20 @@ Across 18 spread configurations, leakage follows the blocks touched: with 30 blo
 \subsection{Destination policies: where the counter wins, and where it fails}
 \label{sec:matched}
 
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=0.82\textwidth]{fig6_matched_a}
+\caption{Leakage vs.\ Legitimate-User Completion Across Settings.}
+\label{fig:matched}
+\end{figure*}
+
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=0.82\textwidth]{fig6_matched_b}
+\caption{Leakage Difference from the Default Across Attack Types.}
+\label{fig:matchedpaired}
+\end{figure*}
+
 \begin{table*}[!t]
 \caption{Leakage and Benign-User Impact Across Carrier Types.}
 \label{tab:matched}
@@ -401,20 +424,6 @@ Setting (selected as) & NV & IV & HL & CB & Compl. & Benign & Chall. & Events \\
 
 \subsubsection{At a benign service target}
 Table~\ref{tab:matched} reports the first protocol at 200 blocks (144 legitimate sends per block a day; tuning seeds 100--102, evaluation seeds 0--9): 20-minute leakage against the never-verifying (NV), instant (IV), human-like (HL) and challenge-buying (CB) carriers and, from 24-hour attack-free runs at 65\% conversion, completion, benign cost (points), users challenged and verdict events a day; the tuning target is 63.95\%. Figure~\ref{fig:matched} plots each setting's completion against its leakage summed over the four pumpers' runs of a seed (not one combined attack), with the tuning target dotted; its unlabeled points are sequential settings matched to the default's false alarms at other credits (key: \texttt{results/\allowbreak figure1\_key.md}). Figure~\ref{fig:matchedpaired} gives each selected setting's leakage minus the default's, paired per seed (negative: leaks less). The sequential setting selected at the tuning target holds the human-like carrier to 126 messages only by raising 334 false verdict events a day, and misses the target by 0.18 points on seeds 0--9. The graded counter of four sends per block per ten minutes leaks 24 against each outcome-reading carrier and 48 against the challenge buyer, at 0.06 points; counters selected at the sparser settings leak 6 to 18 at 0.15 to 0.35 points (up to 0.43 at 80\%). With the full grid and density-specific attacks (E5) the rule selects the same counters, and so do other objectives on the tuning runs (worst-case leakage, a first-time-loss constraint, each attacker alone, 2\,000 random mixes), except the instant verifier alone and 3 mixes at 200 blocks; on fresh seeds the counter leaked least of the winners against every attacker but the instant verifier (25, against 15 and 16). On seeds 300--309 the 1\,000-block counter falls 0.12 points below its target, yet no seed-and-conversion cell fails the paired check (the evaluation default minus 0.5 points).
-
-\begin{figure*}[!t]
-\centering
-\includegraphics[width=0.82\textwidth]{fig6_matched_a}
-\caption{Leakage vs.\ Legitimate-User Completion Across Settings.}
-\label{fig:matched}
-\end{figure*}
-
-\begin{figure*}[!t]
-\centering
-\includegraphics[width=0.82\textwidth]{fig6_matched_b}
-\caption{Leakage Difference from the Default Across Attack Types.}
-\label{fig:matchedpaired}
-\end{figure*}
 
 \begin{table*}[!t]
 \caption{Held-Out Evaluation of the Principal Counter.}
@@ -470,14 +479,30 @@ Tables~\ref{tab:attacked} and~\ref{tab:poisoner} report E1 at 200 blocks (60-min
 
 
 \subsubsection{The operating boundary and adaptive attackers}
-Figure~\ref{fig:boundary} shows the counter's operating boundary (E4, seeds 300--304): in (a), the attributable loss of the three hot blocks' users against their legitimate rate, attack-free and with a never-verifying pumper on those blocks; in (b, c), leakage in 20 and 60 minutes against the blocks a pumper uses, at full rate or paced, with Equations~\eqref{eq:leak}--\eqref{eq:counterwarm} for the full-rate pumper as hollow markers. All horizontal axes and the vertical axes of (b, c) are logarithmic, and lines join sampled settings without locating a crossover. Attack-free, the counter costs a block's users nothing at one send per ten minutes, 2.3 points at four and 5.5 at eight, far below the idealized share beyond the quota (27\% at four), since most challenged users complete or switch to WhatsApp; without WhatsApp, eight sends cost 13.2. A 30-minute launch at three times the normal rate costs its blocks' users 16 points. Over 60 minutes (Figure~\ref{fig:boundary}c) the default leaked 110, 144 and 242 messages on 3, 10 and 30 blocks, against 105, 139 and 240 from Equation~\eqref{eq:leak} ($\lambda\tau \approx 90$), and the counter 71, 240 and 679 against its cold-start bound of 72, 240 and 720. Once 7 messages sent, exempt, to real users' trusted numbers are set aside, no counter run that started cold (44 of 100) exceeded Equation~\eqref{eq:counter}; three warm ones did, by 5 or 6 messages, and none exceeded Equation~\eqref{eq:counterwarm}. With these unfitted inputs Equation~\eqref{eq:cross} ordered the policies' mean leakage in 18 of 18 decisive cells (two ties at $N$), and with the warm-start term in 17, missing where the estimates differ by 0.8 messages (30 blocks, 20 minutes; measured difference 6.6 [$-$27.2, 42.4]); per seed, 76 of 78 decisive comparisons agree. The algebraic crossing lies near five blocks for an hour and 30 for twenty minutes, where the nearest measured differences (three and 30 blocks) do not exclude zero; it is not a measured switching point. Paced to the quota, a pumper leaks about as much under the counter as with no policy (71 against 72 on three blocks in an hour), and 23 under the tests.
+Figures~\ref{fig:boundarya}--\ref{fig:boundaryc} show the counter's operating boundary (E4, seeds 300--304). Figure~\ref{fig:boundarya} plots the attributable loss of the three hot blocks' users against their legitimate rate, attack-free and with a never-verifying pumper on those blocks; its horizontal axis is logarithmic, and lines join sampled settings without locating a crossover. Attack-free, the counter costs a block's users nothing at one send per ten minutes, 2.3 points at four and 5.5 at eight, far below the idealized share beyond the quota (27\% at four), since most challenged users complete or switch to WhatsApp; without WhatsApp, eight sends cost 13.2. A 30-minute launch at three times the normal rate costs its blocks' users 16 points. With a pumper on the same blocks, both policies turn that cost into a gain at up to four sends per ten minutes (the counter 6 to 15 points, the tests 1 to 10), because without a policy the pumper exhausts those blocks and the hourly budget; at eight sends, both cost their users again, the counter 4 points and the tests 9.
 
-\begin{figure*}[!t]
+\begin{figure}[!htb]
 \centering
-\includegraphics[width=\textwidth,height=0.8\textheight,keepaspectratio]{fig7_counter_boundary}
-\caption{Operating Boundary of the Counter.}
-\label{fig:boundary}
-\end{figure*}
+\includegraphics[width=\columnwidth]{fig7a_service}
+\caption{Service Boundary of the Counter: the Hot Blocks' Users.}
+\label{fig:boundarya}
+\end{figure}
+
+Figures~\ref{fig:boundaryb} and~\ref{fig:boundaryc} plot leakage in 20 and 60 minutes against the blocks a pumper uses, at full rate or paced to the quota, with Equations~\eqref{eq:leak}--\eqref{eq:counterwarm} for the full-rate pumper as hollow markers; both axes are logarithmic. In twenty minutes (Figure~\ref{fig:boundaryb}) the counter leaked 25 and 81 messages on 3 and 10 blocks where the tests leaked 110 and 144, the two leaked about the same on 30 blocks (235 against 242), and from 100 blocks on both approached the no-policy line of about 700. Over 60 minutes (Figure~\ref{fig:boundaryc}) the default leaked 110, 144 and 242 messages on 3, 10 and 30 blocks, against 105, 139 and 240 from Equation~\eqref{eq:leak} ($\lambda\tau \approx 90$), and the counter 71, 240 and 679 against its cold-start bound of 72, 240 and 720. Once 7 messages sent, exempt, to real users' trusted numbers are set aside, no counter run that started cold (44 of 100) exceeded Equation~\eqref{eq:counter}; three warm ones did, by 5 or 6 messages, and none exceeded Equation~\eqref{eq:counterwarm}. With these unfitted inputs Equation~\eqref{eq:cross} ordered the policies' mean leakage in 18 of 18 decisive cells (two ties at $N$), and with the warm-start term in 17, missing where the estimates differ by 0.8 messages (30 blocks, 20 minutes; measured difference 6.6 [$-$27.2, 42.4]); per seed, 76 of 78 decisive comparisons agree. The algebraic crossing lies near five blocks for an hour and 30 for twenty minutes, where the nearest measured differences (three and 30 blocks) do not exclude zero; it is not a measured switching point. Paced to the quota, a pumper leaks about as much under the counter as with no policy (71 against 72 on three blocks in an hour), and 23 under the tests.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\columnwidth]{fig7b_security20}
+\caption{Security Boundary of the Counter: a 20-Minute Attack.}
+\label{fig:boundaryb}
+\end{figure}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\columnwidth]{fig7c_security60}
+\caption{Security Boundary of the Counter: a 60-Minute Attack.}
+\label{fig:boundaryc}
+\end{figure}
 
 Against adaptive attackers (E3), the counter held the threshold-aware carrier, receipt faker, and concentrated trust builder to 24 to 36 messages (502 to 665 under the default), but not trust builders on random numbers (577, as under the default); over 360 minutes, the human-like carrier gained 81 messages an hour under the counter, and 753 under the default.
 
@@ -504,6 +529,26 @@ On a real Redis (four vCPUs, four workers), sends cost 13.8\,ms (median) and 21.
 
 \subsection{Lessons}
 In the scripted workloads, carriers that verify with human-like delay, fake receipts, or know the thresholds defeated our outcome tests but not a short-window counter. Within an hour of a verdict, the counter's allowance, unlike the tests', grows with the windows an attack spans; over longer campaigns, verdicts expire and the tests leak again. Equation~\eqref{eq:cross} summarizes this for pumpers that solve no challenge and hold no exemption. Its inputs are in an operator's logs; the cost of an excess send, competition under attack, and exemption abuse come only from the simulation. The counter and tests together, with a quota set from each block's traffic, is a hypothesis for real traffic, not a recommendation.
+
+\subsection{Comparison with the in-study benchmarks and the nearest work}
+\label{sec:compare}
+Table~\ref{tab:designs} sets the seven designs of Section~\ref{sec:method} against the nine source-side attackers on the same traffic and seeds, with source caps lifted so that only the behavioral layers act (intervals in supplementary Table~S1). Each design adds one thing to the baseline, and the table says what it bought. Correcting the platform header alone (v1-corrected) changed only the forged-header attack, from 100\% to 99.5\%: that attacker is the farm with a header, and the header was never what held it. Sessions and a hard budget (budget-only) removed the single client's leakage (5.6\% to 0.3\%) and cut the premium pumper's from 99.4\% to 94.9\%, nothing else. A refusing counter of five sends per block a day (block-limit) held the premium pumper and the walked numbers to 1\%, the two attacks that concentrate on a few blocks, and left the rest where v1 had them. The behavioral layers of v2, with either block test, were what removed datacenter rotation (69\% to 0) and most of the reused profile (99.5\% to 22.5\%); the conversion and speed tests differ only on the walked numbers (11.5\% against 13.3\%). No design in the table separates the residential bot (37.2\%) or the farm (99.5\%): those are held only by the adaptive caps of Table~\ref{tab:headline}, at the price Section~\ref{sec:rationing} reports. On the destination, the in-study benchmarks are the no-policy and default arms of Tables~\ref{tab:pumping}, \ref{tab:matched} and~\ref{tab:attacked}: against the never-verifying pumper v1 leaked 570 messages, the default tests 90 and the selected counter 24, and under the shared-block pumper of Table~\ref{tab:attacked} the counter leaked 403 messages where the default tests leaked 1\,149 and no policy 5\,509, neither policy costing all users anything on average.
+
+\begin{table}[!t]
+\caption{In-Study Benchmarks: Leaked Share of Attack Requests by Design, Caps Lifted.}
+\label{tab:designs}
+\footnotesize
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrrrrr@{}}
+\toprule
+Attacker & v1 & v1-c. & budget & BL & conv. & speed & v2 \\
+\midrule
+\tablerows{tables/designs.tex}
+\bottomrule
+\end{tabular*}
+\end{table}
+
+The nearest external work is set out in Table~\ref{tab:related}, and it can be compared only on what each needs and reports, since none ran on the same traffic. \citet{huh2025ait} report 89.6\% recall at 0.19\% false positives for a supervised model on one service's real logs. The class of attack their model targets, a few requests per identity over many fresh identities, is the farm here, which the behavioral layers do not separate and the caps only ration, at 54\% of first-time users refused; what the layers do contain without labels are the attacks with a signature in the request (0 to 11.5\% leaked with caps lifted) and most of the reused profile. \citet{zaliskyi2026ait} report that fixed-window prefix counts blocked 95\% and 63\% of two incidents at the price of 58\% of a legitimate campaign. The graded counter here is the same family of control, a ten-minute window on a 10\,000-number block with a challenge rather than a 24-hour quarantine; it leaked 24 of about 574 requests from each outcome-reading pumper at an attack-free cost of 0.06 points of completion, on simulated traffic with no campaigns in it, and it failed its service claims on blocks the attacker shares. Twilio's products report claimed false-positive rates and no leakage. What this study reports that none of the three does is an attack-free benign cost, a cost under attack for the users who share a block with the attacker, a selection fixed before the evaluation runs and tested on held-out seeds and workloads, and an implementation anyone can run; what the three have and this study lacks is real traffic.
 
 \subsection{Limitations}
 \label{sec:limitations}

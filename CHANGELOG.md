@@ -32,9 +32,12 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   Introduction, Related work (with a comparison table and a figure of the request path,
   `paper/figures/fig8_defense_path.tex`), Threat model and design, Methodology, Results,
   Discussion, Limitations, Conclusions and future work. The v1 baseline is Algorithm 1
-  (`paper/figures/alg1_v1_body.tex`), the threat model and the twelve steps are figures
-  (`fig9_threat_model.tex`, `fig10_steps.tex`). Final revision 8 numbering: Tables 1-8, Figures 1-6;
-  `results/study_map.md` uses it.
+  (`paper/figures/alg1_v1_body.tex`) and the v2 pipeline with its feedback loop Algorithm 2
+  (`alg2_v2_body.tex`); the threat model and the twelve steps are figures (`fig9_threat_model.tex`,
+  `fig10_steps.tex`); the boundary figure is split into three column-width figures (`figures.py`
+  `fig7_panels`); `scripts/paper_tables.py` writes `paper/tables/designs.tex`, the in-study benchmark
+  table. Final revision 8 numbering: Tables 1-9, Figures 1-8, Algorithms 1-2; `results/study_map.md`
+  uses it.
 
 ## 2.9.0 (2026-10-05)
 

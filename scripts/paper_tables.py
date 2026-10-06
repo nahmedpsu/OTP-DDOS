@@ -49,6 +49,15 @@ def headline(E):
     return "\n".join(rows)
 
 
+def designs_tex(E):
+    """Rows of the in-study benchmark table (Discussion): every design against every source-side
+    attacker with source caps lifted, leaked share of attack requests (%, means); intervals in
+    results/design_table.md."""
+    ms = E["multi_seed"]["behavioural_only"]
+    return "\n".join(f"{label} & " + " & ".join(n(ms[key][d]["leak_fraction_pct"][0], 1) for d, _ in DESIGNS) + " \\\\"
+                     for key, label in ATTACKERS)
+
+
 def design_table(E):
     ms = E["multi_seed"]
     L = ["# Supplementary Table S1: every design against every attacker", "",
@@ -223,6 +232,7 @@ def main():
     CS = json.loads((res / "counter_study.json").read_text())
     R5 = json.loads((res / "round5_analyses.json").read_text())
     (out / "headline.tex").write_text(headline(E) + "\n")
+    (out / "designs.tex").write_text(designs_tex(E) + "\n")
     (out / "pumping.tex").write_text(pumping(E) + "\n")
     (out / "matched.tex").write_text(matched(E) + "\n")
     (out / "claims.tex").write_text(claims(CS) + "\n")

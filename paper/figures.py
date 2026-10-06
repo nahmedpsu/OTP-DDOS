@@ -485,6 +485,78 @@ def fig7_counter_boundary(CS, out, runs_path=ROOT / "results" / "counter_study_r
     save(fig, out, "fig7_counter_boundary", tight=False)
 
 
+def fig7_panels(CS, out, runs_path=ROOT / "results" / "counter_study_runs.jsonl.gz", cond_path=None):
+    """The three panels of fig7_counter_boundary as separate column-width figures (fig7a_service,
+    fig7b_security20, fig7c_security60), drawn from the same data with the same markers, lines and
+    intervals, each with its own legend, so that each can be set next to the paragraph that discusses
+    it. Drawn at 4.3 in and printed at the column width (3.5 in): 11 pt text prints at about 9 pt."""
+    E4 = CS["E4"]
+    cond = json.loads(pathlib.Path(cond_path).read_text()) if cond_path and pathlib.Path(cond_path).exists() else None
+    # (a) service
+    fig, ax = plt.subplots(figsize=(4.6, 4.1))
+    style(ax)
+    ax.tick_params(labelsize=10)
+    rates = sorted({float(k.split("|")[0]) for k in E4["service"]})
+    for pol, col in (("counter graded 4/10 min", C["green"]), ("sequential T1000 c1", C["blue"])):
+        for cnd, ls in (("benign", "--"), ("attacked", "-")):
+            ys, lo, hi = [], [], []
+            for r in rates:
+                key = f"{r:g}|0.7|{cnd}|{pol}"
+                key = key if key in E4["service"] else f"{r}|0.7|{cnd}|{pol}"
+                g = (E4["service"][key]["attributable_loss_vs_none"] or {}).get("hot_block", {}).get("net_lost_pct_of_group", (0, 0, 0, 0))
+                ys.append(g[0]); lo.append(g[1]); hi.append(g[2])
+            ax.plot(rates, ys, color=col, linestyle=ls, marker="o", markersize=5.5, linewidth=1.8,
+                    label=f"{'counter' if 'counter' in pol else 'tests'}, {'attack-free' if cnd == 'benign' else 'with pumper'}")
+            ax.fill_between(rates, lo, hi, color=col, alpha=0.12, linewidth=0)
+    ax.axvline(4, color=INK2, linestyle=":", linewidth=1.2)
+    ax.annotate("quota: 4 per 10 min", (4, ax.get_ylim()[0]), textcoords="offset points", xytext=(-4, 6), fontsize=9.5, color=INK, ha="right")
+    ax.set_xscale("log"); ax.set_xticks(rates); ax.set_xticklabels([f"{r:g}" for r in rates])
+    ax.xaxis.set_minor_formatter(NullFormatter())
+    ax.set_xlabel("legitimate sends per hot block per 10 min (log scale)", color=INK, fontsize=10)
+    ax.set_ylabel("completions lost, pp\nof the hot blocks' users", color=INK, fontsize=10)
+    fig.legend(frameon=False, fontsize=9, loc="upper left", ncol=2, columnspacing=1.2, handlelength=1.8, bbox_to_anchor=(0.02, 0.17),
+               title="Mean over five seeds, 95 % interval; 70 % of users on WhatsApp", title_fontsize=9, alignment="left")
+    fig.subplots_adjust(left=0.17, right=0.98, top=0.97, bottom=0.33)
+    save(fig, out, "fig7a_service", tight=False)
+    # (b), (c) security
+    blocks = sorted({int(k.split("|")[0]) for k in E4["security"]})
+    for name, mins in (("fig7b_security20", 20), ("fig7c_security60", 60)):
+        fig, ax = plt.subplots(figsize=(4.6, 5.2))
+        style(ax)
+        ax.tick_params(labelsize=10)
+        measured, estimated = [], []
+        for pol, col in (("none", INK2), ("sequential T1000 c1", C["blue"]), ("counter graded 4/10 min", C["green"])):
+            for kind, mk in (("spreading, never verifies", "o"), ("quota-aware", "s")):
+                v = [E4["security"][f"{b}|{kind}|{mins}|{pol}"]["leaked_total"] for b in blocks]
+                h = ax.errorbar(blocks, [x[0] for x in v], yerr=[[x[0] - x[1] for x in v], [x[2] - x[0] for x in v]], color=col,
+                                marker=mk, markersize=5.5, linewidth=1.8, linestyle="-" if mk == "o" else "--", capsize=2,
+                                elinewidth=0.9, label=f"{ {'none': 'no policy', 'sequential T1000 c1': 'tests'}.get(pol, 'counter')}, "
+                                                      f"{'full rate' if mk == 'o' else 'paced to the quota'}")
+                measured.append(h)
+        if cond:
+            cells = {c["blocks"]: c for c in cond["cells"] if c["minutes"] == mins and c["pumper"] == "spreading, never verifies"}
+            for key, col, lab, mk, ls in (("tests_estimate", C["blue"], "Eq. 2: tests", "D", ":"),
+                                          ("counter_cold", C["green"], "Eq. 3: counter, cold", "^", ":"),
+                                          ("counter_warm", C["orange"], "Eq. 4: counter, warm", "v", "-.")):
+                h, = ax.plot(blocks, [cells[b][key] for b in blocks], color=col, linestyle=ls, linewidth=1.4, marker=mk, markersize=7.5,
+                             markerfacecolor="none", markeredgewidth=1.4, label=lab)
+                estimated.append(h)
+        ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xticks(blocks); ax.set_xticklabels([str(b) for b in blocks])
+        ax.xaxis.set_minor_formatter(NullFormatter())
+        ax.set_xlabel("blocks the pumper uses (log)", color=INK, fontsize=10)
+        ax.set_ylabel(f"SMS leaked in {mins} min (log)", color=INK, fontsize=10)
+        order = [0, 2, 4, 1, 3, 5]
+        l1 = fig.legend(handles=[measured[i] for i in order], frameon=False, fontsize=8.5, loc="upper left", ncol=2,
+                        bbox_to_anchor=(0.02, 0.235), title="Measured (filled markers): mean over five seeds, 95 % interval",
+                        title_fontsize=8.5, alignment="left", columnspacing=1.0, handlelength=2.0, labelspacing=0.25)
+        fig.legend(handles=estimated, frameon=False, fontsize=8.5, loc="upper left", ncol=2, bbox_to_anchor=(0.02, 0.105),
+                   title="Estimated for the full-rate pumper (hollow markers), per run", title_fontsize=8.5,
+                   alignment="left", columnspacing=1.0, handlelength=2.0, labelspacing=0.25)
+        fig.add_artist(l1)
+        fig.subplots_adjust(left=0.16, right=0.98, top=0.98, bottom=0.38)
+        save(fig, out, name, tight=False)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", default=str(ROOT / "results"))
@@ -505,6 +577,9 @@ def main():
         fig7_counter_boundary(json.loads(cs.read_text()), out, pathlib.Path(a.results) / "counter_study_runs.jsonl.gz",
                               pathlib.Path(a.results) / "condition_check.json")
         print("wrote fig7_counter_boundary")
+        fig7_panels(json.loads(cs.read_text()), out, pathlib.Path(a.results) / "counter_study_runs.jsonl.gz",
+                    pathlib.Path(a.results) / "condition_check.json")
+        print("wrote fig7a_service, fig7b_security20, fig7c_security60")
 
 
 if __name__ == "__main__":

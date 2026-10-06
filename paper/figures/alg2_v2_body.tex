@@ -1,0 +1,47 @@
+% The v2 pipeline (Section 3.3) and its feedback loop (Section 3.4), as implemented in src/otp_guard/pipeline.py
+% and feedback.py (release 2.9.0). Shared by main.tex (Algorithm 2) and the standalone alg2_v2.tex for Word.
+\providecommand{\gap}[1]{\Statex \hspace{\algorithmicindent}{\color{black!60}$\triangleright$ \textit{#1}}}
+\begin{algorithmic}[1]
+\Procedure{ProcessRequest}{$r$} \Comment{every refusal releases the claims taken so far}
+\State $p \gets$ \textsc{Attest}$(r)$; \textbf{if} $r$.address is a proxy \textbf{or} $p$ invalid \textbf{then refuse}
+\gap{Step 0: App Attest or Play Integrity; the platform header is ignored}
+\State \textbf{if} session$(r)$ unsigned, not bound to $r$.fingerprint, nonce replayed, \textbf{or} 3 requests in 10 min \textbf{then refuse}
+\gap{Step 1}
+\State \textbf{if} $r$.fingerprint \textbf{or} $r$.address is denylisted \textbf{then refuse}
+\For{$k \in \{$address, /24, ASN$\}$} \textbf{if not} \textsc{AtomicTake}$(\mathrm{limit}_k)$ \textbf{then refuse} \EndFor
+\gap{Step 2: one Redis operation per limit; lower caps for hosting ASNs}
+\State \textbf{if} $p = \mathrm{web}$ \textbf{and} (reCAPTCHA score $< \theta_r$ \textbf{or} origin $\notin$ allowed) \textbf{then refuse}
+\gap{Steps 3--4}
+\State $m \gets$ \textsc{Normalize}$(r.\mathrm{number})$; \textbf{if} country$(m) \notin$ allow-list \textbf{then refuse}
+\State signals $\mathrel{+}=$ cost class of prefix$(m)$ (premium: \textbf{refuse}), sequential or narrow-range burst, VoIP; \textbf{if} HLR says dead \textbf{then refuse}
+\State $v \gets$ \textsc{BlockVerdict}(block$(m)$) \Comment{the stage in force on the 8-digit block}
+\gap{Step 5: the bulk flag needs an internal credential}
+\State \textbf{if} body invalid \textbf{or} $m$ excluded \textbf{then refuse} \Comment{Step 6: the test flag needs a credential}
+\State $s \gets$ \scoreeq; $t \gets$ \textsc{Tier}$(s, \mathrm{mode})$ \Comment{Step 7: allow, delay, challenge, downgrade, block}
+\State \textbf{if} $r$ has no verified history: $t \gets \max(t, \mathrm{challenge})$ if $v = 1$, $\max(t, \mathrm{downgrade})$ if $v = 2$
+\State \textbf{if} $t = $ block \textbf{then refuse}; \textbf{if} $t = $ challenge \textbf{and} $p = \mathrm{web}$ \textbf{then return} challenge
+\gap{the client retries with the solved challenge, which scores $-20$}
+\State \textbf{if not} \textsc{AtomicClaim}$(m$: window $60\,\mathrm{s} \cdot 2^{\mathrm{sends}}$ up to 1\,h; 5 a day$)$ \textbf{then refuse} \Comment{Step 8}
+\State $\mu \gets$ \textsc{AdaptiveMultiplier}(source, $p$, country) $\in [0.25, 1.5]$ \Comment{Step 9: from the baseline job}
+\State \textbf{if not} \textsc{AtomicTake}(source caps $\times \mu$) \textbf{then refuse} \Comment{verified history keeps the static cap}
+\State mode $\gets$ \textsc{OperatingMode}(hourly count, spend) \Comment{Step 10: elevated at 80\%, emergency at 100\%}
+\State \textbf{if not} \textsc{AtomicReserve}(hourly count, spend, block$(m)$'s counter slot) \textbf{then refuse} \Comment{Step 11}
+\State \textbf{if} the slot is past the quota \textbf{and} $r$ has no verified history: $t \gets \max(t, \mathrm{challenge})$; past twice: $\max(t, \mathrm{downgrade})$
+\State channel $\gets$ SMS, or push or WhatsApp if $t = $ downgrade; write state; enqueue$(m$, channel, delay if $t = $ delay$)$
+\State \Return one uniform HTTP 200 body after at least 400\,ms \Comment{the same body for sent, dropped and refused}
+\EndProcedure
+\Statex
+\Procedure{OnOutcome}{send, outcome} \Comment{asynchronous; outcome $\in \{$verified, failed, undelivered$\}$}
+\State record the transition and its effects in one compare-and-set; apply each effect at most once
+\gap{failed: five wrong codes or 2 min after delivery; undelivered: no receipt in 60 s, or a failed receipt}
+\For{$k \in$ keys(send)} \Comment{address, /24, ASN, fingerprint, session, country, prefix, number}
+  \State verified$_k$ or failed$_k$ $\mathrel{+}= 1$ \Comment{undelivered counts toward neither}
+  \State \textbf{if} $k$ is a fine key, resolved$_k \ge 50$ \textbf{and} verified$_k/\mathrm{resolved}_k < 0.1$ \textbf{then} denylist $k$ for 24\,h
+\EndFor
+\State \textbf{if} verified \textbf{then} mark the number trusted \Comment{verified history exempts the client from both destination policies}
+\State $b \gets$ block(number); $\mathrm{conv}_b \gets \max(-ch,\ \mathrm{conv}_b + (\text{verified} \,?\, -2.08 : +1.50))$
+\State \textbf{if} verified \textbf{then} $\mathrm{speed}_b \gets \max(-ch,\ \mathrm{speed}_b + (\text{entered within 5 s} \,?\, +1.50 : -2.08))$
+\State \textbf{if} $\mathrm{conv}_b > h$ (after 3 events) \textbf{or} $\mathrm{speed}_b > h$ \textbf{then} issue a verdict for 1\,h and reset both statistics
+\gap{stage 1, or stage 2 if a verdict is active: Section 3.5; $h = \ln 1000$, $c$ the floor parameter}
+\EndProcedure
+\end{algorithmic}
