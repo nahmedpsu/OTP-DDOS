@@ -36,9 +36,10 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   (`alg2_v2_body.tex`); the threat model and the twelve steps are figures (`fig9_threat_model.tex`,
   `fig10_steps.tex`); the boundary figure is split into three column-width figures (`figures.py`
   `fig7_panels`); `scripts/paper_tables.py` writes `paper/tables/designs.tex`, the in-study benchmark
-  table. The evaluation method is a figure (`fig11_method.tex`) and one simulation run, as
-  `evaluation/sim.py` executes it, is Algorithm 3 (`alg3_sim_body.tex`). Final revision 8 numbering:
-  Tables 1-9, Figures 1-9, Algorithms 1-3; `results/study_map.md` uses it.
+  table. The architecture of the implementation, drawn from `src/otp_guard`, is a figure
+  (`fig12_architecture.tex`); the evaluation method is a figure (`fig11_method.tex`) and one
+  simulation run, as `evaluation/sim.py` executes it, is Algorithm 3 (`alg3_sim_body.tex`). Final
+  revision 8 numbering: Tables 1-9, Figures 1-10, Algorithms 1-3; `results/study_map.md` uses it.
 
 ## 2.9.0 (2026-10-05)
 

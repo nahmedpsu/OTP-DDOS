@@ -3,7 +3,7 @@
 all: main.pdf
 main.pdf: main.tex refs.bib figures/*.pdf
 	latexmk -pdf -interaction=nonstopmode main.tex
-DRAWN = figures/fig8_defense_path.pdf figures/fig9_threat_model.pdf figures/fig10_steps.pdf figures/fig11_method.pdf figures/alg1_v1.pdf figures/alg2_v2.pdf figures/alg3_sim.pdf
+DRAWN = figures/fig8_defense_path.pdf figures/fig9_threat_model.pdf figures/fig10_steps.pdf figures/fig11_method.pdf figures/fig12_architecture.pdf figures/alg1_v1.pdf figures/alg2_v2.pdf figures/alg3_sim.pdf
 figures: ../results/evaluation.json $(DRAWN)
 	python3 figures.py
 figures/alg1_v1.pdf: figures/alg1_v1_body.tex
