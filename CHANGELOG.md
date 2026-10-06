@@ -19,12 +19,20 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   `docs/original/problem_statement.pdf` is removed from the tree. A scenario label in the hashed driving
   script `scripts/run_scenarios.py` ('original incident: one client, random numbers') and its recorded
   results are left unchanged, since editing it would change code that produced results.
-- **Supplementary key to Figure 1.** `scripts/paper_tables.py` writes `results/figure1_key.md`: every
-  setting plotted, its completion and summed leakage with intervals, and its roles in the selection
-  (including the auxiliary 'matched false alarms, credit inf' setting that moved from T1000 cinf to T300
-  cinf in 2.9.0, under both protocols). In manuscript revision 8, revision 7's Table 9 is split into Tables 8
-  (pumper) and 9 (poisoner), the study map is supplementary Table S2 (`results/study_map.md`), and Figure 3 is
-  redrawn with larger text and separate legends for measurements and estimates.
+- **Supplementary key to the matched-comparison figure.** `scripts/paper_tables.py` writes
+  `results/figure1_key.md` (named for the figure's revision 7 number; it is Figure 2 in the final
+  revision 8): every setting plotted, its completion and summed leakage with intervals, and its roles in
+  the selection (including the auxiliary 'matched false alarms, credit inf' setting that moved from
+  T1000 cinf to T300 cinf in 2.9.0, under both protocols). In manuscript revision 8, revision 7's Table 9
+  is split into two tables (pumper; poisoner), the study map is supplementary Table S2
+  (`results/study_map.md`), and the boundary figure is redrawn with larger text and separate legends
+  for measurements and estimates.
+- **Manuscript in the journal's article structure (after the 2.9.1 tag; paper only, no code or
+  result change).** Author-year references, two-column layout, Elsevier captions; sections
+  Introduction, Related work (with a comparison table and a figure of the request path,
+  `paper/figures/fig8_defense_path.tex`), Baseline and threat model, Design, Methodology, Results,
+  Discussion, Limitations, Conclusions and future work. Final revision 8 numbering: Tables 1-10,
+  Figures 1-4; `results/study_map.md` uses it.
 
 ## 2.9.0 (2026-10-05)
 

@@ -3,11 +3,16 @@
 all: main.pdf
 main.pdf: main.tex refs.bib figures/*.pdf
 	latexmk -pdf -interaction=nonstopmode main.tex
-figures: ../results/evaluation.json
+figures: ../results/evaluation.json figures/fig8_defense_path.pdf
 	python3 figures.py
-rebuttal: rebuttal_round6.docx
-rebuttal_round6.docx: rebuttal_round6.js
-	node rebuttal_round6.js
+figures/fig8_defense_path.pdf: figures/fig8_defense_path.tex
+	cd figures && pdflatex -interaction=nonstopmode fig8_defense_path.tex && rm -f fig8_defense_path.aux fig8_defense_path.log \
+	  && pdftoppm -r 220 -png -singlefile fig8_defense_path.pdf fig8_defense_path
+rebuttal: rebuttal_round8.docx
+rebuttal_round8.docx: rebuttal_round8.js
+	node rebuttal_round8.js
+word: main.pdf
+	python3 make_docx.py && rm -f build_word.tex
 clean:
 	latexmk -C; rm -f *.bbl *.spl
-.PHONY: all figures rebuttal clean
+.PHONY: all figures rebuttal word clean

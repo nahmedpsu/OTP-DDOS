@@ -103,6 +103,9 @@ def body_latex():
 
     # generated tables, figures, layout-only commands
     s = re.sub(r"\\tablerows\{([^}]*)\}", lambda m: table_rows(m.group(1)), s)
+    # tabular* filled to the column or text width -> a plain tabular (Word tables are fitted below)
+    s = re.sub(r"\\begin\{tabular\*\}\{\\(?:textwidth|columnwidth)\}\{@\{\\extracolsep\{\\fill\}\}", lambda m: "\\begin{tabular}{", s)
+    s = s.replace("\\end{tabular*}", "\\end{tabular}")
     s = re.sub(r"\\begin\{tabular\}\{(.*?)\}\n", lambda m: "\\begin{tabular}{" + simplify_colspec(m.group(1)) + "}\n", s)
     s = re.sub(r"\\includegraphics\[[^\]]*\]\{([^}]*)\}", r"\\includegraphics[width=16cm]{figures/\1.png}", s)
     for cmd in ("\\linenumbers", "\\FloatBarrier", "\\centering", "\\footnotesize", "\\scriptsize", "\\small",
