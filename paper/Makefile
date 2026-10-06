@@ -3,11 +3,13 @@
 all: main.pdf
 main.pdf: main.tex refs.bib figures/*.pdf
 	latexmk -pdf -interaction=nonstopmode main.tex
-figures: ../results/evaluation.json figures/fig8_defense_path.pdf
+DRAWN = figures/fig8_defense_path.pdf figures/fig9_threat_model.pdf figures/fig10_steps.pdf figures/alg1_v1.pdf
+figures: ../results/evaluation.json $(DRAWN)
 	python3 figures.py
-figures/fig8_defense_path.pdf: figures/fig8_defense_path.tex
-	cd figures && pdflatex -interaction=nonstopmode fig8_defense_path.tex && rm -f fig8_defense_path.aux fig8_defense_path.log \
-	  && pdftoppm -r 220 -png -singlefile fig8_defense_path.pdf fig8_defense_path
+figures/alg1_v1.pdf: figures/alg1_v1_body.tex
+$(DRAWN): %.pdf: %.tex
+	cd figures && pdflatex -interaction=nonstopmode $(notdir $<) && rm -f $(notdir $*).aux $(notdir $*).log \
+	  && pdftoppm -r 220 -png -singlefile $(notdir $*).pdf $(notdir $*)
 rebuttal: rebuttal_round8.docx
 rebuttal_round8.docx: rebuttal_round8.js
 	node rebuttal_round8.js

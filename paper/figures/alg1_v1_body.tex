@@ -1,0 +1,29 @@
+% The v1 baseline as the evaluated pipeline applies it (features off: src/otp_guard/config.py V1_FEATURES).
+% Shared by main.tex (Algorithm 1) and the standalone alg1_v1.tex that renders it for the Word version.
+% \gap{...} sets a comment line naming the gap of Section 3.1 that the preceding rule opens.
+\providecommand{\gap}[1]{\Statex \hspace{\algorithmicindent}{\color{black!60}$\triangleright$ \textit{#1}}}
+\begin{algorithmic}[1]
+\Require a request $r$: address, platform header, number, body, bulk and test flags
+\If{$r$.address is a known VPN or proxy address} \textbf{refuse} \EndIf
+\State $p \gets r$.header[\texttt{HTTP\_PLATFORM}]
+\gap{A: the platform is a client claim; a header saying iOS or Android skips lines 4--5}
+\If{$p = \mathrm{web}$}
+  \State \textbf{if} reCAPTCHA v3 score$(r) < 0.5$ \textbf{then refuse}
+  \State \textbf{if} origin$(r) \notin$ allowed domains \textbf{then refuse}
+\EndIf
+\If{\textbf{not} $r$.bulk \textbf{and} country$(r.\mathrm{number}) \notin$ allow-list} \textbf{refuse} \EndIf
+\gap{D: premium ranges inside an allowed country pass; G: the bulk flag needs no credential}
+\If{\textbf{not} $r$.test \textbf{and} (body too long \textbf{or} number excluded)} \textbf{refuse} \EndIf
+\gap{G: the test flag needs no credential}
+\If{sends$(r.\mathrm{number}, 1\,\mathrm{min}) \ge 1$} \textbf{refuse} \EndIf
+\If{requests$(r.\mathrm{address}, 1\,\mathrm{min}) \ge 5$} \textbf{refuse} \EndIf
+\gap{B: a fresh address per request; nothing throttles a subnet or an ASN}
+\If{requests$(p, \mathrm{country}, \mathrm{window}) \ge$ static cap} \textbf{refuse} \EndIf
+\gap{E: every cap is per key; nothing bounds the total or the spend}
+\State increment the counters read in lines 8--10
+\gap{F: read, then write: two racing instances both pass}
+\State send the SMS to $r$.number
+\gap{C: the number is never validated or priced before it is paid for}
+\State \Return the control that refused, or success
+\gap{H: each threshold can be probed, and registered numbers enumerated}
+\end{algorithmic}

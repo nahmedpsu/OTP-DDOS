@@ -31,8 +31,10 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   result change).** Author-year references, two-column layout, Elsevier captions; sections
   Introduction, Related work (with a comparison table and a figure of the request path,
   `paper/figures/fig8_defense_path.tex`), Threat model and design, Methodology, Results,
-  Discussion, Limitations, Conclusions and future work. Final revision 8 numbering: Tables 1-10,
-  Figures 1-4; `results/study_map.md` uses it.
+  Discussion, Limitations, Conclusions and future work. The v1 baseline is Algorithm 1
+  (`paper/figures/alg1_v1_body.tex`), the threat model and the twelve steps are figures
+  (`fig9_threat_model.tex`, `fig10_steps.tex`). Final revision 8 numbering: Tables 1-8, Figures 1-6;
+  `results/study_map.md` uses it.
 
 ## 2.9.0 (2026-10-05)
 

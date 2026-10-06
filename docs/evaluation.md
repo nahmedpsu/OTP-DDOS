@@ -229,7 +229,7 @@ Release 2.9.1; no simulated result changed (every result comes from 2.9.0, commi
   effects are serialized. `feedback.py`'s module notes say so; the manuscript's Section 3.4 likewise.
 - **Containment of the human-like carrier.** None of its ten 20-minute runs is contained; over an hour
   two of ten are, at 47.0 minutes on average (`results/evaluation.md`, pumping table).
-- **Figure 2 key and the auxiliary setting.** `results/figure1_key.md` (named for the figure's earlier number) lists every plotted setting with
+- **Figure 4 key and the auxiliary setting.** `results/figure1_key.md` (named for the figure's earlier number) lists every plotted setting with
   its roles; the 'matched false alarms, credit inf' role moved from T1000 cinf to T300 cinf in 2.9.0
   under both protocols, the only selection that changed.
 - **No incident narrative.** The v1 baseline and its gaps are presented as an analysis of v1's rules

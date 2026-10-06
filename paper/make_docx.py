@@ -130,6 +130,18 @@ def body_latex():
         return f"\\begin{{{env}}}{inner}\\end{{{env}}}"
     s = re.sub(r"\\begin\{(table|figure)\}(.*?)\\end\{\1\}", number_caption, s, flags=re.S)
 
+    # algorithms: the standalone rendering (figures/alg1_v1.png) with the PDF's number and caption
+    def algorithm_block(m):
+        inner = m.group(1)
+        lab = re.search(r"\\label\{([^}]*)\}", inner)
+        num = labels.get(lab.group(1), "?") if lab else "?"
+        i = inner.index("\\caption{")
+        cap, _ = braced(inner, i + 8)
+        src = re.search(r"\\input\{figures/([^}]*)_body\}", inner).group(1)
+        return (f"\\begin{{figure}}\n\\includegraphics[width=12cm]{{figures/{src}.png}}\n"
+                f"\\caption{{\\textbf{{Algorithm {num}.}} {cap}}}\n\\end{{figure}}")
+    s = re.sub(r"\\begin\{algorithm\}(.*?)\\end\{algorithm\}", algorithm_block, s, flags=re.S)
+
     # equations: native Word equations with the PDF's number
     def equation(m):
         inner = m.group(1)
