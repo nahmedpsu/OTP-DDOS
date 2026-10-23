@@ -1,0 +1,65 @@
+% Shared look of the hand-drawn manuscript figures (Figures 1 to 5): coloured stage boxes with a white
+% title band, one short line of text, Font Awesome icons (icons/), dotted forward arrows and dashed
+% feedback loops. Each standalone figure \input{figstyle} in its preamble.
+\usepackage{helvet}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usetikzlibrary{positioning,arrows.meta,calc,fit,backgrounds,shadows.blur}
+\graphicspath{{icons/}}
+% the palette of the user's Figure 1: client coral, service indigo, vendor teal, operator green
+\definecolor{cClient}{HTML}{E0532F}
+\definecolor{cClientL}{HTML}{FCE9E3}
+\definecolor{cService}{HTML}{3B3F8F}
+\definecolor{cServiceL}{HTML}{E6E7F4}
+\definecolor{cVendor}{HTML}{1C8E9E}
+\definecolor{cVendorL}{HTML}{E1F2F4}
+\definecolor{cOperator}{HTML}{2E8B4A}
+\definecolor{cOperatorL}{HTML}{E3F2E7}
+\definecolor{cAmber}{HTML}{C47F17}
+\definecolor{cAmberL}{HTML}{FBF0DC}
+\definecolor{cSlate}{HTML}{4A5568}
+\definecolor{cSlateL}{HTML}{EDF0F4}
+\definecolor{cInk}{HTML}{2B2D42}
+\definecolor{cInk2}{HTML}{5B5F73}
+\definecolor{cPanel}{HTML}{EDEFF4}
+\newcommand{\ic}[2]{\includegraphics[height=#1]{#2}}      % \ic{height}{icon-colour}
+\tikzset{
+  boxbody/.style 2 args={draw=#1, line width=0.6pt, rounded corners=5pt, fill=#2, inner sep=0pt,
+                         blur shadow={shadow blur steps=6, shadow opacity=16, shadow xshift=0.6pt, shadow yshift=-0.9pt}},
+  title/.style={font=\sffamily\bfseries\footnotesize, text=white, align=center},
+  body/.style={font=\sffamily\scriptsize, text=cInk, align=center},
+  chip/.style 2 args={draw=#1, line width=0.5pt, rounded corners=4pt, fill=#2, font=\sffamily\scriptsize, text=cInk, align=center,
+                      inner xsep=5pt, inner ysep=3.5pt},
+  note/.style={font=\sffamily\scriptsize, text=cInk2, align=center},
+  edgelab/.style={font=\sffamily\scriptsize, text=cInk, fill=white, inner sep=1.5pt, align=center},
+  fwd/.style={-{Triangle[length=2.4mm, width=2.2mm]}, line width=1.3pt, dotted, color=#1},
+  loop/.style={-{Triangle[length=2.4mm, width=2.2mm]}, line width=1.1pt, dashed, color=#1},
+  plain/.style={-{Triangle[length=2.2mm, width=2mm]}, line width=1pt, color=#1},
+  both/.style={{Triangle[length=2mm, width=1.8mm]}-{Triangle[length=2mm, width=1.8mm]}, line width=1pt, color=#1},
+  panel/.style={fill=cPanel, rounded corners=8pt, draw=none}
+}
+% \stagebox{name}{x,y}{colour}{light colour}{width}{height}{Title}{icons}{text}: a box with a coloured
+% title band, an icon row and one short line of text
+\newcommand{\stagebox}[9]{%
+  \node[boxbody={#3}{#4}, minimum width=#5, minimum height=#6] (#1) at (#2) {};
+  \begin{scope}
+    \clip[rounded corners=5pt] (#1.south west) rectangle (#1.north east);
+    \fill[#3] ([yshift=-0.62cm]#1.north west) rectangle (#1.north east);
+  \end{scope}
+  \node[title] at ([yshift=-0.31cm]#1.north) {#7};
+  \node[inner sep=0pt] (#1-icons) at ([yshift=-1.25cm]#1.north) {#8};
+  \node[body, anchor=south, text width=\dimexpr#5-0.3cm\relax] (#1-text) at ([yshift=0.22cm]#1.south) {#9};
+}
+% \stageboxi{name}{x,y}{colour}{light colour}{width}{height}{Title}{icon}{text}: the same box with the
+% icon on the left of the body and the text beside it (for short, wide boxes)
+\newcommand{\stageboxi}[9]{%
+  \node[boxbody={#3}{#4}, minimum width=#5, minimum height=#6] (#1) at (#2) {};
+  \begin{scope}
+    \clip[rounded corners=5pt] (#1.south west) rectangle (#1.north east);
+    \fill[#3] ([yshift=-0.62cm]#1.north west) rectangle (#1.north east);
+  \end{scope}
+  \node[title] at ([yshift=-0.31cm]#1.north) {#7};
+  \coordinate (#1-mid) at ($(#1.south)!0.5!([yshift=-0.62cm]#1.north)$);
+  \node[inner sep=0pt, anchor=west] (#1-icons) at ([xshift=0.32cm]#1.west |- #1-mid) {#8};
+  \node[body, anchor=west, align=left, text width=\dimexpr#5-1.55cm\relax] (#1-text) at ([xshift=0.22cm]#1-icons.east) {#9};
+}

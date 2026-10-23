@@ -9,9 +9,9 @@ figures: ../results/evaluation.json $(DRAWN)
 figures/alg1_v1.pdf: figures/alg1_v1_body.tex
 figures/alg2_v2.pdf: figures/alg2_v2_body.tex
 figures/alg3_sim.pdf: figures/alg3_sim_body.tex
-$(DRAWN): %.pdf: %.tex
+$(DRAWN): %.pdf: %.tex figures/figstyle.tex
 	cd figures && pdflatex -interaction=nonstopmode $(notdir $<) && rm -f $(notdir $*).aux $(notdir $*).log \
-	  && pdftoppm -r 220 -png -singlefile $(notdir $*).pdf $(notdir $*)
+	  && pdftoppm -r 300 -png -singlefile $(notdir $*).pdf $(notdir $*)
 rebuttal: rebuttal_round8.docx
 rebuttal_round8.docx: rebuttal_round8.js
 	node rebuttal_round8.js

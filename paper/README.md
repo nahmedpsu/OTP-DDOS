@@ -9,11 +9,14 @@ the `docx` package). Earlier letters are kept as `rebuttal*.js` / `.docx`.
 ## Figures
 
 `figures.py` draws every figure of the manuscript from the recorded results, nothing else. File names keep the
-numbering of revision 4; the first column gives the figure's number in the current manuscript:
+numbering of revision 4; the first column gives the figure's number in the current manuscript. Figures 1 to 5 are
+hand-drawn TikZ figures in one style (`figures/figstyle.tex`: coloured stage boxes, one line of text each, icons
+from Font Awesome Free, CC BY 4.0, rendered to `figures/icons/` by `figures/icons/make_icons.py`); what each
+element means is explained in the text where the figure is cited, not inside the figure.
 
 | Figure in revision 8 | Input | Output |
 |---|---|---|
-| 1. Where the cited defenses act on the path of an OTP request (Section 2) | none (drawn by hand) | `paper/figures/fig8_defense_path.tex` → `fig8_defense_path.{pdf,png}` |
+| 1. The path of an OTP request and its two loops (Section 2); the author's redesign, drawn as vector graphics | none (drawn by hand) | `paper/figures/fig8_defense_path.tex` → `fig8_defense_path.{pdf,png}` |
 | 2. The threat model on the path of a request (Section 3.2) | none (drawn by hand) | `paper/figures/fig9_threat_model.tex` → `fig9_threat_model.{pdf,png}` |
 | 3. Architecture of the implementation (Section 3.3) | none (drawn by hand, from `src/otp_guard`) | `paper/figures/fig12_architecture.tex` → `fig12_architecture.{pdf,png}` |
 | 4. The twelve steps and the feedback loop (Section 3.3) | none (drawn by hand) | `paper/figures/fig10_steps.tex` → `fig10_steps.{pdf,png}` |

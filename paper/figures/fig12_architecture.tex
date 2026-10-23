@@ -1,67 +1,57 @@
-% Architecture of the implementation (manuscript Section 3.3): the service's components, the state they
-% share, the external services behind provider adapters, and the two feedback edges. Drawn from
-% src/otp_guard (api.py, pipeline.py, feedback.py, worker.py, baseline.py, store.py, factory.py, providers/).
-% Build: pdflatex fig12_architecture.tex; pdftoppm -r 220 -png -singlefile fig12_architecture.pdf fig12_architecture
-\documentclass[tikz,border=2pt]{standalone}
-\usepackage{times}
-\usetikzlibrary{positioning,arrows.meta,calc,fit,backgrounds}
+% Figure 3: architecture of the implementation (manuscript Section 3.3), drawn from src/otp_guard:
+% the service's components, the store they share, the external services behind adapters, and the
+% three edges that close the loops. The text of Section 3.3 explains each part.
+% Build: pdflatex fig12_architecture.tex; pdftoppm -r 300 -png -singlefile fig12_architecture.pdf fig12_architecture
+\documentclass[tikz,border=3pt]{standalone}
+\input{figstyle}
 \begin{document}
-\begin{tikzpicture}[
-  comp/.style={draw, rounded corners=2pt, align=left, font=\scriptsize, inner sep=3.5pt, fill=white},
-  party/.style={draw, rounded corners=2pt, align=center, font=\scriptsize, inner sep=3.5pt, fill=gray!10},
-  ext/.style={draw, align=left, font=\scriptsize, inner sep=3pt, fill=yellow!8, text width=3.5cm},
-  store/.style={draw, rounded corners=2pt, align=left, font=\scriptsize, inner sep=3.5pt, fill=blue!5},
-  arr/.style={-{Latex[length=1.8mm]}, thick},
-  ret/.style={-{Latex[length=1.8mm]}, thick, dashed},
-  both/.style={{Latex[length=1.6mm]}-{Latex[length=1.6mm]}, thick},
-  lab/.style={font=\tiny, fill=white, inner sep=1pt, align=center},
-  title/.style={font=\scriptsize\bfseries}
-]
+\begin{tikzpicture}
 % ---- the service ----
-\node[comp, text width=8.5cm] (api) at (7.8,0) {\textbf{HTTP API} (FastAPI; any number of instances)\\
-public: \texttt{/attest/challenge}, \texttt{/attest/enroll}, \texttt{/session} (a reCAPTCHA token or an attestation buys a signed session), \texttt{/otp/request} (the pipeline), \texttt{/otp/verify} (the code)\\
-internal, behind a service credential: \texttt{/internal/delivery} (the vendor's receipt), \texttt{/internal/timeouts/run}};
-
-\node[comp, text width=3.95cm, anchor=north east] (pipe) at ($(api.south east)+(0,-0.3)$) {\textbf{Pipeline} (Steps 0--11, \textsc{ProcessRequest})\\
-cheap checks first; every limit one atomic store operation, released on refusal; reserve, write state, enqueue; one uniform body after 400\,ms};
-\node[comp, text width=3.95cm, anchor=north west] (fb) at ($(api.south west)+(0,-0.3)$) {\textbf{Feedback loop} (\textsc{OnOutcome})\\
-one compare-and-set per transition of a send (delivered, verified, failed, undelivered); reputation per key; block statistics, verdicts; denylist};
-
-\node[store, text width=8.5cm, anchor=north] (st) at ($(api.south)+(0,-2.5)$) {\textbf{Store} (Redis in production; an in-memory twin with the same rules for the tests and the simulator)\\
-signed sessions and nonces; per-key limits and reservations; number tracker; SMS history, one entry per send; reputation counts per key; block statistics, counters and verdicts; denylist; adaptive multipliers; operating mode, hourly count and spend. What the loop writes, the next request reads.};
-
-\node[comp, text width=8.5cm, anchor=north] (worker) at ($(st.south)+(0,-0.45)$) {\textbf{Worker} (one per deployment; a one-minute tick)\\
-resolves the sends that timed out (the feedback loop's undelivered and failed transitions); runs the baseline job: the expected rate per source, platform and country for this hour of the week, from the pipeline's own counters, sets the adaptive multipliers of Step~9};
-
+\stageboxi{api}{7.6,0}{cService}{cServiceL}{7.4cm}{1.6cm}{HTTP API}
+  {\ic{0.5cm}{cloud-indigo}}
+  {five public endpoints and two internal ones; any number of instances}
+\stageboxi{fb}{5.7,-2.4}{cOperator}{cOperatorL}{3.5cm}{1.6cm}{Feedback Loop}
+  {\ic{0.5cm}{arrows-rotate-green}}
+  {the outcome of every send}
+\stageboxi{pipe}{9.5,-2.4}{cService}{cServiceL}{3.5cm}{1.6cm}{Pipeline}
+  {\ic{0.5cm}{list-check-indigo}}
+  {Steps 0 to 11 on each request}
+\stageboxi{store}{7.6,-4.8}{cSlate}{cSlateL}{7.4cm}{1.6cm}{Store}
+  {\ic{0.5cm}{database-slate}}
+  {Redis, or its in-memory twin; every limit, reservation, outcome and statistic lives here}
+\stageboxi{worker}{7.6,-7.1}{cAmber}{cAmberL}{7.4cm}{1.6cm}{Worker}
+  {\ic{0.48cm}{gears-amber}}
+  {one per deployment, every minute: resolves timed-out sends, learns the baseline rate}
 \begin{scope}[on background layer]
-\node[draw, rounded corners=3pt, fill=gray!4, inner sep=6pt, fit=(api)(pipe)(fb)(st)(worker)] (svc) {};
+\node[panel, inner sep=9pt, fit=(api)(fb)(pipe)(store)(worker)] (svc) {};
 \end{scope}
-\node[title, anchor=south west] at (svc.north west) {The service (release 2.9.0)};
-
+\node[note, anchor=south west, font=\sffamily\bfseries\footnotesize, text=cService] at ([yshift=1pt]svc.north west) {The service};
 % internal edges
-\draw[both] (pipe.south) -- node[lab, right]{read; atomic take and reserve} (pipe.south |- st.north);
-\draw[arr] (fb.south) -- node[lab, right]{compare-and-set} (fb.south |- st.north);
-\draw[both] (worker.north) -- node[lab, right]{timeouts; counters $\to$ multipliers} (worker.north |- st.south);
-
+\draw[both=cOperator] (fb.south) -- node[edgelab, right=0pt]{writes outcomes} (fb.south |- store.north);
+\draw[both=cService] (pipe.south) -- node[edgelab, right=0pt]{reads, takes, reserves} (pipe.south |- store.north);
+\draw[both=cAmber] (worker.north) -- node[edgelab, right=0pt]{timeouts, multipliers} (worker.north |- store.south);
 % ---- client and recipient ----
-\node[party, text width=2.2cm] (client) at (0.5,0.05) {\textbf{Client}\\web or app};
-\node[party, text width=2.2cm] (recip) at (0.5,-1.85) {\textbf{Recipient}\\the number's owner};
-\draw[arr] ([yshift=0.3cm]client.east) -- node[lab, above]{session,\\request} ([yshift=0.3cm]client.east -| svc.west);
-\draw[arr] ([yshift=-0.3cm]client.east -| svc.west) -- node[lab, below]{uniform body,\\or a challenge} ([yshift=-0.3cm]client.east);
-\draw[ret] (recip.east) -- node[lab, above]{the code, or nothing} (recip.east -| svc.west);
-
+\stageboxi{client}{-0.1,0}{cClient}{cClientL}{3.2cm}{1.6cm}{Client}
+  {\ic{0.46cm}{laptop-red}}
+  {web or app}
+\stageboxi{recip}{-0.1,-2.4}{cClient}{cClientL}{3.2cm}{1.6cm}{Recipient}
+  {\ic{0.46cm}{user-red}}
+  {the number's owner}
+\draw[fwd=cClient] ([yshift=0.25cm]client.east) -- node[edgelab, above=0pt]{session, request} ([yshift=0.25cm]client.east -| svc.west);
+\draw[fwd=cService] ([yshift=-0.3cm]client.east -| svc.west) -- node[edgelab, below=0pt]{one uniform body} ([yshift=-0.3cm]client.east);
+\draw[loop=cClient] (recip.east) -- node[edgelab, above=0pt]{the code, or nothing} (recip.east -| svc.west);
 % ---- external services ----
-\node[ext, anchor=north west] (sms) at (12.95,0.6) {\textbf{SMS vendor} (Step 11)\\sends the message; reports a delivery receipt};
-\node[ext, below=0.15cm of sms] (push) {\textbf{Push, WhatsApp}\\the downgrade channels};
-\node[ext, below=0.15cm of push] (att) {\textbf{App Attest, Play Integrity}\\Step 0: the platform};
-\node[ext, below=0.15cm of att] (rc) {\textbf{reCAPTCHA v3; the challenge}\\Steps 3 and 7, web only};
-\node[ext, below=0.15cm of rc] (ip) {\textbf{Address intelligence, proxy lists}\\Steps 0 and 2};
-\node[ext, below=0.15cm of ip] (hlr) {\textbf{HLR lookup; prefix table}\\Step 5: liveness, cost class};
-\node[ext, below=0.15cm of hlr] (al) {\textbf{Alert sink}\\circuit breaker, outages};
-\node[title, anchor=south west, align=left, text width=3.6cm] at ([yshift=0.05cm]sms.north west) {External services, each behind an adapter with an in-memory fake};
-
-\draw[arr] ([yshift=0.15cm]sms.west -| svc.east) -- ([yshift=0.15cm]sms.west);
-\draw[ret] ([yshift=-0.2cm]sms.west) -- node[lab, below]{receipt} ([yshift=-0.2cm]sms.west -| svc.east);
-\foreach \n in {push, att, rc, ip, hlr, al} {\draw[arr] (\n.west -| svc.east) -- (\n.west);}
+\def\ext#1#2#3#4#5{\node[chip={#4}{#5}, anchor=north west, text width=3.9cm, align=left, inner ysep=4pt] (#1) at #2 {\raisebox{-3pt}{\ic{0.36cm}{#3}}\hspace{5pt}#1};}
+\node[chip={cVendor}{cVendorL}, anchor=north west, text width=3.45cm, align=left] (e1) at (12.6,0.9) {\raisebox{-3pt}{\ic{0.36cm}{comment-sms-teal}}\hspace{5pt}\textbf{SMS vendor}};
+\node[chip={cVendor}{cVendorL}, below=0.18cm of e1, text width=3.45cm, align=left] (e2) {\raisebox{-3pt}{\ic{0.36cm}{paper-plane-teal}}\hspace{5pt}\textbf{Push, WhatsApp}};
+\node[chip={cVendor}{cVendorL}, below=0.18cm of e2, text width=3.45cm, align=left] (e3) {\raisebox{-3pt}{\ic{0.36cm}{shield-halved-teal}}\hspace{5pt}\textbf{App Attest, Play Integrity}};
+\node[chip={cVendor}{cVendorL}, below=0.18cm of e3, text width=3.45cm, align=left] (e4) {\raisebox{-3pt}{\ic{0.36cm}{robot-teal}}\hspace{5pt}\textbf{reCAPTCHA}};
+\node[chip={cVendor}{cVendorL}, below=0.18cm of e4, text width=3.45cm, align=left] (e5) {\raisebox{-3pt}{\ic{0.36cm}{globe-teal}}\hspace{5pt}\textbf{Address intelligence}};
+\node[chip={cVendor}{cVendorL}, below=0.18cm of e5, text width=3.45cm, align=left] (e6) {\raisebox{-3pt}{\ic{0.36cm}{phone-volume-teal}}\hspace{5pt}\textbf{HLR lookup}};
+\node[chip={cVendor}{cVendorL}, below=0.18cm of e6, text width=3.45cm, align=left] (e7) {\raisebox{-3pt}{\ic{0.36cm}{bell-teal}}\hspace{5pt}\textbf{Alerts}};
+\node[note, anchor=south west, font=\sffamily\bfseries\footnotesize, text=cVendor, align=left, text width=3.6cm] at ([yshift=1pt]e1.north west) {External services\\{\mdseries\scriptsize each behind an adapter with a fake}};
+\draw[fwd=cService] ([yshift=0.12cm]e1.west -| svc.east) -- ([yshift=0.12cm]e1.west);
+\draw[loop=cVendor] ([yshift=-0.14cm]e1.west) -- node[edgelab, below=0pt]{receipt} ([yshift=-0.14cm]e1.west -| svc.east);
+\foreach \n in {e2,e3,e4,e5,e6,e7} {\draw[fwd=cService] (\n.west -| svc.east) -- (\n.west);}
 \end{tikzpicture}
 \end{document}
