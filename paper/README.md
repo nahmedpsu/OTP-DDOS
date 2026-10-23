@@ -27,7 +27,7 @@ numbering of revision 4; the first column gives the figure's number in the curre
 | artifact only. Leakage against legitimate refusal and challenge, every sweep point, with completion | `cap_sweep`, `weight_sweep` | `paper/figures/fig4_tradeoff.{png,svg,pdf}` |
 | artifact only. Pumper spread: measured leakage, model, and residuals | `spread` | `paper/figures/fig5_spread.{png,svg,pdf}` |
 | 6. Matched comparison at 200 blocks, evaluation seeds: benign completion (separate 24-hour attack-free runs) against leakage summed over four attack-profile means (separate attack runs), with the tuning target | `matched` | `paper/figures/fig6_matched_a.{png,svg,pdf}` |
-| 7. The same comparison: per-attacker leakage differences to the default, paired per seed | `matched` | `paper/figures/fig6_matched_b.{png,svg,pdf}` |
+| 7. The same comparison: each selected setting's leakage minus the default's, paired per seed, grouped by the pumper's carrier | `matched` | `paper/figures/fig6_matched_b.{png,svg,pdf}` |
 | 8, 9, 10. The destination counter's operating boundary, one figure per panel: loss among hot-block users against the legitimate rate on those blocks (6), and leakage in 20 and 60 minutes against the pumper's spread (7, 8), with the counter's bounds (Equations 3 and 4) and the tests' first-verdict estimate (Equation 2) evaluated per run from offered requests, offered rate and the configured timeouts, nothing fitted | `results/counter_study.json` → `E4`; `results/counter_study_runs.jsonl.gz`; `results/condition_check.json` | `paper/figures/fig7a_service`, `fig7b_security20`, `fig7c_security60` `.{png,svg,pdf}` |
 | artifact only. The same three panels as one figure | as above | `paper/figures/fig7_counter_boundary.{png,svg,pdf}` |
 

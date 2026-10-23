@@ -433,7 +433,7 @@ Across 18 spread configurations, leakage follows the blocks touched: with 30 blo
 
 \begin{figure*}[!t]
 \centering
-\includegraphics[width=0.82\textwidth]{fig6_matched_b}
+\includegraphics[width=0.8\textwidth]{fig6_matched_b}
 \caption{Leakage Difference from the Default Across Attack Types.}
 \label{fig:matchedpaired}
 \end{figure*}
@@ -452,7 +452,7 @@ Setting (selected as) & NV & IV & HL & CB & Compl. & Benign & Chall. & Events \\
 \end{table*}
 
 \subsubsection{At a service target}
-Table~\ref{tab:matched} reports the first protocol at 200 blocks (144 legitimate sends per block a day; tuning seeds 100--102, evaluation seeds 0--9): 20-minute leakage against the never-verifying (NV), instant (IV), human-like (HL) and challenge-buying (CB) carriers and, from 24-hour attack-free runs at 65\% conversion, completion, benign cost (points), users challenged and verdict events a day; the tuning target is 63.95\%. Figure~\ref{fig:matched} plots each setting's completion against its leakage summed over the four pumpers' runs of a seed (not one combined attack), with the tuning target dotted; its unlabeled points are sequential settings matched to the default's false alarms at other credits (key: \texttt{results/\allowbreak figure1\_key.md}). Figure~\ref{fig:matchedpaired} gives each selected setting's leakage minus the default's, paired per seed (negative: leaks less). The sequential setting selected at the tuning target holds the human-like carrier to 126 messages only by raising 334 false verdict events a day, and misses the target by 0.18 points on seeds 0--9. The graded counter of four sends per block per ten minutes leaks 24 against each outcome-reading carrier and 48 against the challenge buyer, at 0.06 points; counters selected at the sparser settings leak 6 to 18 at 0.15 to 0.35 points (up to 0.43 at 80\%). With the full grid and density-specific attacks (E5) the rule selects the same counters, and so do other objectives on the tuning runs (worst-case leakage, a first-time-loss constraint, each attacker alone, 2\,000 random mixes), except the instant verifier alone and 3 mixes at 200 blocks; on fresh seeds the counter leaked least of the winners against every attacker but the instant verifier (25, against 15 and 16). On seeds 300--309 the 1\,000-block counter falls 0.12 points below its target, yet no seed-and-conversion cell fails the paired check (the evaluation default minus 0.5 points).
+Table~\ref{tab:matched} reports the first protocol at 200 blocks (144 legitimate sends per block a day; tuning seeds 100--102, evaluation seeds 0--9): 20-minute leakage against the never-verifying (NV), instant (IV), human-like (HL) and challenge-buying (CB) carriers and, from 24-hour attack-free runs at 65\% conversion, completion, benign cost (points), users challenged and verdict events a day; the tuning target is 63.95\%. Figure~\ref{fig:matched} plots each setting's completion against its leakage summed over the four pumpers' runs of a seed (not one combined attack), with the tuning target dotted. The figures name each setting by its rule, threshold and credit, so $T300$, $c0$ of Table~\ref{tab:matched} is the test with threshold 300 and no credit; the three points beside the default, one under its star, are sequential settings matched to the default's false alarms at other credits (key: \texttt{results/\allowbreak figure1\_key.md}). Figure~\ref{fig:matchedpaired} gives, carrier by carrier, each selected setting's leakage minus the default's, paired per seed (left of zero: leaks less than the default). The sequential setting selected at the tuning target holds the human-like carrier to 126 messages only by raising 334 false verdict events a day, and misses the target by 0.18 points on seeds 0--9. The graded counter of four sends per block per ten minutes leaks 24 against each outcome-reading carrier and 48 against the challenge buyer, at 0.06 points; counters selected at the sparser settings leak 6 to 18 at 0.15 to 0.35 points (up to 0.43 at 80\%). With the full grid and density-specific attacks (E5) the rule selects the same counters, and so do other objectives on the tuning runs (worst-case leakage, a first-time-loss constraint, each attacker alone, 2\,000 random mixes), except the instant verifier alone and 3 mixes at 200 blocks; on fresh seeds the counter leaked least of the winners against every attacker but the instant verifier (25, against 15 and 16). On seeds 300--309 the 1\,000-block counter falls 0.12 points below its target, yet no seed-and-conversion cell fails the paired check (the evaluation default minus 0.5 points).
 
 \begin{table*}[!t]
 \caption{Held-Out Evaluation of the Principal Counter.}
@@ -487,7 +487,7 @@ Policy & (SMS) & ($\approx$1\,200) & blocks ($\approx$18) & & blocks & users \\
 \end{tabular*}
 \end{table*}
 
-\begin{table}[!t]
+\begin{table}[!htb]
 \caption{User Harm Under a Full-Block Poisoning Attack.}
 \label{tab:poisoner}
 \footnotesize

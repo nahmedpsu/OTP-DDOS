@@ -280,16 +280,48 @@ def fig5_spread(R, out):
     save(fig, out, "fig5_spread")
 
 
-SHORT = {"none": "none", "sequential T1000 c1": "default (T1000, credit 1)"}
+# Plain-language names for the matched-comparison settings (Figures 6 and 7 of revision 8). The body text
+# keeps the short notation (T300, c0) beside these names, so a reader can move between figure and text.
+PLAIN = {"none": "no policy",
+         "sequential T1000 c1": "default tests (threshold 1 000, credit 1)",
+         "sequential T300 c0": "tests selected at the target (threshold 300, no credit)",
+         "counter graded 160/day": "graded counter, 160 sends a day",
+         "counter graded 4/10 min": "graded counter, 4 sends per 10 minutes",
+         "counter refuse 320/day": "refusing counter, 320 sends a day"}
+# one hue per family (tests blue, graded counters green, the refusing counter orange, no policy grey:
+# three hues pass the all-pairs colour-vision check) and one marker shape per setting kind
+FAMILY = {"none": ("no destination policy", INK2, "o"),
+          "sequential": ("sequential tests of code outcomes", C["blue"], "o"),
+          "counter graded, daily": ("graded counter, quota per day", C["green"], "s"),
+          "counter graded, short window": ("graded counter, quota per 10 minutes", C["green"], "^"),
+          "counter refusing, daily": ("refusing counter, quota per day", C["orange"], "D")}
+PLAIN_SHORT = {"none": "no policy", "sequential T300 c0": "selected tests (threshold 300, no credit)",
+               "counter graded 160/day": "graded counter, 160 a day", "counter graded 4/10 min": "graded counter, 4 per 10 minutes",
+               "counter refuse 320/day": "refusing counter, 320 a day"}
+CARRIER = {"concentrated_pumper_no_verify": "the pumper's carrier never enters a code",
+           "concentrated_pumper_verifies_instantly": "the carrier enters every code within a second",
+           "concentrated_pumper_verifies_humanlike": "the carrier enters 60 % of codes, human-like delay",
+           "concentrated_pumper_solves_challenges": "the pumper buys every challenge solution"}
 
 
-def _short(n):
-    if n in SHORT:
-        return SHORT[n]
+def _family(n):
+    if n == "none":
+        return "none"
+    if n.startswith("sequential"):
+        return "sequential"
+    if "refuse" in n:
+        return "counter refusing, daily"
+    return "counter graded, short window" if "min" in n else "counter graded, daily"
+
+
+def _plain(n):
+    if n in PLAIN:
+        return PLAIN[n]
     if n.startswith("sequential"):
         _, t, c = n.split()
-        return f"T{t[1:]}, credit {c[1:]}"
-    return n.replace("counter ", "").replace("/day", " a day").replace("/10 min", " per 10 min").replace("/60 min", " per hour")
+        credit = "no credit" if c == "c0" else "unbounded credit" if c == "cinf" else f"credit {c[1:]}"
+        return f"tests (threshold {int(t[1:]):,}, {credit})".replace(",", " ")
+    return n
 
 
 def _matched_sums(runs_path):
@@ -310,78 +342,89 @@ def _matched_sums(runs_path):
 
 
 def fig6_matched(R, out, runs_path=ROOT / "results" / "evaluation_runs.jsonl.gz"):
-    """The matched comparison at 200 blocks, as two figures so each panel has the full text width.
+    """The matched comparison at 200 blocks, as two figures so each has the full text width.
     fig6_matched_a: every evaluated setting, benign completion (separate 24-hour attack-free runs)
-    against leakage summed over four attack-profile means (separate attack runs), with the benign
-    service target; only the reference and selected settings are labelled. fig6_matched_b: per-attacker
-    paired differences in leakage against the default for the selected settings."""
+    against leakage summed over the four pumpers' runs of a seed (separate attack runs), with the
+    tuning target; the reference and selected settings carry plain-language labels and the three
+    settings matched to the default's false alarms share one note. fig6_matched_b: per-carrier paired
+    differences in leakage against the default for the selected settings, grouped by carrier."""
     M = R["matched"]
     density = "200"
     names = M["evaluate"][density]
     sel = M["selection"][density]
-    fam_col = {"none": INK2, "sequential": C["blue"], "counter graded, daily": C["orange"], "counter graded, short window": C["green"],
-               "counter refusing, daily": C["pink"]}
-
-    def family(n):
-        if n == "none":
-            return "none"
-        if n.startswith("sequential"):
-            return "sequential"
-        if "refuse" in n:
-            return "counter refusing, daily"
-        return "counter graded, short window" if "min" in n else "counter graded, daily"
     chosen = [v for k, v in sel["chosen"].items() if v not in ("sequential T1000 c1",) and not k.startswith("matched false")]
     chosen = list(dict.fromkeys(chosen))
     labelled = set(chosen) | {"none", "sequential T1000 c1"}
+    matched = [v for k, v in sel["chosen"].items() if k.startswith("matched false") and v != "sequential T1000 c1"]
     sums = _matched_sums(runs_path) if pathlib.Path(runs_path).exists() else {}
-    # (a)
-    fig, ax = plt.subplots(figsize=(8.6, 5.8))
+    # (a) completion against leakage
+    fig, ax = plt.subplots(figsize=(8.6, 5.5))
     style(ax)
     ax.tick_params(labelsize=10.5)
+    pts = {}
     for n in names:
         leg = M["legit"][density][n]["0.65"]["legit_completed_pct"]
         att = [M["attack"][n][x]["leaked_total"] for x in M["attack"][n]]
         y, ylo, yhi = sums[n][:3] if n in sums else (sum(a[0] for a in att), sum(a[1] for a in att), sum(a[2] for a in att))
-        col = fam_col[family(n)]
+        _, col, mk = FAMILY[_family(n)]
         is_def = n == "sequential T1000 c1"
-        ax.errorbar(leg[0], y, xerr=err(leg), yerr=[[y - ylo], [yhi - y]], fmt="*" if is_def else "o", color=col, ecolor=INK2,
-                    markersize=15 if is_def else 9, elinewidth=0.9, capsize=2, markeredgecolor=INK if is_def else SURFACE, zorder=3)
-        if n in labelled:
-            lab = "default (T1000, credit 1)" if is_def else _short(n)
-            dy = -12 if is_def else 14 if n == "none" else -6 if "refuse" in n else 5     # none and the refusing counter coincide
-            ax.annotate(lab, (leg[0], y), textcoords="offset points", xytext=(9, dy), fontsize=11, color=INK, va="center")
+        ax.errorbar(leg[0], y, xerr=err(leg), yerr=[[y - ylo], [yhi - y]], fmt="*" if is_def else mk, color=col, ecolor=AXIS,
+                    markersize=16 if is_def else 9.5, elinewidth=0.9, capsize=2, markeredgecolor=INK if is_def else SURFACE,
+                    markeredgewidth=0.8, zorder=3)
+        pts[n] = (leg[0], y)
+    # direct labels, offset so that the two coinciding points (no policy and the refusing counter) both read
+    offsets = {"none": (10, 13), "counter refuse 320/day": (10, -9), "sequential T1000 c1": (12, -13),
+               "sequential T300 c0": (10, 11), "counter graded 160/day": (10, 7), "counter graded 4/10 min": (10, 7)}
+    for n in labelled:
+        ax.annotate(_plain(n), pts[n], textcoords="offset points", xytext=offsets.get(n, (9, 5)), fontsize=10.5, color=INK, va="center",
+                    bbox=dict(boxstyle="round,pad=0.12", fc=SURFACE, ec="none", alpha=0.9))
+    # the three settings matched to the default's false alarms, one note for all three
+    if matched:
+        mx = sum(pts[n][0] for n in matched) / len(matched); my = max(pts[n][1] for n in matched)
+        ax.annotate("test settings matched to the default's\nfalse alarms at other credits (one under the star)", (mx, my),
+                    textcoords="offset points", xytext=(28, 64), fontsize=10, color=INK2, ha="left", va="bottom",
+                    arrowprops=dict(arrowstyle="-", color=INK2, linewidth=0.8, shrinkB=6))
     tgt = sel["service_target_completion_pct"]
     ax.axvline(tgt, color=INK, linestyle=":", linewidth=1.4)
-    lo_y = ax.get_ylim()[0]
-    ax.annotate("tuning target\n(default − 0.5 pp,\ntuning seeds)", (tgt, lo_y + 0.45 * (ax.get_ylim()[1] - lo_y)),
-                textcoords="offset points", xytext=(-6, 0), ha="right", fontsize=10.5, color=INK)
-    ax.set_xlabel("legitimate users completing, %  (separate 24-hour attack-free runs, 65 % conversion)", color=INK, fontsize=11.5)
-    ax.set_ylabel("SMS leaked in 20 min, SUMMED over the four\npumpers' runs of a seed (separate attack runs)", color=INK, fontsize=11.5)
+    y0, y1 = ax.get_ylim()
+    ax.annotate("tuning target:\nthe default's completion\nminus 0.5 points", (tgt, y0 + 0.47 * (y1 - y0)),
+                textcoords="offset points", xytext=(-7, 0), ha="right", va="center", fontsize=10, color=INK)
+    ax.set_xlabel("legitimate users who complete registration, %  (attack-free, 24 hours, 65 % conversion)", color=INK, fontsize=11)
+    ax.set_ylabel("SMS leaked to the four pumpers in 20 minutes\n(the four attacks of a seed, summed)", color=INK, fontsize=11)
     x0, x1 = ax.get_xlim()
-    ax.set_xlim(x0, x1 + 0.3 * (x1 - x0))
-    handles = [Line2D([], [], marker="o", color=c, linestyle="", markersize=9, label=f) for f, c in fam_col.items()] + \
-              [Line2D([], [], marker="*", color=C["blue"], markersize=13, linestyle="", label="default")]
-    ax.legend(handles=handles, frameon=False, fontsize=10.5, loc="upper left")
+    ax.set_xlim(x0, x1 + 0.34 * (x1 - x0))
+    handles = [Line2D([], [], marker=mk, color=col, linestyle="", markersize=9, label=lab) for lab, col, mk in FAMILY.values()] + \
+              [Line2D([], [], marker="*", color=C["blue"], markeredgecolor=INK, markersize=14, linestyle="", label="the default tests")]
+    ax.legend(handles=handles, frameon=False, fontsize=10, loc="upper left", title="bars: 95 % intervals over the ten evaluation seeds",
+              title_fontsize=9.5, alignment="left")
     save(fig, out, "fig6_matched_a")
-    # (b)
+    # (b) each selected setting against the default, carrier by carrier
     atts = list(M["attack"]["none"])
-    alab = {"concentrated_pumper_no_verify": "never verifies", "concentrated_pumper_verifies_instantly": "verifies instantly",
-            "concentrated_pumper_verifies_humanlike": "verifies 60 %, human-like", "concentrated_pumper_solves_challenges": "solves challenges"}
-    fig, ax = plt.subplots(figsize=(8.6, 7.0))
+    fig, ax = plt.subplots(figsize=(9.0, 6.4))
     style(ax)
     ax.tick_params(labelsize=10.5)
-    yy = 0
-    yt, yl = [], []
+    yy = 0.0
+    yt, yl, heads = [], [], []
     for a in atts:
+        heads.append((yy, CARRIER[a]))
+        yy += 1
         for n in chosen:
             d = M["attack"][n][a]["paired_leak_vs_default"]
-            ax.errorbar(d[0], yy, xerr=err(d), fmt="o", color=fam_col[family(n)], ecolor=INK2, markersize=8, capsize=2)
-            yt.append(yy); yl.append(f"{alab[a]} — {_short(n)}")
+            _, col, mk = FAMILY[_family(n)]
+            ax.errorbar(d[0], yy, xerr=err(d), fmt=mk, color=col, ecolor=INK2, markersize=8.5, capsize=2, markeredgecolor=SURFACE,
+                        markeredgewidth=0.8, zorder=3)
+            yt.append(yy); yl.append(PLAIN_SHORT.get(n, _plain(n)))
             yy += 1
-        yy += 0.8
+        yy += 0.6
     ax.axvline(0, color=INK, linewidth=1.4)
-    ax.set_yticks(yt); ax.set_yticklabels(yl, fontsize=11, color=INK); ax.invert_yaxis()
-    ax.set_xlabel("SMS leaked: setting − default, paired per seed\n(negative = leaks less)", color=INK, fontsize=11.5)
+    ax.set_yticks(yt); ax.set_yticklabels(yl, fontsize=11, color=INK)
+    ax.set_ylim(yy - 0.6, -0.8); ax.tick_params(axis="y", length=0)
+    for y, text in heads:
+        ax.text(-0.012, y, text, transform=ax.get_yaxis_transform(), ha="right", va="center", fontsize=11, color=INK, fontweight="bold")
+    ax.annotate("the default tests", (0, -0.75), textcoords="offset points", xytext=(0, 2), ha="center", va="bottom", fontsize=10, color=INK)
+    ax.set_xlabel("SMS leaked to the pumper in 20 minutes, setting minus the default tests\n"
+                  "(left of zero: leaks less than the default; paired per seed; bars: 95 % intervals over ten seeds)",
+                  color=INK, fontsize=10.5, loc="right")
     save(fig, out, "fig6_matched_b")
 
 
