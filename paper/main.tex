@@ -116,12 +116,12 @@ Section~\ref{sec:related} reviews related work; Section~\ref{sec:design} gives t
 \section{Related work}
 \label{sec:related}
 
-We group prior work by where it acts on the path of an OTP request, which Figure~\ref{fig:path} draws. A request leaves a client, a browser or an app, which in an attack is a botnet behind residential proxies; it reaches the service endpoint, which receives it and decides whether to send; an SMS vendor or aggregator routes and filters the message; and a terminating operator delivers it to the destination number, which in a pumping attack lies in a premium-rate range. Two loops close the path. Above it, the termination fee flows back from the operator to a pumper on its partner's ranges, which is why the destination is the one key a pumper cannot change. Below it, the code that the recipient enters, or does not, flows back to the service as the outcome signal that one of our two destination policies uses. The works we review sit at one of these four points. At the client are the measurements of what an attacker can buy: residential proxy addresses~\citep{mi2019resip}, shared addresses behind carrier-grade NAT~\citep{richter2016cgn}, CAPTCHA solutions~\citep{motoyama2010captcha,dionysiou2020captcha} and as many identities as it likes~\citep{douceur2002sybil}. At the service are the controls an endpoint can run itself: per-entity limits, CAPTCHA, proxy and country lists (our v1 baseline, Section~\ref{sec:baseline}), risk-based scoring of logins~\citep{wiefling2019rba} and supervised per-request detection on labeled logs~\citep{huh2025ait}; our twelve source-side steps and two destination policies act here too (Sections~\ref{sec:pipeline}--\ref{sec:blocks}). At the vendor are prefix and country blocking from an account's history and a per-number pumping risk score~\citep{twilio_fraudguard,twilio_pumping_risk}, and counts of sends per prefix in five-minute windows with a 24-hour quarantine~\citep{zaliskyi2026ait}. At the operator, where the money is made, are the revenue-share number ranges that providers advertise and share, and detection from call records and test-number intelligence~\citep{sahin2017sok,sahin2021irsf}. We close with the gap we address (Table~\ref{tab:related}).
+We group prior work by where it acts on the path of an OTP request, which Figure~\ref{fig:path} draws. The attacker's bots, working through a botnet or behind residential proxies, open the target website and ask it for a code; the website's service endpoint receives each OTP request and decides whether to send; an SMS vendor routes the message; and a terminating operator delivers it, in a pumping attack to premium-rate numbers that a number provider has placed with that operator. Two flows run against the direction of the request. The outcome signal, whether the code was entered or not, returns from the website to the service endpoint, and it is what one of our two destination policies uses. The revenue-sharing line, drawn dashed, carries part of the termination fee from the operator through the provider of the premium-rate numbers back to the attacker, which is why the destination is the one key a pumper cannot change. The works we review sit at one of these points. At the client, the bots and the proxies, are the measurements of what an attacker can buy: residential proxy addresses~\citep{mi2019resip}, shared addresses behind carrier-grade NAT~\citep{richter2016cgn}, CAPTCHA solutions~\citep{motoyama2010captcha,dionysiou2020captcha} and as many identities as it likes~\citep{douceur2002sybil}. At the service are the controls an endpoint can run itself: per-entity limits, CAPTCHA, proxy and country lists (our v1 baseline, Section~\ref{sec:baseline}), risk-based scoring of logins~\citep{wiefling2019rba} and supervised per-request detection on labeled logs~\citep{huh2025ait}; our twelve source-side steps and two destination policies act here too (Sections~\ref{sec:pipeline}--\ref{sec:blocks}). At the vendor are prefix and country blocking from an account's history and a per-number pumping risk score~\citep{twilio_fraudguard,twilio_pumping_risk}, and counts of sends per prefix in five-minute windows with a 24-hour quarantine~\citep{zaliskyi2026ait}. At the operator and the number provider, where the money is made, are the revenue-share number ranges that providers advertise and share, and detection from call records and test-number intelligence~\citep{sahin2017sok,sahin2021irsf}. We close with the gap we address (Table~\ref{tab:related}).
 
 \begin{figure*}[!b]
 \centering
-\includegraphics[width=0.96\textwidth]{fig8_defense_path}
-\caption{Defenses Along the Path of an OTP Request.}
+\includegraphics[width=0.84\textwidth]{fig8_defense_path.png}
+\caption{The path of an OTP request, and where the money goes.}
 \label{fig:path}
 \end{figure*}
 
@@ -153,7 +153,7 @@ Malware on the handset or a social-engineering call can take a code after it is 
 Table~\ref{tab:related} compares the works closest to ours on the evidence they use, the signal they act on, where they act, and whether they measure the cost to legitimate users. Across them, the destination is agreed to be where a pumper is exposed, and three ways to act on it are in use: a supervised model with labels, a count per prefix, and a vendor's undisclosed score. What none supplies is a controlled comparison, under a protocol fixed before the runs, of the two signals a service can compute without labels, with the cost to the users who share a block made part of the result. We supply that comparison, in simulation, together with the source-side layers it sits in.
 
 \begin{table*}[!b]
-\caption{Comparison of Related Work with This Study.}
+\caption{The closest work, set beside ours.}
 \label{tab:related}
 \scriptsize
 \setlength{\tabcolsep}{5pt}
@@ -184,7 +184,7 @@ The baseline, v1, is our starting point, the registration endpoint as it stood b
 Each control rests on an assumption that an attacker within the threat model of Section~\ref{sec:threat} breaks. We derived the eight gaps below from the rules, not from observed abuse; Algorithm~\ref{alg:v1} marks where each opens. (A) The platform exemptions trust a client claim, so any request can send the header for iOS and skip the reCAPTCHA and origin checks. (B) Five requests per address assume that addresses are scarce; a residential proxy pool supplies a fresh address per request, nothing throttles a subnet or an autonomous system, and no client identity survives an address change. (C) A number is sent to without validation, so numbers that cannot exist, numbers on dead ranges and generated sequences cost the same as a real message. (D) The country allow-list is the only notion of destination cost; premium-rate and revenue-share prefixes inside an allowed country cost many times a standard message, and a pumper targets exactly those. (E) Every limit is per key, so a wide attack that stays under each cap burns the budget without bound; nothing watches total volume or spend. (F) A limit checks its counter and increments it as two operations, so two concurrent requests on different instances both pass. (G) The bulk and test paths skip checks but need no stronger authentication than a normal request, so a leaked flag is a bypass. (H) Every decision is pass or fail and the response names the control that refused, so an attacker can probe each threshold, stay under it, and enumerate registered numbers.
 
 \begin{algorithm}[!htb]
-\caption{The v1 baseline, as the evaluated pipeline applies it to a code request; each comment names the gap the preceding rule opens.}
+\caption{The v1 baseline; each comment names the gap the rule above it opens.}
 \label{alg:v1}
 \footnotesize
 \input{figures/alg1_v1_body}
@@ -192,12 +192,12 @@ Each control rests on an assumption that an attacker within the threat model of 
 
 \subsection{Threat model}
 \label{sec:threat}
-The attacker is a party that wants the service to send as many messages as possible, or as many as possible to numbers that pay it. The first is a flooder: the service pays per message, and the attacker's gain is the service's loss. The second is a pumper, paid a share of the termination fee by the operator that terminates its ranges; it earns nothing on any other number, so its traffic concentrates on the blocks it is paid for. The share is not public, so in Section~\ref{sec:adaptive} we report instead the share at which each scripted pumper breaks even. Figure~\ref{fig:threat} places the attacker on the path of a request: its two goals above the path, what it controls at each of the four points below it, and at the foot what it cannot do and what the model leaves out; the paragraphs that follow give the detail.
+The attacker is a party that wants the service to send as many messages as possible, or as many as possible to numbers that pay it. The first is a flooder: the service pays per message, and the attacker's gain is the service's loss. The second is a pumper, paid a share of the termination fee by the operator that terminates its ranges; it earns nothing on any other number, so its traffic concentrates on the blocks it is paid for. The share is not public, so in Section~\ref{sec:adaptive} we report instead the share at which each scripted pumper breaks even. Figure~\ref{fig:threat} places the two attackers on the path of a request: the flooder, whose aim is the service's SMS spend, and the pumper, who earns on its partner's ranges through the share of the termination fee that the dashed line carries back from the operator to the client. What each controls at the four points of the path, what neither can do, and what the model leaves out follow.
 
 \begin{figure*}[!t]
 \centering
-\includegraphics[width=0.92\textwidth]{fig9_threat_model}
-\caption{The Threat Model on the Path of a Request.}
+\includegraphics[width=0.94\textwidth]{fig9_threat_model.png}
+\caption{The two attackers on the path, and the fee that flows back to one of them.}
 \label{fig:threat}
 \end{figure*}
 
@@ -213,26 +213,26 @@ Figure~\ref{fig:arch} shows the implementation as deployed. An HTTP API, run on 
 
 \begin{figure*}[!t]
 \centering
-\includegraphics[width=0.96\textwidth]{fig12_architecture}
-\caption{Architecture of the Implementation.}
+\includegraphics[width=0.9\textwidth]{fig12_architecture.png}
+\caption{How the implementation fits together.}
 \label{fig:arch}
 \end{figure*}
 
 We designed the pipeline so that no message is paid for before every check passes, and cheap checks run first. Trust comes from evidence the client cannot forge, an attestation, a server-signed session, and the fate of earlier codes, though such evidence can be manufactured (Section~\ref{sec:adaptive}).
 
-A request passes the twelve steps of Figure~\ref{fig:steps} in order until one refuses it; the letters below are the gaps of Section~\ref{sec:baseline} that each step closes. Step~0 establishes the platform from an App Attest or Play Integrity result and refuses proxy addresses (A). Step~1 binds the request to a server-signed session with a fingerprint and a replay nonce, three requests per session per ten minutes (B). Step~2 throttles the address, its /24 and its autonomous system, with lower caps for hosting networks (B, F). Steps~3 and~4, for web requests only, check the reCAPTCHA score and the origin. Step~5 prices and checks the number before anything is paid for: its country and cost class, sequential or narrow-range bursts, liveness through an HLR lookup, and the verdict stage of its block, with the bulk flag now needing an internal credential (C, D, G). Step~6 validates the body and the exclusion list, the test flag needing a credential too (G). Step~7 computes the risk score of Equation~\eqref{eq:score} and chooses one of five tiers (H). Step~8 applies a per-number backoff, sixty seconds doubling to an hour and five sends a day. Step~9 takes the source caps per source, platform and country, multiplied by the adaptive factor. Step~10 sets the operating mode from the hourly budget, elevated above 80\% and emergency at 100\% (E). Step~11 reserves the hourly count, the spend and any destination slot in one atomic operation, writes the state and enqueues the message (E, H). A refusal at any step returns one uniform reply, and every send resolves through the feedback loop, whose per-key and per-block outcomes are what the next request is judged on.
+A request passes the twelve steps of Figure~\ref{fig:steps} in order until one refuses it. The figure numbers its stages in reading order: its stages 1 to 4 are Steps~0 to~4 of the text and of Algorithm~\ref{alg:v2}, with Steps~3 and~4 drawn as one stage, the web checks; from stage~5 on the two numberings coincide; and stage~12 is the feedback loop. The letters below are the gaps of Section~\ref{sec:baseline} that each step closes. Step~0 establishes the platform from an App Attest or Play Integrity result and refuses proxy addresses (A). Step~1 binds the request to a server-signed session with a fingerprint and a replay nonce, three requests per session per ten minutes (B). Step~2 throttles the address, its /24 and its autonomous system, with lower caps for hosting networks (B, F). Steps~3 and~4, for web requests only, check the reCAPTCHA score and the origin. Step~5 prices and checks the number before anything is paid for: its country and cost class, sequential or narrow-range bursts, liveness through an HLR lookup, and the verdict stage of its block, with the bulk flag now needing an internal credential (C, D, G). Step~6 validates the body and the exclusion list, the test flag needing a credential too (G). Step~7 computes the risk score of Equation~\eqref{eq:score} and chooses one of five tiers (H). Step~8 applies a per-number backoff, sixty seconds doubling to an hour and five sends a day. Step~9 takes the source caps per source, platform and country, multiplied by the adaptive factor. Step~10 sets the operating mode from the hourly budget, elevated above 80\% and emergency at 100\% (E). Step~11 reserves the hourly count, the spend and any destination slot in one atomic operation, writes the state and enqueues the message (E, H). A refusal at any step returns one uniform reply, and every send resolves through the feedback loop, whose per-key and per-block outcomes are what the next request is judged on.
 
 Algorithm~\ref{alg:v2} gives the same pipeline as we implemented it, with the feedback loop of Section~\ref{sec:feedback} and the block statistics of Section~\ref{sec:blocks} as its second procedure. Read against Algorithm~\ref{alg:v1}, it differs in four ways: the platform is established before anything else and from evidence, every limit is taken atomically and released on refusal, the number is priced and checked before it is paid for, and the outcome of each send flows back into the keys and the destination block that the next request will be judged on. Each limit and reservation is one atomic Redis operation, but the enclosing steps are not one transaction: on the normal path, a refused request returns its per-number claims and counter slot, and the hourly budget is reserved only for a message about to be enqueued, a reservation rather than a completed dispatch; a crash between them can leak reservations (Section~\ref{sec:method}). Address limits and source caps count requests, except that a request Step~11 challenges returns its source-cap count. Every outcome after Step~0, except the challenge, returns one HTTP~200 body after at least 400\,ms, a floor that cannot hide longer work.
 
 \begin{figure*}[!t]
 \centering
-\includegraphics[width=0.86\textwidth]{fig10_steps}
-\caption{The Twelve Steps of the Design and the Feedback Loop.}
+\includegraphics[width=0.84\textwidth]{fig10_steps.png}
+\caption{The twelve steps, and the loop that feeds the next request.}
 \label{fig:steps}
 \end{figure*}
 
 \begin{algorithm*}[!t]
-\caption{The v2 pipeline and its feedback loop, as implemented (release 2.9.0); the steps are those of Figure~\ref{fig:steps}.}
+\caption{The v2 pipeline and its feedback loop, as implemented.}
 \label{alg:v2}
 \footnotesize
 \input{figures/alg2_v2_body}
@@ -308,8 +308,8 @@ Figure~\ref{fig:method} summarizes how we evaluated the design. Our implementati
 
 \begin{figure*}[!t]
 \centering
-\includegraphics[width=0.92\textwidth]{fig11_method}
-\caption{The Evaluation Method: Inputs, Runs, Protocols and Metrics.}
+\includegraphics[width=0.86\textwidth]{fig11_method.png}
+\caption{How we evaluated the design.}
 \label{fig:method}
 \end{figure*}
 
@@ -322,7 +322,7 @@ We implemented the pipeline of Algorithm~\ref{alg:v2} in about 4\,000 lines of P
 We run the pipeline against scripted vendor fakes on a simulated clock, as Algorithm~\ref{alg:sim} sets out: every exogenous quantity of a request is drawn before the pipeline sees it, from one random stream for legitimate traffic and another for the attacker, so every scenario at a seed, the attack-free one included, offers the same users, and our comparisons between scenarios are paired. After a warm-up of ten minutes (30 or 130 for pumping), the attack runs over legitimate traffic at 20 requests per minute. Our simulated users verify 80\% of codes after a lognormal delay (median 22\,s; 2\,s for the 20\% using autofill); 70\% of numbers are reachable on WhatsApp; 90\% of users complete a challenge; 20\% are returning account holders with a stable fingerprint, a trusted number and verified history, so our results for returning users describe trusted identities only.
 
 \begin{algorithm*}[!t]
-\caption{One simulation run, as our evaluation harness executes it (\texttt{src/otp\_guard/evaluation/sim.py}, release 2.9.0); the pipeline it calls is Algorithm~\ref{alg:v2}.}
+\caption{One simulation run, as the harness executes it.}
 \label{alg:sim}
 \footnotesize
 \input{figures/alg3_sim_body}
@@ -331,7 +331,7 @@ We run the pipeline against scripted vendor fakes on a simulated clock, as Algor
 Three behavioral parameters have published counterparts: genuine conversion (one provider's 68\% or more~\citep{twilio_verify}; ours 60\%--90\%) and the never-converting destinations and identity churn of Section~\ref{sec:related}; the rest are our assumptions. Table~\ref{tab:attackers} groups the attacker profiles we scripted by capability and marks the destination policies each faced (S, sequential tests; C, counters; B, block-limit; parameters in \texttt{results/\allowbreak attacker\_profiles.md}). Attackers draw pool size, rate and CAPTCHA class per seed, which explains 92\% [80, 98] of the variance of the farm's leakage in a nested design (ten configurations, three seeds each). Brackets in the text and tables, and bars and bands in the figures, are 95\% percentile-bootstrap intervals over seeds, paired per seed for differences; they describe variation under our generator, not uncertainty about real traffic.
 
 \begin{table*}[!t]
-\caption{Attacker Profiles, Capabilities, and Policies.}
+\caption{The 25 attacker profiles, and the destination policies each one faced.}
 \label{tab:attackers}
 \footnotesize
 \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{12.4cm}l@{}}
@@ -366,7 +366,7 @@ We evaluate seven designs: \textbf{v1}, \textbf{v1-corrected} (attested platform
 \label{sec:rq1}
 
 \begin{table}[!t]
-\caption{Leakage and User Impact Across Designs.}
+\caption{What each design leaks, and what users pay for it.}
 \label{tab:headline}
 \footnotesize
 \setlength{\tabcolsep}{2.8pt}
@@ -408,7 +408,7 @@ When separation fails, the cap is the lever: over ten seeds, the default lets 47
 \label{sec:pumping}
 
 \begin{table*}[!t]
-\caption{Containment Results for Concentrated Pumping Attacks.}
+\caption{Concentrated pumping: how much leaks before the tests contain it.}
 \label{tab:pumping}
 \footnotesize
 \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lllllr@{}}
@@ -431,19 +431,19 @@ Across 18 spread configurations, leakage follows the blocks touched: with 30 blo
 \begin{figure*}[!t]
 \centering
 \includegraphics[width=0.82\textwidth]{fig6_matched_a}
-\caption{Leakage vs.\ Legitimate-User Completion Across Settings.}
+\caption{Each setting's leakage against the completion it costs.}
 \label{fig:matched}
 \end{figure*}
 
 \begin{figure*}[!t]
 \centering
 \includegraphics[width=0.72\textwidth]{fig6_matched_b}
-\caption{Leakage Difference from the Default Across Attack Types.}
+\caption{Each selected setting against the default tests, carrier by carrier.}
 \label{fig:matchedpaired}
 \end{figure*}
 
 \begin{table*}[!t]
-\caption{Leakage and Benign-User Impact Across Carrier Types.}
+\caption{Counting against testing at the service target.}
 \label{tab:matched}
 \footnotesize
 \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lrrrrrrrr@{}}
@@ -459,7 +459,7 @@ Setting (selected as) & NV & IV & HL & CB & Compl. & Benign & Chall. & Events \\
 Table~\ref{tab:matched} reports the first protocol at 200 blocks (144 legitimate sends per block a day; tuning seeds 100--102, evaluation seeds 0--9): 20-minute leakage against the never-verifying (NV), instant (IV), human-like (HL) and challenge-buying (CB) carriers and, from 24-hour attack-free runs at 65\% conversion, completion, benign cost (points), users challenged and verdict events a day; the tuning target is 63.95\%. Figure~\ref{fig:matched} plots each setting's completion against its leakage summed over the four pumpers' runs of a seed (not one combined attack), with the tuning target dotted. The figures name each setting by its rule, threshold and credit, so $T300$, $c0$ of Table~\ref{tab:matched} is the test with threshold 300 and no credit; the three points beside the default, one under its star, are sequential settings matched to the default's false alarms at other credits (key: \texttt{results/\allowbreak figure1\_key.md}). Figure~\ref{fig:matchedpaired} gives, carrier by carrier, each selected setting's leakage minus the default's, paired per seed (left of zero: leaks less than the default). The sequential setting selected at the tuning target holds the human-like carrier to 126 messages only by raising 334 false verdict events a day, and misses the target by 0.18 points on seeds 0--9. The graded counter of four sends per block per ten minutes leaks 24 against each outcome-reading carrier and 48 against the challenge buyer, at 0.06 points; counters selected at the sparser settings leak 6 to 18 at 0.15 to 0.35 points (up to 0.43 at 80\%). With the full grid and density-specific attacks (E5) the rule selects the same counters, and so do other objectives on the tuning runs (worst-case leakage, a first-time-loss constraint, each attacker alone, 2\,000 random mixes), except the instant verifier alone and 3 mixes at 200 blocks; on fresh seeds the counter leaked least of the winners against every attacker but the instant verifier (25, against 15 and 16). On seeds 300--309 the 1\,000-block counter falls 0.12 points below its target, yet no seed-and-conversion cell fails the paired check (the evaluation default minus 0.5 points).
 
 \begin{table*}[!t]
-\caption{Held-Out Evaluation of the Principal Counter.}
+\caption{The frozen counter on seeds and workloads it had never seen.}
 \label{tab:claims}
 \footnotesize
 \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}l>{\raggedright\arraybackslash}p{7.6cm}rr>{\raggedright\arraybackslash}p{4.6cm}@{}}
@@ -475,7 +475,7 @@ Claim & Statement & True / cells & IV & Result \\
 Table~\ref{tab:claims} covers 12 shifted points of the held-out family, with held-out attack rates and pools, three seeds each and a 20-minute pumper on three blocks real users share; a claim holds if true in 90\% of cells, which share workloads and seeds and are not independent, and IV marks the instant verifier's cells. Frozen and run on this family, the counter leaked 33, 34, 33, and 62 messages against the four carriers, where the default leaked 287, 36, 344, and 287, and no policy 451 to 1\,857, at a benign cost of 0.13 [0.09, 0.17] points, and failed both service-under-attack claims: 13 of the 17 cells that broke K3 lie at the three points with the most legitimate traffic, where users and pumper compete for one quota; K5 failed in 51 cells over 11 of 12 points. The counters selected for sparser traffic cost 4.7 and 5.8 points here even without an attack: the quota must match the traffic.
 
 \begin{table*}[!t]
-\caption{Leakage and User Harm Under Shared-Block Pumping.}
+\caption{A pumper on blocks that real users share: what leaks and who pays.}
 \label{tab:attacked}
 \footnotesize
 \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lrrrrrr@{}}
@@ -492,7 +492,7 @@ Policy & (SMS) & ($\approx$1\,200) & blocks ($\approx$18) & & blocks & users \\
 \end{table*}
 
 \begin{table}[!htb]
-\caption{User Harm Under a Full-Block Poisoning Attack.}
+\caption{A poisoner on every block: what users lose.}
 \label{tab:poisoner}
 \footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -517,7 +517,7 @@ Figures~\ref{fig:boundarya}--\ref{fig:boundaryc} show the counter's operating bo
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=\columnwidth]{fig7a_service}
-\caption{Service Boundary of the Counter: the Hot Blocks' Users.}
+\caption{What the counter costs the users of a busy block.}
 \label{fig:boundarya}
 \end{figure}
 
@@ -526,14 +526,14 @@ Figures~\ref{fig:boundaryb} and~\ref{fig:boundaryc} plot leakage in 20 and 60 mi
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=\columnwidth]{fig7b_security20}
-\caption{Security Boundary of the Counter: a 20-Minute Attack.}
+\caption{Leakage against the blocks a pumper spreads over, in twenty minutes.}
 \label{fig:boundaryb}
 \end{figure}
 
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=\columnwidth]{fig7c_security60}
-\caption{Security Boundary of the Counter: a 60-Minute Attack.}
+\caption{The same, over an hour.}
 \label{fig:boundaryc}
 \end{figure}
 
@@ -568,7 +568,7 @@ In the scripted workloads, carriers that verify with human-like delay, fake rece
 Table~\ref{tab:designs} sets the seven designs of Section~\ref{sec:method} against the nine source-side attackers on the same traffic and seeds, with source caps lifted so that only the behavioral layers act (intervals in supplementary Table~S1). Each design adds one thing to the baseline, and the table says what it bought. Correcting the platform header alone (v1-corrected) changed only the forged-header attack, from 100\% to 99.5\%: that attacker is the farm with a header, and the header was never what held it. Sessions and a hard budget (budget-only) removed the single client's leakage (5.6\% to 0.3\%) and cut the premium pumper's from 99.4\% to 94.9\%, nothing else. A refusing counter of five sends per block a day (block-limit) held the premium pumper and the walked numbers to 1\%, the two attacks that concentrate on a few blocks, and left the rest where v1 had them. The behavioral layers of v2, with either block test, were what removed datacenter rotation (69\% to 0) and most of the reused profile (99.5\% to 22.5\%); the conversion and speed tests differ only on the walked numbers (11.5\% against 13.3\%). No design in the table separates the residential bot (37.2\%) or the farm (99.5\%): those are held only by the adaptive caps of Table~\ref{tab:headline}, at the price Section~\ref{sec:rationing} reports. On the destination, the in-study benchmarks are the no-policy and default arms of Tables~\ref{tab:pumping}, \ref{tab:matched} and~\ref{tab:attacked}: against the never-verifying pumper v1 leaked 570 messages, the default tests 90 and the selected counter 24, and under the shared-block pumper of Table~\ref{tab:attacked} the counter leaked 403 messages where the default tests leaked 1\,149 and no policy 5\,509, neither policy costing all users anything on average.
 
 \begin{table}[!t]
-\caption{In-Study Benchmarks: Leaked Share of Attack Requests by Design, Caps Lifted.}
+\caption{Every design against every source-side attacker, caps lifted.}
 \label{tab:designs}
 \footnotesize
 \setlength{\tabcolsep}{2.5pt}

@@ -40,9 +40,9 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   (`fig12_architecture.tex`); the evaluation method is a figure (`fig11_method.tex`) and one
   simulation run, as `evaluation/sim.py` executes it, is Algorithm 3 (`alg3_sim_body.tex`). Final
   revision 8 numbering: Tables 1-9, Figures 1-10, Algorithms 1-3; `results/study_map.md` uses it.
-  Figures 1 to 5 are drawn in one coloured style (`paper/figures/figstyle.tex`, Font Awesome Free icons
-  in `paper/figures/icons/`), Figure 1 after the author's redesign, with a line of text per element and
-  the detail in the text; Figures 6 and 7 name every setting in plain words.
+  Figures 1 to 5 are the author's own drawings (`paper/figures/fig8_defense_path.png`, `fig9_threat_model.png`,
+  `fig12_architecture.png`, `fig10_steps.png`, `fig11_method.png`), with the detail in the paragraph before
+  each figure; Figures 6 and 7 name every setting in plain words; every caption is a short plain sentence.
 
 ## 2.9.0 (2026-10-05)
 

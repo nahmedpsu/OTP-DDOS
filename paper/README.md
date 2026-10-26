@@ -10,19 +10,18 @@ the `docx` package). Earlier letters are kept as `rebuttal*.js` / `.docx`.
 
 `figures.py` draws every figure of the manuscript from the recorded results, nothing else. File names keep the
 numbering of revision 4; the first column gives the figure's number in the current manuscript. Figures 1 to 5 are
-hand-drawn TikZ figures in one style (`figures/figstyle.tex`: coloured stage boxes, one line of text each, icons
-from Font Awesome Free, CC BY 4.0, rendered to `figures/icons/` by `figures/icons/make_icons.py`); what each
-element means is explained in the text where the figure is cited, not inside the figure.
+the author's own drawings (PNG, a word or two per element); the paragraph before each figure explains what it
+shows, so the figures carry no detail of their own.
 
 | Figure in revision 8 | Input | Output |
 |---|---|---|
-| 1. The path of an OTP request and its two loops (Section 2); the author's redesign, drawn as vector graphics | none (drawn by hand) | `paper/figures/fig8_defense_path.tex` → `fig8_defense_path.{pdf,png}` |
-| 2. The threat model on the path of a request (Section 3.2) | none (drawn by hand) | `paper/figures/fig9_threat_model.tex` → `fig9_threat_model.{pdf,png}` |
-| 3. Architecture of the implementation (Section 3.3) | none (drawn by hand, from `src/otp_guard`) | `paper/figures/fig12_architecture.tex` → `fig12_architecture.{pdf,png}` |
-| 4. The twelve steps and the feedback loop (Section 3.3) | none (drawn by hand) | `paper/figures/fig10_steps.tex` → `fig10_steps.{pdf,png}` |
+| 1. The path of an OTP request, and where the money goes (Section 2) | none (the author's drawing) | `paper/figures/fig8_defense_path.png` |
+| 2. The two attackers on the path of a request (Section 3.2) | none (the author's drawing) | `paper/figures/fig9_threat_model.png` |
+| 3. How the implementation fits together (Section 3.3) | none (the author's drawing, after `src/otp_guard`) | `paper/figures/fig12_architecture.png` |
+| 4. The twelve steps and the feedback loop (Section 3.3; the figure's stages are numbered 1 to 12 in reading order, the text's Steps 0 to 11) | none (the author's drawing) | `paper/figures/fig10_steps.png` |
 | Algorithm 1. The v1 baseline (Section 3.1) | none | `paper/figures/alg1_v1_body.tex`, included by `main.tex`; `alg1_v1.tex` renders it for the Word version |
 | Algorithm 2. The v2 pipeline and its feedback loop (Section 3.3) | none | `paper/figures/alg2_v2_body.tex`, included by `main.tex`; `alg2_v2.tex` renders it for the Word version |
-| 5. The evaluation method: inputs, runs, protocols and metrics (Section 4) | none (drawn by hand) | `paper/figures/fig11_method.tex` → `fig11_method.{pdf,png}` |
+| 5. How we evaluated the design (Section 4) | none (the author's drawing) | `paper/figures/fig11_method.png` |
 | Algorithm 3. One simulation run (Section 4.2) | none | `paper/figures/alg3_sim_body.tex`, included by `main.tex`; `alg3_sim.tex` renders it for the Word version |
 | artifact only. Leakage by attacker, v1 against v2, caps lifted and caps on, with legitimate completion | `results/evaluation.json` → `multi_seed` | `paper/figures/fig1_leakage.{png,svg,pdf}` |
 | artifact only. Ablation: leaked SMS relative to the full design, one layer removed at a time (paired, same seeds) | `multi_seed`, `ablation` | `paper/figures/fig2_ablation.{png,svg,pdf}` |
