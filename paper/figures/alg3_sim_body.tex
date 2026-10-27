@@ -1,26 +1,27 @@
 % One simulation run (Section IV-B), as src/otp_guard/evaluation/sim.py executes it (release 2.9.0).
 % Shared by main.tex (Algorithm 3) and the standalone alg3_sim.tex that renders it for the Word version.
+% The streams, the drawn request, the timed events and the run record are explained in Section IV-B.
 \begin{algorithmic}[1]
-\Require design $d$, attacker profile $a$, legitimate-traffic specification $\ell$, seed $z$, attack minutes $T$, warm-up minutes $W$
-\Ensure the run record $R$
-\State $(\mathrm{rng}_\ell, \mathrm{rng}_w, \mathrm{rng}_p) \gets \textsc{Streams}(z)$ \Comment{users, attacker, challenge outcomes; the same $z$ offers the same users to every scenario}
-\State $P \gets \textsc{BuildPipeline}(d)$ on the in-memory store with vendor fakes; \textsc{SeedReturningUsers}$(P, 0.2)$
-\State $E \gets \emptyset$; $\mathrm{leaked}, \mathrm{offered} \gets$ empty arrays \Comment{$E$: timed events (receipts, code entries, resends)}
+\Require design $d$, attacker $a$, legitimate traffic $\ell$, seed $z$, attack minutes $T$, warm-up minutes $W$
+\Ensure run record $R$
+\State $(\mathrm{rng}_\ell, \mathrm{rng}_a, \mathrm{rng}_c) \gets \textsc{Streams}(z)$
+\State $P \gets \textsc{BuildPipeline}(d)$;\ \textsc{SeedReturningUsers}$(P, 0.2)$
+\State $E \gets \emptyset$;\ $\mathrm{leaked}, \mathrm{offered} \gets \mathbf{0}_T$
 \For{$m \gets -W$ \textbf{to} $T - 1$}
-  \State $n_\ell \sim \mathrm{Poisson}(\ell.\mathrm{rate})$ from $\mathrm{rng}_\ell$; \ $n_a \sim \mathrm{Poisson}(a.\mathrm{rate})$ from $\mathrm{rng}_w$ if $m \ge 0$, else $0$
-  \State $A \gets$ the $n_\ell + n_a$ arrivals with times drawn inside minute $m$, sorted by time
+  \State $n_\ell \sim \mathrm{Poisson}(\lambda_\ell)$;\ $n_a \sim \mathrm{Poisson}(\lambda_a)\,[m \ge 0]$
+  \State $A \gets \textsc{Arrivals}(n_\ell, n_a, m)$ sorted by time
   \ForAll{$(t, \mathrm{kind}) \in A$}
-    \State \textsc{ApplyEvents}$(E, t)$; $\mathrm{clock} \gets t$
-    \State $q \gets \textsc{DrawRequest}(\mathrm{kind})$ \Comment{identity, address, number, CAPTCHA scores, delays and whether the person would verify, all drawn in advance}
-    \State $r \gets P.\textsc{ProcessRequest}(q)$ \Comment{\algvtwo{}}
-    \If{$r$ = challenge \textbf{and} $q$ solves it} $r \gets P.\textsc{ProcessRequest}(q \,\|\, \mathrm{solution})$ \EndIf
-    \If{$r$ sent an SMS}
-      \State push onto $E$ a receipt at $t + \mathrm{queue} + \mathrm{delivery}$ and, if $q$ verifies, a code entry after its delay
+    \State \textsc{ApplyEvents}$(E, t)$
+    \State $q \gets \textsc{DrawRequest}(\mathrm{kind})$;\ $y \gets P.\textsc{ProcessRequest}(q)$
+    \If{$y = \mathrm{challenge}$ \textbf{and} $q.\mathrm{solves}$}
+      \State $y \gets P.\textsc{ProcessRequest}(q \,\|\, \mathrm{solution})$
     \EndIf
+    \If{$y = \mathrm{sent}$} $E \gets E \cup \{\mathrm{receipt}(q), \mathrm{entry}(q)\}$ \EndIf
   \EndFor
-  \State \textsc{ApplyEvents}$(E, \mathrm{end}(m))$; $P.\textsc{ResolveTimeouts}()$; $P.\textsc{AdaptiveJob}()$ at its cadence
-  \If{$m \ge 0$} $\mathrm{leaked}[m] \gets$ SMS sent to $a$ in minute $m$; $\mathrm{offered}[m] \gets n_a$ \EndIf
+  \State \textsc{ApplyEvents}$(E, \mathrm{end}(m))$;\ $P.\textsc{ResolveTimeouts}()$
+  \State $P.\textsc{AdaptiveJob}()$
+  \If{$m \ge 0$} $\mathrm{leaked}[m] \gets \textsc{SentTo}(a, m)$;\ $\mathrm{offered}[m] \gets n_a$ \EndIf
 \EndFor
-\State \textsc{ApplyEvents}$(E, \mathrm{horizon})$ \Comment{drain: receipt grace, resolution timeout, the slowest entry and a resend}
-\State \Return $R \gets$ (leaked, offered, containment; each user's funnel by cohort; verdict events; the attacker's verifications, challenges solved and bill; $d$, $a$, $\ell$, $z$, the workload digest and the code hash)
+\State \textsc{ApplyEvents}$(E, \infty)$
+\State \Return $R \gets (\mathrm{leaked}, \mathrm{offered}, \textsc{Funnels}(P), \textsc{Events}(P), d, a, \ell, z)$
 \end{algorithmic}

@@ -1,28 +1,31 @@
 % The v2 pipeline (Section III-C) and its feedback loop (Section III-D), as implemented in src/otp_guard/pipeline.py
-% and feedback.py (release 2.9.0), in plain words. Shared by main.tex (Algorithm 2) and the standalone alg2_v2.tex for Word.
+% and feedback.py (release 2.9.0). Shared by main.tex (Algorithm 2) and the standalone alg2_v2.tex for Word.
+% Each line of ProcessRequest is one step of Figure 4; the symbols, limits and constants are explained in Section III-C.
 \begin{algorithmic}[1]
-\Procedure{ProcessRequest}{$r$} \Comment{a refusal releases every claim taken so far}
-\State establish the platform from the app attestation; refuse a proxy address or an invalid attestation \Comment{Step 0}
-\State refuse unless $r$ carries a valid signed session bound to its fingerprint, with at most 3 requests in 10 min \Comment{Step 1}
-\State refuse a denylisted fingerprint or address; take one slot each for the address, its /24 and its ASN \Comment{Step 2}
-\State \textbf{if} $r$ is a web request \textbf{then} refuse a low reCAPTCHA score or a foreign origin \Comment{Steps 3--4}
-\State check the number before paying for it: refuse a country off the allow-list, a premium prefix or a dead number; note sequential bursts and VoIP; read the verdict stage $v$ of its block \Comment{Step 5}
-\State refuse an invalid body or an excluded number; the bulk and test flags need an internal credential \Comment{Step 6}
-\State $s \gets$ \scoreeq; $t \gets \textsc{Tier}(s)$; for a client without verified history, raise $t$ to challenge if $v = 1$ and to downgrade if $v = 2$ \Comment{Step 7}
-\State \textbf{if} $t$ = block \textbf{then refuse}; \textbf{if} $t$ = challenge \textbf{then return} the challenge \Comment{a solved one scores $-20$ on retry}
-\State take the number's backoff slot: 60\,s doubling to 1\,h, five sends a day \Comment{Step 8}
-\State take the source caps, scaled by the adaptive multiplier \Comment{Step 9}
-\State set the operating mode from the hourly budget: elevated above 80\%, emergency at 100\% \Comment{Step 10}
-\State reserve the hourly count, the spend and the block's counter slot in one operation; past the quota, raise $t$ for a client without verified history \Comment{Step 11}
-\State send by SMS, or by push or WhatsApp if $t$ = downgrade, after a wait if $t$ = delay; write the state
-\State \Return one uniform body after at least 400\,ms \Comment{the same body for sent, dropped and refused}
+\Require request $r$; the store $S$
+\Ensure one uniform reply, after a send, a downgrade, a delay or a refusal
+\Procedure{ProcessRequest}{$r$}
+\State $p \gets \textsc{Attest}(r)$;\ \textbf{if} $p = \bot$ \textbf{or} $r.\mathrm{address} \in \mathcal{V}$ \textbf{then} \Return \textsc{Refuse}$()$
+\State \textbf{if} $\neg\textsc{ValidSession}(r)$ \textbf{or} $n_{\mathrm{sess}}[r.\mathrm{session}] \ge 3$ \textbf{then} \Return \textsc{Refuse}$()$
+\State \textbf{if} $\textsc{Denylisted}(r)$ \textbf{or} $\neg\textsc{Take}(r.\mathrm{address}, r.\mathrm{/24}, r.\mathrm{ASN})$ \textbf{then} \Return \textsc{Refuse}$()$
+\State \textbf{if} $p = \mathrm{web}$ \textbf{and} ($\mathrm{score}(r) < \theta_w$ \textbf{or} $\mathrm{origin}(r) \notin \mathcal{O}$) \textbf{then} \Return \textsc{Refuse}$()$
+\State $(c, \mathrm{live}, v) \gets \textsc{CheckNumber}(r.\mathrm{number})$;\ \textbf{if} $\neg\mathrm{live}$ \textbf{or} $c \in \{\text{off-list}, \text{premium}\}$ \textbf{then} \Return \textsc{Refuse}$()$
+\State \textbf{if} $\neg\textsc{ValidBody}(r)$ \textbf{or} $r.\mathrm{number} \in \mathcal{X}$ \textbf{or} $((r.\mathrm{bulk} \lor r.\mathrm{test}) \land \neg r.\mathrm{credential})$ \textbf{then} \Return \textsc{Refuse}$()$
+\State $s \gets$ \scoreeq;\ $t \gets \textsc{Tier}(s, v, r.\mathrm{history})$
+\State \textbf{if} $t = \mathrm{block}$ \textbf{then} \Return \textsc{Refuse}$()$;\ \textbf{if} $t = \mathrm{challenge}$ \textbf{then} \Return \textsc{Challenge}$()$
+\State \textbf{if} $\neg\textsc{Take}(\mathrm{backoff}[r.\mathrm{number}])$ \textbf{then} \Return \textsc{Refuse}$()$
+\State \textbf{if} $\neg\textsc{Take}(m \cdot K[r.\mathrm{source}, p, \mathrm{country}(r.\mathrm{number})])$ \textbf{then} \Return \textsc{Refuse}$()$
+\State $\mathrm{mode} \gets \textsc{Mode}(\mathrm{budget})$;\ \textbf{if} $\mathrm{mode} = \mathrm{emergency}$ \textbf{then} \Return \textsc{Refuse}$()$
+\State $(\mathrm{ok}, g) \gets \textsc{Reserve}(\mathrm{count}, \mathrm{spend}, \mathrm{slot}[r.\mathrm{block}])$;\ \textbf{if} $\neg\mathrm{ok}$ \textbf{then} \Return \textsc{Refuse}$()$
+\State $t \gets \textsc{Raise}(t, g, r.\mathrm{history})$;\ \textbf{if} $t = \mathrm{challenge}$ \textbf{then} \Return \textsc{Challenge}$()$
+\State \textsc{Dispatch}$(r, t)$;\ \textsc{Write}$(S)$
+\State \Return \textsc{Reply}$()$
 \EndProcedure
 \Statex
-\Procedure{OnOutcome}{send, outcome} \Comment{verified, failed or undelivered; applied once per transition}
-\State count the outcome on every key of the send: address, /24, ASN, fingerprint, session, country, prefix and number
-\State denylist a fine key for 24\,h once it has 50 resolved sends and fewer than 10\% verified
-\State \textbf{if} verified \textbf{then} mark the number trusted \Comment{verified history exempts a client from both destination policies}
-\State update the block's conversion statistic, and on a verification its speed statistic, each floored at $-ch$
-\State \textbf{if} either statistic crosses $h$ \textbf{then} issue a verdict for 1\,h (stage 1, or stage 2 if one is active) and reset both
+\Procedure{OnOutcome}{$x$, $o$}
+\ForAll{$k \in \mathrm{keys}(x)$} $n_k \gets n_k + 1$;\ $v_k \gets v_k + [o = \mathrm{verified}]$;\ \textbf{if} $n_k \ge 50$ \textbf{and} $v_k < 0.1\, n_k$ \textbf{then} \textsc{Denylist}$(k, 24\,\mathrm{h})$ \EndFor
+\State \textbf{if} $o = \mathrm{verified}$ \textbf{then} $\mathrm{trusted}[x.\mathrm{number}] \gets \mathrm{true}$
+\State $b \gets x.\mathrm{block}$;\ $S_c[b] \gets \max(-ch,\, S_c[b] + \delta_c(o))$;\ \textbf{if} $o = \mathrm{verified}$ \textbf{then} $S_s[b] \gets \max(-ch,\, S_s[b] + \delta_s(x))$
+\State \textbf{if} $S_c[b] > h$ \textbf{or} $S_s[b] > h$ \textbf{then} \textsc{Verdict}$(b, 1\,\mathrm{h})$;\ $S_c[b], S_s[b] \gets 0$
 \EndProcedure
 \end{algorithmic}

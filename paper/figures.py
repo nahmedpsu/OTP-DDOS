@@ -528,76 +528,94 @@ def fig7_counter_boundary(CS, out, runs_path=ROOT / "results" / "counter_study_r
     save(fig, out, "fig7_counter_boundary", tight=False)
 
 
+def plain(ax):
+    """The plain style of the boundary figures: white, four spines, a faint grid, legend inside the axes."""
+    ax.set_facecolor("white")
+    ax.grid(True, color="#d9d9d9", linewidth=0.6, linestyle="-"); ax.set_axisbelow(True)
+    for sp in ax.spines.values():
+        sp.set_color("black"); sp.set_linewidth(0.8)
+    ax.tick_params(colors="black", labelsize=9, direction="out")
+
+
 def fig7_panels(CS, out, runs_path=ROOT / "results" / "counter_study_runs.jsonl.gz", cond_path=None):
-    """The three panels of fig7_counter_boundary as separate column-width figures (fig7a_service,
-    fig7b_security20, fig7c_security60), drawn from the same data with the same markers, lines and
-    intervals, each with its own legend, so that each can be set next to the paragraph that discusses
-    it. Drawn at 4.3 in and printed at the column width (3.5 in): 11 pt text prints at about 9 pt."""
+    """The counter's operating boundary (results/counter_study.json, E4) as three plain column-width
+    figures: fig7a_service, the hot blocks' users' attributable loss against their legitimate rate,
+    attack-free and under a pumper on the same blocks; fig7b_security20, leakage in 20 minutes against
+    the blocks a pumper spreads over, at full rate and paced to the quota; fig7c_security60, leakage in
+    60 minutes at full rate against the estimates of Equations 2-4 (results/condition_check.json).
+    Means over five seeds; the error bars are the recorded 95 % bootstrap intervals. The legends name
+    the series in words; the conditions they share are stated in the text that cites each figure."""
     E4 = CS["E4"]
     cond = json.loads(pathlib.Path(cond_path).read_text()) if cond_path and pathlib.Path(cond_path).exists() else None
+    POL = {"none": ("no destination policy", "black", "o"), "sequential T1000 c1": ("sequential tests (default)", "tab:blue", "s"),
+           "counter graded 4/10 min": ("counter, 4 per 10 min", "tab:green", "^")}
     # (a) service
-    fig, ax = plt.subplots(figsize=(4.6, 4.1))
-    style(ax)
-    ax.tick_params(labelsize=10)
+    fig, ax = plt.subplots(figsize=(4.6, 3.4))
+    plain(ax)
     rates = sorted({float(k.split("|")[0]) for k in E4["service"]})
-    for pol, col in (("counter graded 4/10 min", C["green"]), ("sequential T1000 c1", C["blue"])):
-        for cnd, ls in (("benign", "--"), ("attacked", "-")):
+    for pol in ("counter graded 4/10 min", "sequential T1000 c1"):
+        lab, col, mk = POL[pol]
+        for cnd, ls, word in (("benign", "--", "no attack"), ("attacked", "-", "pumper on the block")):
             ys, lo, hi = [], [], []
             for r in rates:
                 key = f"{r:g}|0.7|{cnd}|{pol}"
                 key = key if key in E4["service"] else f"{r}|0.7|{cnd}|{pol}"
                 g = (E4["service"][key]["attributable_loss_vs_none"] or {}).get("hot_block", {}).get("net_lost_pct_of_group", (0, 0, 0, 0))
                 ys.append(g[0]); lo.append(g[1]); hi.append(g[2])
-            ax.plot(rates, ys, color=col, linestyle=ls, marker="o", markersize=5.5, linewidth=1.8,
-                    label=f"{'counter' if 'counter' in pol else 'tests'}, {'attack-free' if cnd == 'benign' else 'with pumper'}")
-            ax.fill_between(rates, lo, hi, color=col, alpha=0.12, linewidth=0)
-    ax.axvline(4, color=INK2, linestyle=":", linewidth=1.2)
-    ax.annotate("quota: 4 per 10 min", (4, ax.get_ylim()[0]), textcoords="offset points", xytext=(-4, 6), fontsize=9.5, color=INK, ha="right")
+            ax.errorbar(rates, ys, yerr=[[y - l for y, l in zip(ys, lo)], [h - y for y, h in zip(ys, hi)]], color=col, linestyle=ls,
+                        marker=mk, markersize=4.5, linewidth=1.3, capsize=2, elinewidth=0.8, markerfacecolor=col if cnd == "attacked" else "white",
+                        label=f"{lab.split(' (')[0]}, {word}")
+    ax.axvline(4, color="black", linestyle=":", linewidth=1.0, label="the counter's quota")
+    ax.axhline(0, color="black", linewidth=0.6)
     ax.set_xscale("log"); ax.set_xticks(rates); ax.set_xticklabels([f"{r:g}" for r in rates])
     ax.xaxis.set_minor_formatter(NullFormatter())
-    ax.set_xlabel("legitimate sends per hot block per 10 min (log scale)", color=INK, fontsize=10)
-    ax.set_ylabel("completions lost, pp\nof the hot blocks' users", color=INK, fontsize=10)
-    fig.legend(frameon=False, fontsize=9, loc="upper left", ncol=2, columnspacing=1.2, handlelength=1.8, bbox_to_anchor=(0.02, 0.17),
-               title="Mean over five seeds, 95 % interval; 70 % of users on WhatsApp", title_fontsize=9, alignment="left")
-    fig.subplots_adjust(left=0.17, right=0.98, top=0.97, bottom=0.33)
+    ax.set_xlabel("legitimate sends per block per 10 min", fontsize=9)
+    ax.set_ylabel("completions lost by the block's users (points)", fontsize=9)
+    h, l = ax.get_legend_handles_labels()
+    ax.legend(h[1:] + h[:1], l[1:] + l[:1], loc="upper left", fontsize=7.5, frameon=True, framealpha=1, edgecolor="#bbbbbb", handlelength=2.2)
+    fig.subplots_adjust(left=0.13, right=0.98, top=0.97, bottom=0.15)
     save(fig, out, "fig7a_service", tight=False)
-    # (b), (c) security
+    # (b) 20 minutes: measured, at full rate and paced to the quota
     blocks = sorted({int(k.split("|")[0]) for k in E4["security"]})
-    for name, mins in (("fig7b_security20", 20), ("fig7c_security60", 60)):
-        fig, ax = plt.subplots(figsize=(4.6, 5.2))
-        style(ax)
-        ax.tick_params(labelsize=10)
-        measured, estimated = [], []
-        for pol, col in (("none", INK2), ("sequential T1000 c1", C["blue"]), ("counter graded 4/10 min", C["green"])):
-            for kind, mk in (("spreading, never verifies", "o"), ("quota-aware", "s")):
-                v = [E4["security"][f"{b}|{kind}|{mins}|{pol}"]["leaked_total"] for b in blocks]
-                h = ax.errorbar(blocks, [x[0] for x in v], yerr=[[x[0] - x[1] for x in v], [x[2] - x[0] for x in v]], color=col,
-                                marker=mk, markersize=5.5, linewidth=1.8, linestyle="-" if mk == "o" else "--", capsize=2,
-                                elinewidth=0.9, label=f"{ {'none': 'no policy', 'sequential T1000 c1': 'tests'}.get(pol, 'counter')}, "
-                                                      f"{'full rate' if mk == 'o' else 'paced to the quota'}")
-                measured.append(h)
-        if cond:
-            cells = {c["blocks"]: c for c in cond["cells"] if c["minutes"] == mins and c["pumper"] == "spreading, never verifies"}
-            for key, col, lab, mk, ls in (("tests_estimate", C["blue"], "Eq. 2: tests", "D", ":"),
-                                          ("counter_cold", C["green"], "Eq. 3: counter, cold", "^", ":"),
-                                          ("counter_warm", C["orange"], "Eq. 4: counter, warm", "v", "-.")):
-                h, = ax.plot(blocks, [cells[b][key] for b in blocks], color=col, linestyle=ls, linewidth=1.4, marker=mk, markersize=7.5,
-                             markerfacecolor="none", markeredgewidth=1.4, label=lab)
-                estimated.append(h)
+
+    def series(ax, pol, kind, mins, ls, fill, label):
+        lab, col, mk = POL[pol]
+        v = [E4["security"][f"{b}|{kind}|{mins}|{pol}"]["leaked_total"] for b in blocks]
+        ax.errorbar(blocks, [x[0] for x in v], yerr=[[x[0] - x[1] for x in v], [x[2] - x[0] for x in v]], color=col, marker=mk,
+                    markersize=4.5, linewidth=1.3, linestyle=ls, capsize=2, elinewidth=0.8, markerfacecolor=col if fill else "white", label=label)
+
+    def axes_log(ax, mins):
         ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xticks(blocks); ax.set_xticklabels([str(b) for b in blocks])
         ax.xaxis.set_minor_formatter(NullFormatter())
-        ax.set_xlabel("blocks the pumper uses (log)", color=INK, fontsize=10)
-        ax.set_ylabel(f"SMS leaked in {mins} min (log)", color=INK, fontsize=10)
-        order = [0, 2, 4, 1, 3, 5]
-        l1 = fig.legend(handles=[measured[i] for i in order], frameon=False, fontsize=8.5, loc="upper left", ncol=2,
-                        bbox_to_anchor=(0.02, 0.235), title="Measured (filled markers): mean over five seeds, 95 % interval",
-                        title_fontsize=8.5, alignment="left", columnspacing=1.0, handlelength=2.0, labelspacing=0.25)
-        fig.legend(handles=estimated, frameon=False, fontsize=8.5, loc="upper left", ncol=2, bbox_to_anchor=(0.02, 0.105),
-                   title="Estimated for the full-rate pumper (hollow markers), per run", title_fontsize=8.5,
-                   alignment="left", columnspacing=1.0, handlelength=2.0, labelspacing=0.25)
-        fig.add_artist(l1)
-        fig.subplots_adjust(left=0.16, right=0.98, top=0.98, bottom=0.38)
-        save(fig, out, name, tight=False)
+        ax.set_xlabel("blocks the pumper spreads over", fontsize=9)
+        ax.set_ylabel(f"SMS leaked in {mins} minutes", fontsize=9)
+
+    fig, ax = plt.subplots(figsize=(4.6, 3.4))
+    plain(ax)
+    for pol in ("none", "sequential T1000 c1", "counter graded 4/10 min"):
+        series(ax, pol, "spreading, never verifies", 20, "-", True, f"{POL[pol][0]}, pumper at full rate")
+    for pol in ("sequential T1000 c1", "counter graded 4/10 min"):
+        series(ax, pol, "quota-aware", 20, "--", False, f"{POL[pol][0]}, pumper paced to the quota")
+    axes_log(ax, 20)
+    ax.legend(loc="lower right", fontsize=7.5, frameon=True, framealpha=1, edgecolor="#bbbbbb", handlelength=2.4)
+    fig.subplots_adjust(left=0.13, right=0.98, top=0.97, bottom=0.15)
+    save(fig, out, "fig7b_security20", tight=False)
+    # (c) 60 minutes: measured at full rate, against the estimates from the rules
+    fig, ax = plt.subplots(figsize=(4.6, 3.4))
+    plain(ax)
+    for pol in ("none", "sequential T1000 c1", "counter graded 4/10 min"):
+        series(ax, pol, "spreading, never verifies", 60, "-", True, f"{POL[pol][0]}, measured")
+    if cond:
+        cells = {c["blocks"]: c for c in cond["cells"] if c["minutes"] == 60 and c["pumper"] == "spreading, never verifies"}
+        for key, col, lab, mk, ls in (("tests_estimate", "tab:blue", "tests, estimate from the rules (Eq. 2)", "D", ":"),
+                                      ("counter_cold", "tab:green", "counter, cold-start bound (Eq. 3)", "v", ":"),
+                                      ("counter_warm", "tab:red", "counter, warm-start bound (Eq. 4)", "x", "-.")):
+            ax.plot(blocks, [cells[b][key] for b in blocks], color=col, linestyle=ls, linewidth=1.2, marker=mk, markersize=6,
+                    markerfacecolor="white", markeredgewidth=1.2, label=lab)
+    axes_log(ax, 60)
+    ax.legend(loc="lower right", fontsize=7.5, frameon=True, framealpha=1, edgecolor="#bbbbbb", handlelength=2.4)
+    fig.subplots_adjust(left=0.13, right=0.98, top=0.97, bottom=0.15)
+    save(fig, out, "fig7c_security60", tight=False)
 
 
 def main():
@@ -612,14 +630,14 @@ def main():
     for fn in (fig1_leakage, fig2_ablation, fig3_dilution, fig4_tradeoff, fig5_spread):
         fn(R, out)
         print("wrote", fn.__name__)
-    for fn in (fig6_matched,):
+    for fn in (fig6_matched,):                              # artifact only since revision 8 (Table 5 carries the comparison)
         fn(R, out, pathlib.Path(a.results) / "evaluation_runs.jsonl.gz")
-        print("wrote", fn.__name__)
+        print("wrote", fn.__name__, "(artifact only)")
     cs = pathlib.Path(a.results) / "counter_study.json"
     if cs.exists():
         fig7_counter_boundary(json.loads(cs.read_text()), out, pathlib.Path(a.results) / "counter_study_runs.jsonl.gz",
                               pathlib.Path(a.results) / "condition_check.json")
-        print("wrote fig7_counter_boundary")
+        print("wrote fig7_counter_boundary (artifact only)")
         fig7_panels(json.loads(cs.read_text()), out, pathlib.Path(a.results) / "counter_study_runs.jsonl.gz",
                     pathlib.Path(a.results) / "condition_check.json")
         print("wrote fig7a_service, fig7b_security20, fig7c_security60")
