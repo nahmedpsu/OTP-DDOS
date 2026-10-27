@@ -37,6 +37,11 @@ shows, so the figures carry no detail of their own.
 | 6, 7, 8. The destination counter's operating boundary, three plain column-width line charts with the legend inside the axes: loss among hot-block users against the legitimate rate on those blocks, attack-free and under a pumper (6); leakage in 20 minutes against the pumper's spread, at full rate and paced to the quota (7); leakage in 60 minutes at full rate against the counter's bounds (Equations 3 and 4) and the tests' first-verdict estimate (Equation 2), evaluated per run from offered requests, offered rate and the configured timeouts, nothing fitted (8). The conditions the series share (five seeds, 95 % intervals, 70 % of users on WhatsApp, the quota, the logarithmic axes) are stated in the text that cites each figure | `results/counter_study.json` → `E4`; `results/counter_study_runs.jsonl.gz`; `results/condition_check.json` | `paper/figures/fig7a_service`, `fig7b_security20`, `fig7c_security60` `.{png,svg,pdf}` |
 | artifact only. The same three panels as one figure | as above | `paper/figures/fig7_counter_boundary.{png,svg,pdf}` |
 
+`scripts/paper_tables.py` writes the table rows in `tables/`: `headline.tex` (Table 3), `matched.tex` (Table 4),
+`claims.tex` (Table 5) and `attacked_a.tex` (Table 6) are included by `main.tex`; `pumping.tex`, `attacked_b.tex` and
+`designs.tex` (revision 8's Tables 4, 8 and 9, dropped from the manuscript) are kept as supplementary rows, and
+`results/design_table.md` is supplementary Table S1.
+
 The ablation figure's numbers are also written to `paper/figures/fig2_ablation_matrix.csv`, and its large effects (interval excluding zero, at least 10 SMS) to `paper/figures/fig2_key_effects.md`. The figures carry no embedded titles; captions belong in the manuscript, which includes the vector PDFs.
 
 Regenerate with `python3 paper/figures.py` (after `make evaluation`); `--results` and `--out`

@@ -369,21 +369,7 @@ When separation fails, the cap is the lever: over ten seeds, the default lets 47
 \subsection{Pumping against the tests}
 \label{sec:pumping}
 
-\begin{table*}[!t]
-\caption{Concentrated pumping: how much leaks before the tests contain it.}
-\label{tab:pumping}
-\footnotesize
-\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lllllr@{}}
-\toprule
-Carrier, design & Leaked & Contained & Containment & First verdict & Codes \\
- & (msgs) & (seeds) & (min) & (min) & entered \\
-\midrule
-\tablerows{tables/pumping.tex}
-\bottomrule
-\end{tabular*}
-\end{table*}
-
-Table~\ref{tab:pumping} covers concentrated pumpers on three blocks with caps lifted over ten seeds: messages leaked of about 574 requests in 20 minutes, seeds contained, mean minutes to containment (contained seeds) and to the first verdict (seeds with one), and codes entered. The speed test catches a carrier verifying within a second at 19 messages, while the carrier verifying 60\% with human-like delay is contained in none of the ten 20-minute runs: its first verdict comes at minute 11.6 on average and 452 messages leak; in an hour, 1\,067 leak and two of ten runs are contained, at minute 47.0 on average. Claim C3 (containment with at most 30\% leaked) held in 36 of 36 cells.
+We ran concentrated pumpers on three blocks with caps lifted over ten seeds, about 574 requests in 20 minutes, and recorded the messages leaked, the runs in which the tests contained the attack, the minutes to containment and to the first verdict, and the codes the carrier entered. A carrier that never verifies leaked 570 [419, 736] messages under v1, which contains nothing, and 90 [71, 114] under the v2 default, which contained all ten runs at minute 3.5 [3.1, 3.9] after a first verdict at minute 3.0; a carrier that buys every challenge solution leaked 106 [87, 127] and was contained in all ten runs at minute 4.3. The speed test catches a carrier verifying within a second at 19 [17, 21] messages, contained at minute 1.4 after 19 codes entered, while the carrier verifying 60\% of its codes with human-like delay was contained in none of the ten 20-minute runs: it entered 272 codes, its first verdict came at minute 11.6 on average and 452 [365, 539] messages leaked; in an hour, 1\,067 [839, 1\,310] leaked and two of ten runs were contained, at minute 47.0 on average. Claim C3 (containment with at most 30\% leaked) held in 36 of 36 cells.
 
 Across 18 spread configurations, leakage follows the blocks touched: with 30 blocks, five to seven runs in ten are still contained. Unsaturated, Equation~\eqref{eq:leak} errs by 1.6 to 7.9 messages per run (1\%--13\%, ten configurations); saturated, it overstates by up to 91.
 
@@ -439,24 +425,7 @@ Policy & (SMS) & ($\approx$1\,200) & blocks ($\approx$18) & & blocks & users \\
 \end{tabular*}
 \end{table*}
 
-\begin{table}[!htb]
-\caption{A poisoner on every block: what users lose.}
-\label{tab:poisoner}
-\footnotesize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrr@{}}
-\toprule
- & Leaked & \multicolumn{2}{c}{Extra harm against attacked,} \\
- & & \multicolumn{2}{c}{no policy} \\
-\cmidrule(lr){3-4}
-Policy & (SMS) & all users & first-time users \\
-\midrule
-\tablerows{tables/attacked_b.tex}
-\bottomrule
-\end{tabular*}
-\end{table}
-
-Tables~\ref{tab:attacked} and~\ref{tab:poisoner} report E1 at 200 blocks (60-minute attacks, seeds 300--309): a pumper on three blocks real users share, and a poisoner flooding all 200 blocks. Leakage under the pumper is summed over the four carriers' runs of a seed, which can hide a carrier on which a policy loses (per carrier: artifact); harm is net completions lost in points, averaged over the carriers (negative: a gain), with intervals for leakage and the attacked blocks in Table~\ref{tab:attacked} and for all users' extra harm in Table~\ref{tab:poisoner}. In Table~\ref{tab:attacked}, against the attacked no-policy arm, the counter cost all users nothing on average and gained the attacked blocks' users three points on average, since without a destination policy, the pumper exhausts their blocks and the hourly budget; with the human-like carrier alone, it cost them 1.9. Against the attack-free operation, every evaluated policy left those users 5 to 9 points worse off on average (2 to 12 per carrier; 8 with none): none shields a block an attacker shares. Counter and tests together, explored outside the frozen claims, leaked least summed over the four carriers but not against the instant verifier (28; $T300$, $c0$: 22), and under the poisoner (Table~\ref{tab:poisoner}) cost all users most of the counters and buckets and leaked more than $T300$, $c0$. A token bucket with a burst of 4 spared the poisoner's users only by letting almost everything through; with two untuned settings, neither limiter dominated, and we ranked only the implemented policies. Returning users, all simulated with verified history, lost nothing.
+Table~\ref{tab:attacked} reports E1 at 200 blocks (60-minute attacks, seeds 300--309): a pumper on three blocks real users share. Leakage is summed over the four carriers' runs of a seed, which can hide a carrier on which a policy loses (per carrier: artifact); harm is net completions lost in points, averaged over the carriers (negative: a gain), with intervals for leakage and the attacked blocks. Against the attacked no-policy arm, the counter cost all users nothing on average and gained the attacked blocks' users three points on average, since without a destination policy, the pumper exhausts their blocks and the hourly budget; with the human-like carrier alone, it cost them 1.9. Against the attack-free operation, every evaluated policy left those users 5 to 9 points worse off on average (2 to 12 per carrier; 8 with none): none shields a block an attacker shares. Counter and tests together, explored outside the frozen claims, leaked least summed over the four carriers but not against the instant verifier (28; $T300$, $c0$: 22). Against a poisoner flooding all 200 blocks for an hour on the same seeds, the tests leaked less than the counters but cost users more: of 1\,976 messages with no policy, $T300$, $c0$ leaked 858 at an extra harm to all users of 2.55 [2.04, 3.07] points (3.20 for first-time users), the default tests 1\,357 at 1.09 [0.59, 1.59], the counter and tests together 1\,286 at 1.43 [0.88, 1.97], and the counter alone 1\,662 at 0.72 [0.44, 1.02]. A token bucket with a burst of 4 spared the poisoner's users (0.12 points) only by letting 1\,877 messages through, and one with a burst of 12 let through all but two; with two untuned settings, neither limiter dominated, and we ranked only the implemented policies. Returning users, all simulated with verified history, lost nothing.
 
 
 \subsubsection{The counter's boundary}
@@ -510,21 +479,7 @@ On a real Redis (four vCPUs, four workers), we measured sends at 13.8\,ms (media
 \section{Discussion}
 \label{sec:discussion}
 
-In the scripted workloads, carriers that verify with human-like delay, fake receipts or know the thresholds defeated our outcome tests but not a short-window counter: within an hour of a verdict the counter's allowance, unlike the tests', grows with the windows an attack spans, while over longer campaigns verdicts expire and the tests leak again. Equation~\eqref{eq:cross} summarizes this for pumpers that solve no challenge and hold no exemption; its inputs are in an operator's logs, whereas the cost of an excess send, competition under attack and exemption abuse come only from the simulation. Table~\ref{tab:designs} sets the seven designs of Section~\ref{sec:method} against the nine source-side attackers on the same traffic and seeds, with source caps lifted so that only the behavioral layers act (intervals in supplementary Table~S1); each design adds one thing to the baseline, and the table says what it bought. Correcting the platform header alone changed only the forged-header attack, from 100\% to 99.5\%, because that attacker is the farm with a header. Sessions and a hard budget removed the single client's leakage (5.6\% to 0.3\%) and cut the premium pumper's from 99.4\% to 94.9\%. A refusing counter of five sends per block a day held the premium pumper and the walked numbers, the two attacks that concentrate on a few blocks, to 1\%. The behavioral layers of v2 removed datacenter rotation (69\% to 0) and most of the reused profile (99.5\% to 22.5\%), and the two block tests differ only on the walked numbers (11.5\% against 13.3\%). No design separates the residential bot (37.2\%) or the farm (99.5\%); those are held only by the adaptive caps of Table~\ref{tab:headline}, at the price Section~\ref{sec:rationing} reports. On the destination, against the never-verifying pumper v1 leaked 570 messages, the default tests 90 and the selected counter 24, and under the shared-block pumper of Table~\ref{tab:attacked} the counter leaked 403 where the default tests leaked 1\,149 and no policy 5\,509, neither policy costing all users anything on average.
-
-\begin{table}[!t]
-\caption{Every design against every source-side attacker, caps lifted.}
-\label{tab:designs}
-\footnotesize
-\setlength{\tabcolsep}{2.5pt}
-\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lrrrrrrr@{}}
-\toprule
-Attacker & v1 & v1-c. & budget & BL & conv. & speed & v2 \\
-\midrule
-\tablerows{tables/designs.tex}
-\bottomrule
-\end{tabular*}
-\end{table}
+In the scripted workloads, carriers that verify with human-like delay, fake receipts or know the thresholds defeated our outcome tests but not a short-window counter: within an hour of a verdict the counter's allowance, unlike the tests', grows with the windows an attack spans, while over longer campaigns verdicts expire and the tests leak again. Equation~\eqref{eq:cross} summarizes this for pumpers that solve no challenge and hold no exemption; its inputs are in an operator's logs, whereas the cost of an excess send, competition under attack and exemption abuse come only from the simulation. Supplementary Table~S1 sets the seven designs of Section~\ref{sec:method} against the nine source-side attackers on the same traffic and seeds, with source caps lifted so that only the behavioral layers act; each design adds one thing to the baseline, and its differences from the v1 and v2 columns of Table~\ref{tab:headline} say what it bought. Correcting the platform header alone changed only the forged-header attack, from 100\% to 99.5\%, because that attacker is the farm with a header. Sessions and a hard budget removed the single client's leakage (5.6\% to 0.3\%) and cut the premium pumper's from 99.4\% to 94.9\%. A refusing counter of five sends per block a day held the premium pumper and the walked numbers, the two attacks that concentrate on a few blocks, to 1\%. The behavioral layers of v2 removed datacenter rotation (69\% to 0) and most of the reused profile (99.5\% to 22.5\%), and the two block tests differ only on the walked numbers (11.5\% against 13.3\%). No design separates the residential bot (37.2\%) or the farm (99.5\%); those are held only by the adaptive caps of Table~\ref{tab:headline}, at the price Section~\ref{sec:rationing} reports. On the destination, against the never-verifying pumper v1 leaked 570 messages, the default tests 90 and the selected counter 24, and under the shared-block pumper of Table~\ref{tab:attacked} the counter leaked 403 where the default tests leaked 1\,149 and no policy 5\,509, neither policy costing all users anything on average.
 
 The nearest external work, set out in Table~\ref{tab:related}, can be compared only on what each needs and reports, since none ran on the same traffic. \citet{huh2025ait} report 89.6\% recall at 0.19\% false positives for a supervised model on one service's real logs; the attack it targets, a few requests per identity over many fresh identities, is the farm here, which our layers do not separate and the caps only ration, at 54\% of first-time users refused, while what the layers contain without labels are the attacks with a signature in the request and most of the reused profile. \citet{zaliskyi2026ait} report that fixed-window prefix counts blocked 95\% and 63\% of two incidents at the price of 58\% of a legitimate campaign; our graded counter is the same family of control, a ten-minute window on a 10\,000-number block with a challenge rather than a 24-hour quarantine, and it leaked 24 of about 574 requests from each outcome-reading pumper at an attack-free cost of 0.06 points of completion, on simulated traffic with no campaigns in it, and failed its service claims on blocks the attacker shares. Twilio's products report claimed false-positive rates and no leakage. What we report that none of the three does is an attack-free benign cost, a cost under attack for the users who share a block with the attacker, a selection fixed before the evaluation runs and tested on held-out seeds and workloads, and an implementation anyone can run; what the three have and we lack is real traffic.
 

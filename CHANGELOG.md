@@ -27,8 +27,14 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   is split into two tables (pumper; poisoner), the study map is supplementary Table S2
   (`results/study_map.md`), and the boundary figure is redrawn with larger text and separate legends
   for measurements and estimates.
+- **Three tables dropped (paper only).** Revision 8's Table 4 (concentrated pumping against the tests),
+  Table 8 (the poisoner) and Table 9 (every design against every source-side attacker) are removed and
+  their load-bearing numbers carried in the sentences that cited them; the design comparison is
+  supplementary Table S1 (`results/design_table.md`). `scripts/paper_tables.py` still writes their rows
+  (`paper/tables/pumping.tex`, `attacked_b.tex`, `designs.tex`) as supplementary material. Final
+  numbering: Tables 1-6, Figures 1-8, Algorithms 1-3.
 - **Manuscript, second pass in the journal's format (paper only).** Figures 6 and 7 (the matched
-  comparison) are dropped: Table 5 carries the comparison, and the paired differences against the
+  comparison) are dropped: Table 5 (Table 4 after the next entry) carries the comparison, and the paired differences against the
   default tests are stated in Section V-F; the files stay as artifact-only figures and
   `results/figure1_key.md` keys the table. The three boundary figures (now Figures 6-8) are redrawn as
   plain line charts with the legend inside the axes and series named in words (`figures.py`
@@ -37,7 +43,7 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   Require/Ensure style without comments (`alg1_v1_body.tex`, `alg2_v2_body.tex`, `alg3_sim_body.tex`),
   with the gap letters, the symbols, the limits and the run record explained in the text that cites
   each algorithm. The contributions are four one-sentence items, and Section VI is one Discussion
-  section of three paragraphs with Table 9.
+  section of three paragraphs with the design comparison (then Table 9).
 - **Manuscript reformatted for the IEEE Open Journal of the Communications Society (paper only).**
   `paper/ojcoms.sty` gives the journal's look (two columns, Times, Roman-numeral sections, FIGURE and
   TABLE captions, ABSTRACT and INDEX TERMS block) and `IEEEtranN-doi.bst` the numeric IEEE references;
@@ -58,7 +64,7 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   table. The architecture of the implementation, drawn from `src/otp_guard`, is a figure
   (`fig12_architecture.tex`); the evaluation method is a figure (`fig11_method.tex`) and one
   simulation run, as `evaluation/sim.py` executes it, is Algorithm 3 (`alg3_sim_body.tex`). Final
-  revision 8 numbering: Tables 1-9, Figures 1-10 (1-8 after the second pass below), Algorithms 1-3; `results/study_map.md` uses it.
+  revision 8 numbering: Tables 1-9 and Figures 1-10 (Tables 1-6 and Figures 1-8 after the passes below), Algorithms 1-3; `results/study_map.md` uses it.
   Figures 1 to 5 are the author's own drawings (`paper/figures/fig8_defense_path.png`, `fig9_threat_model.png`,
   `fig12_architecture.png`, `fig10_steps.png`, `fig11_method.png`), with the detail in the paragraph before
   each figure; Figures 6 and 7 name every setting in plain words; every caption is a short plain sentence.
