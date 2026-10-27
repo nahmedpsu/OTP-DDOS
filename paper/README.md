@@ -25,7 +25,7 @@ shows, so the figures carry no detail of their own.
 | 3. How the implementation fits together (Section 3.3) | none (the author's drawing, after `src/otp_guard`) | `paper/figures/fig12_architecture.png` |
 | 4. The twelve steps and the feedback loop (Section 3.3; the figure's stages are numbered 1 to 12 in reading order, the text's Steps 0 to 11) | none (the author's drawing) | `paper/figures/fig10_steps.png` |
 | Algorithm 1. The v1 baseline (Section 3.1; compact Require/Ensure pseudocode, the gap each line opens given in the text) | none | `paper/figures/alg1_v1_body.tex`, included by `main.tex`; `alg1_v1.tex` renders it for the Word version |
-| Algorithm 2. The v2 pipeline and its feedback loop (Section 3.3; one procedure per direction, the symbols and constants explained in Sections 3.3 and 3.4) | none | `paper/figures/alg2_v2_body.tex`, included by `main.tex`; `alg2_v2.tex` renders it for the Word version |
+| Algorithm 2. The v2 pipeline and its feedback loop (Section 3.3; one procedure per direction, set in one column, the symbols and constants explained in Sections 3.3 and 3.4) | none | `paper/figures/alg2_v2_body.tex`, included by `main.tex`; `alg2_v2.tex` renders it for the Word version |
 | 5. How we evaluated the design (Section 4) | none (the author's drawing) | `paper/figures/fig11_method.png` |
 | Algorithm 3. One simulation run (Section 4.2; the streams, the drawn request, the events and the run record explained in the text) | none | `paper/figures/alg3_sim_body.tex`, included by `main.tex`; `alg3_sim.tex` renders it for the Word version |
 | artifact only. Leakage by attacker, v1 against v2, caps lifted and caps on, with legitimate completion | `results/evaluation.json` → `multi_seed` | `paper/figures/fig1_leakage.{png,svg,pdf}` |

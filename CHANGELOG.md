@@ -27,6 +27,13 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   is split into two tables (pumper; poisoner), the study map is supplementary Table S2
   (`results/study_map.md`), and the boundary figure is redrawn with larger text and separate legends
   for measurements and estimates.
+- **Author's copy-edit applied (paper only).** The wording changes the author made in the Word copy
+  of revision 15 (serial commas, "approximately", past tense in the method and results, tightened
+  phrasing in about seventy paragraphs, the acknowledgment and data-availability notes) are carried
+  into `main.tex`; thousands separators are commas throughout (`scripts/paper_tables.py` `n`). The
+  Introduction has no subsections (problem statement, contributions and organization are paragraphs),
+  the contributions carry no section references, Sections II-D and II-E are one subsection, and
+  Algorithm 2 is set in one column with its long lines split.
 - **Manuscript brought to 16 pages (paper only).** Figures 1-5 print at 0.72-0.82 of the text width;
   Table 2 is set in the smaller table size; Table 6 prints each interval beside its mean instead of
   under it (`scripts/paper_tables.py` `ci2`); and about 450 words of overlap are removed: the

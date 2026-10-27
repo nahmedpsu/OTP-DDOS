@@ -22,10 +22,10 @@ DESIGNS = [("v1", "v1"), ("v1_corrected", "v1-corrected"), ("budget_only", "budg
 
 
 def n(x, d=0):
-    """A number in the manuscript's style: thin space as thousands separator, minus sign in math."""
+    """A number in the manuscript's style: comma as thousands separator (IEEE), minus sign in math."""
     if x is None:
         return "--"
-    s = f"{abs(x):,.{d}f}".replace(",", "\\,")
+    s = f"{abs(x):,.{d}f}"
     return ("$-$" if x < 0 and round(abs(x), d) != 0 else "") + s
 
 
