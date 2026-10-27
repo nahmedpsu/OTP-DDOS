@@ -27,6 +27,14 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   is split into two tables (pumper; poisoner), the study map is supplementary Table S2
   (`results/study_map.md`), and the boundary figure is redrawn with larger text and separate legends
   for measurements and estimates.
+- **Section V trimmed (paper only).** About 540 words of supporting detail removed from the results:
+  the cold- and warm-start bookkeeping behind the leakage estimates, the per-seed agreement count, the
+  undrawn no-policy line of Figure 7, the selection-rule robustness checks compressed to one sentence,
+  the poisoner result to two, the Equation 2 error figures of the spread study (superseded by Figure 8),
+  the poisoner variants in parentheses, and the timing side-channel statistics cut to one sentence; the
+  scripted adaptations with caps lifted moved next to the E3 sentence in Section V-F, and Section V-H is
+  now "Economics and overhead". Every number the abstract, contributions, discussion and conclusion
+  quote is unchanged, and the removed detail remains in `results/`.
 - **Three tables dropped (paper only).** Revision 8's Table 4 (concentrated pumping against the tests),
   Table 8 (the poisoner) and Table 9 (every design against every source-side attacker) are removed and
   their load-bearing numbers carried in the sentences that cited them; the design comparison is
