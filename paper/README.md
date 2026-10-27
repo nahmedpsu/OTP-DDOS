@@ -1,8 +1,13 @@
 # Manuscript
 
-`main.tex` is the manuscript for Computers & Security (Elsevier `elsarticle` class in its
-two-column `5p` layout with the author-year `elsarticle-harv` style, both vendored here; the
-`elsarticle-num` styles are kept for earlier revisions), with `refs.bib`. `make` builds `main.pdf`; `make rebuttal`
+`main.tex` is the manuscript in the format of the IEEE Open Journal of the Communications Society:
+`ojcoms.sty` gives the journal's look on the standard `article` class (two columns, Times, `I. SECTION`
+headings, `FIGURE 1.` and `TABLE 1.` captions, a title block with ABSTRACT and INDEX TERMS) and
+`IEEEtranN-doi.bst` prints the numeric IEEE reference list (both vendored here; see the note in
+`ojcoms.sty` for switching to `IEEEtran.cls`, which could not be installed in the build sandbox). The
+Elsevier files of the earlier Computers & Security version (`elsarticle.cls`, `elsarticle-*.bst`) are
+kept for the revision history. `refs.bib` holds the references, each checked against its publisher's
+record. `make` builds `main.pdf`; `make rebuttal`
 builds the current response letter (`rebuttal_round8.js` -> `rebuttal_round8.docx`, with Node and
 the `docx` package). Earlier letters are kept as `rebuttal*.js` / `.docx`.
 

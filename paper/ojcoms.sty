@@ -1,0 +1,66 @@
+% ojcoms.sty: the look of an IEEE Open Journal of the Communications Society article, built on the
+% standard article class, for a sandbox where IEEEtran.cls could not be installed. It defines the
+% IEEEtran commands the manuscript uses (\IEEEPARstart, IEEEkeywords, \IEEEmembership) so that the
+% source also compiles with \documentclass[journal]{IEEEtran} once that class is available: comment
+% out \usepackage{ojcoms} and the \ojtitlepage block, and use IEEEtran's \author, \maketitle and
+% \begin{abstract} instead. Two-column letter paper, Times text, sans-serif headings and captions in
+% the journal's style (I. INTRODUCTION, A. SUBSECTION, FIGURE 1., TABLE 1.), numeric IEEE references.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{ojcoms}[2026/10/27 IEEE OJ-COMS-like layout on article]
+\RequirePackage[letterpaper,top=0.78in,bottom=0.95in,left=0.69in,right=0.69in,columnsep=0.21in,headheight=10pt,headsep=14pt,footskip=26pt]{geometry}
+\RequirePackage{amsmath}
+\RequirePackage{txfonts}
+\RequirePackage[scaled=0.9]{helvet}
+\RequirePackage{titlesec}
+\RequirePackage{caption}
+\RequirePackage{lettrine}
+\RequirePackage{fancyhdr}
+\RequirePackage[numbers,sort]{natbib}
+\setcitestyle{square,citesep={], [}}
+% headings
+\renewcommand{\thesection}{\Roman{section}}
+\renewcommand{\thesubsection}{\thesection-\Alph{subsection}}          % cross-references read "Section III-C"
+\renewcommand{\thesubsubsection}{\thesubsection.\arabic{subsubsection}}
+\titleformat{\section}{\sffamily\bfseries\small}{\thesection.}{0.45em}{\MakeUppercase}
+\titleformat{name=\section,numberless}{\sffamily\bfseries\small}{}{0em}{\MakeUppercase}
+\titleformat{\subsection}{\sffamily\bfseries\footnotesize}{\Alph{subsection}.}{0.45em}{\MakeUppercase}
+\titleformat{\subsubsection}{\sffamily\bfseries\footnotesize}{\arabic{subsubsection})}{0.4em}{\MakeUppercase}
+\titlespacing*{\section}{0pt}{10pt plus 2pt minus 1pt}{4pt}
+\titlespacing*{\subsection}{0pt}{8pt plus 2pt minus 1pt}{3pt}
+\titlespacing*{\subsubsection}{0pt}{6pt plus 1pt minus 1pt}{2pt}
+% captions: FIGURE 1. below a figure, TABLE 1. above a table
+\captionsetup{font={sf,footnotesize},labelfont={bf},labelsep=period,justification=raggedright,singlelinecheck=false,skip=4pt}
+\captionsetup[figure]{name=FIGURE}
+\captionsetup[table]{name=TABLE,position=above}
+\renewcommand{\thetable}{\arabic{table}}
+% IEEEtran commands
+\newcommand{\IEEEPARstart}[2]{\lettrine[lines=2,lhang=0.05,loversize=0.05,findent=2pt,nindent=0pt]{#1}{#2}}
+\newenvironment{IEEEkeywords}{\par\vspace{6pt}\noindent{\sffamily\bfseries\footnotesize INDEX TERMS\ \ }\footnotesize\sffamily}{\par}
+\newcommand{\IEEEmembership}[1]{{\normalfont\footnotesize\sffamily (#1)}}
+% running head and folio
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\sffamily\scriptsize\ojrunninghead}
+\fancyfoot[C]{\sffamily\scriptsize\thepage}
+\renewcommand{\headrulewidth}{0pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\sffamily\scriptsize\thepage}\renewcommand{\headrulewidth}{0pt}}
+\newcommand{\ojrunninghead}{}
+\newcommand{\ojrunningheadset}[1]{\renewcommand{\ojrunninghead}{#1}}
+% the title block, spanning both columns: \ojtitlepage{title}{authors}{affiliations}{corresponding}{abstract}{index terms}
+\newcommand{\ojtitlepage}[6]{%
+  \twocolumn[{%
+    \begin{center}
+      {\sffamily\bfseries\LARGE #1\par}\vspace{10pt}
+      {\sffamily\scshape\normalsize #2\par}\vspace{5pt}
+      {\sffamily\scriptsize #3\par}\vspace{4pt}
+      {\sffamily\scriptsize\bfseries CORRESPONDING AUTHOR: \mdseries #4\par}
+    \end{center}
+    \vspace{6pt}
+    \begin{list}{}{\leftmargin=0.55in\rightmargin=0.55in}\item\relax
+      {\sffamily\footnotesize{\bfseries ABSTRACT\ \ }#5\par}
+      \begin{IEEEkeywords}#6\end{IEEEkeywords}
+    \end{list}
+    \vspace{10pt}
+  }]%
+}
+\endinput

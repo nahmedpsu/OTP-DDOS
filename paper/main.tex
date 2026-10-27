@@ -1,11 +1,12 @@
-% Manuscript for Computers & Security (Elsevier). Build: latexmk -pdf main.tex
+% Manuscript for the IEEE Open Journal of the Communications Society. Build: latexmk -pdf main.tex
 % Revision 8, after the eighth Reviewer 2 report. Every number comes from
 % ../results/evaluation.json, ../results/counter_study.json, ../results/round5_analyses.json, ../results/condition_check.json
 % or ../results/performance*.json (results produced by release 2.9.0, whose code 2.9.1 runs unchanged; the 2.8.0 results are in ../results/historical_2.8/); ../results/headline_numbers.md maps headline figures to their JSON paths.
-% Two-column Computers & Security layout with author-year references.
-% For a line-numbered single-column review copy use
-% \documentclass[preprint,12pt,authoryear]{elsarticle} and \linenumbers.
-\documentclass[5p,twocolumn,times,authoryear]{elsarticle}
+% Layout: ojcoms.sty gives the journal's look on the article class (two columns, Times, I. SECTION headings,
+% FIGURE 1. and TABLE 1. captions, numeric IEEE references through IEEEtranN-doi.bst); see the note in ojcoms.sty
+% for switching to IEEEtran.cls.
+\documentclass[10pt,twocolumn]{article}
+\usepackage{ojcoms}
 
 \usepackage{amsmath}
 \usepackage{booktabs}
@@ -13,42 +14,17 @@
 \usepackage{float}
 \usepackage{array}
 \usepackage{xurl}
-\usepackage[colorlinks]{hyperref}
-\usepackage{lineno}
+\usepackage[colorlinks,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
 \usepackage{placeins}
 \usepackage{stfloats}
 \usepackage{xcolor}
 \usepackage{algorithm}
 \usepackage[noend]{algpseudocode}
 \renewcommand{\algorithmicrequire}{\textbf{Input:}}
+\renewcommand{\algorithmicensure}{\textbf{Output:}}
 \newcommand{\scoreeq}{Equation~\eqref{eq:score}}
 \newcommand{\algvtwo}{Algorithm~\ref{alg:v2}}
 \graphicspath{{figures/}}
-% DOIs in the reference list as https://doi.org/... links, as the journal prints them
-\newcommand{\DOIprefix}{}
-\newcommand{\doi}[1]{\href{https://doi.org/#1}{\path{https://doi.org/#1}}}
-% Elsevier captions: "Table 1" in bold on its own line above the table;
-% "Fig. 1." in bold followed by the text below the figure.
-\renewcommand{\figurename}{Fig.}
-\makeatletter
-\def\els@tablecaptype{table}
-\long\def\@makecaption#1#2{%
-  \footnotesize
-  \ifx\@captype\els@tablecaptype
-    {\bfseries #1}\par\vskip 1pt
-    {\raggedright #2\par}\vskip 3pt
-  \else
-    \vskip\abovecaptionskip
-    \sbox\@tempboxa{{\bfseries #1.} #2}%
-    \ifdim \wd\@tempboxa >\hsize
-      {\bfseries #1.} #2\par
-    \else
-      \global \@minipagefalse
-      \hb@xt@\hsize{\hfil\box\@tempboxa\hfil}%
-    \fi
-    \vskip\belowcaptionskip
-  \fi}
-\makeatother
 \makeatletter\newcommand{\tablerows}[1]{\@@input #1 }\makeatother % generated rows: scripts/paper_tables.py
 \renewcommand{\topfraction}{0.95}
 \renewcommand{\dbltopfraction}{0.95}
@@ -59,58 +35,46 @@
 \setcounter{dbltopnumber}{4}
 \setcounter{totalnumber}{4}
 \setlength{\emergencystretch}{2em}
-% a little vertical stretch between paragraphs lets the two columns end flush without visible gaps
 \setlength{\parskip}{0pt plus 1.5pt}
-
-\journal{Computers \& Security}
+\ojrunningheadset{AHMED: COUNTING VERSUS TESTING THE DESTINATION}
 
 \begin{document}
 
-\begin{frontmatter}
-
-\title{Counting Versus Testing the Destination: A Simulation Study of Layered Defences Against SMS OTP Flooding and Pumping}
-
-\author[inst1]{Naveed Ahmed\corref{cor1}}
-\ead{nahmed@psu.edu.sa}
-\cortext[cor1]{Corresponding author.}
-\affiliation[inst1]{organization={College of Computer and Information Science, Prince Sultan University},
-            city={Riyadh},
-            country={Saudi Arabia}}
-
-\begin{abstract}
-Endpoints that send one-time passwords via SMS must be reachable before any account exists, and they are abused to waste a service's messaging budget (flooding) or to earn part of the termination fee on a colluding operator's number ranges (SMS pumping). Existing defenses limit the request source, score each request with labeled traffic, or block destination prefixes, but a service that sees only its own traffic has no controlled evidence of which destination signal to act on, the number of sends to a block or the fate of their codes, nor of what either costs the legitimate users who share a block with an attacker. We evaluate in simulation a twelve-step defense for a registration flow, which draws trust from app attestation, signed sessions and verification outcomes, against a seven-control baseline, five simpler designs and 25 attacker profiles, and compare the two label-free destination policies, a counter of sends per number block and sequential tests of code outcomes, under two protocols we committed before their runs. Our results show that attacks carrying a signature in the request are contained at a low cost to simulated users, whereas a residential attacker with farmed CAPTCHA scores is only rationed, by refusing half of first-time users. On the destination, short-window counters of SMS sent per number block, selected at a benign service target, leaked 6 to 48 messages against four concentrated 20-minute pumpers at 0.06 to 0.43 points of attack-free completion, where the default sequential tests of verification outcomes leaked 19 to 452 at the busiest density; on seeds and workloads held out from selection, the frozen counter met its leakage and benign-cost claims and leaked no more than the tests in all but 13 of 144 cells, all against an instantly verifying carrier, but failed both service-under-attack claims when the pumper shared blocks with real users. Unfitted estimates ordered the policies' mean leakage in 18 of 18 decisive boundary cells with the counter's cold-start bound and 17 with its warm-start bound; their crossing is algebraic, not a measured switching point, and the counter loses its advantage against paced or widely spread pumpers. These findings rest on simulated users and assumed calibration. For operators they give a tested ordering of destination policies against short, concentrated pumping, and identify the quota per block, and the competition for it on a shared block, as what decides a counter's cost.
-\end{abstract}
-
-\begin{keyword}
-SMS pumping \sep Artificially inflated traffic \sep One-time password \sep Rate limiting \sep Sequential tests \sep Fraud prevention
-\end{keyword}
-
-\end{frontmatter}
-
-%\linenumbers
+\ojtitlepage{Counting Versus Testing the Destination: A Simulation Study of Layered Defenses Against SMS OTP Flooding and Pumping}
+{Naveed Ahmed\textsuperscript{1}}
+{\textsuperscript{1}College of Computer and Information Science, Prince Sultan University, Riyadh 11586, Saudi Arabia}
+{N. AHMED (e-mail: nahmed@psu.edu.sa)}
+{Services that verify a phone number by SMS expose an endpoint that must answer before any account exists. Attackers abuse it to waste the service's messaging budget (flooding) or to steer paid messages to premium-rate ranges that share the termination fee with them (SMS pumping). Existing defenses limit the source, score requests with labeled traffic or block prefixes, but no controlled evidence says which destination signal a service should act on, sends per block or the fate of their codes, or what either costs the users who share a block with an attacker. We evaluate in simulation a twelve-step defense built on app attestation, signed sessions and verification outcomes, against a seven-control baseline, five simpler designs and 25 attacker profiles, and compare the two label-free destination policies, a short-window counter of sends per number block and sequential tests of code outcomes, under two protocols committed before their runs. Attacks with a signature in the request are contained at little cost to users; a residential attacker is only rationed. Against four concentrated 20-minute pumpers the counter leaked 6 to 48 messages at 0.06 to 0.43 points of completion, where the default tests leaked 19 to 452; on held-out seeds and workloads it met its leakage claims but failed its service claims on blocks real users share. Estimates from the rules alone ordered the two policies in 18 of 18 decisive cells. The results rest on simulated users and give operators a tested ordering of destination policies against short, concentrated pumping.}
+{Artificially inflated traffic, fraud prevention, one-time password, rate limiting, sequential tests, SMS pumping.}
 
 % ---------------------------------------------------------------------------
 \section{Introduction}
 \label{sec:intro}
 
-Most online services verify a phone number by sending a code via SMS from an endpoint that must be reachable before any account exists, at a tenth of a cent to twenty cents per message. Two abuses follow from that design. A flooder makes the service send to numbers it does not own, so the service pays for messages nobody asked for; a pumper sends to a range whose operator shares the termination fee, so the service's SMS budget becomes the attacker's income, a technique that MITRE catalogues as resource hijacking~\citep{mitre_t1496_003}. Pumping is the SMS form of international revenue-share fraud, whose voice form was estimated at \$10.76 billion a year in 2015~\citep{sahin2017sok}. The sums at a single service are not small: Twitter's owner said in 2023 that pumping had cost the company approximately \$60 million a year~\citep{commsrisk2023twitter}, and \citet{huh2025ait} found as many attack requests as genuine ones in three months of one large service's authentication logs.
+\IEEEPARstart{M}{ost} online services verify a phone number by sending a code via SMS from an endpoint that must be reachable before any account exists, at a tenth of a cent to twenty cents per message. Two abuses follow from that design. A flooder makes the service send to numbers it does not own, so the service pays for messages nobody asked for; a pumper sends to a range whose operator shares the termination fee, so the service's SMS budget becomes the attacker's income, a technique that MITRE catalogues as resource hijacking~\citep{mitre_t1496_003}. Pumping is the SMS form of international revenue-share fraud, whose voice form was estimated at \$10.76 billion a year in 2015~\citep{sahin2017sok}. The sums at a single service are not small: Twitter's owner said in 2023 that pumping had cost the company approximately \$60 million a year~\citep{commsrisk2023twitter}, and \citet{huh2025ait} found as many attack requests as genuine ones in three months of one large service's authentication logs.
 
 Defenses act at three points on the path of a request. At the source, services limit requests per address, session and device, challenge them with CAPTCHAs, block known proxies and restrict destination countries, and risk-based authentication combines such signals into a score with graded responses~\citep{wiefling2019rba}. At the messaging vendor, Twilio's Fraud Guard blocks destination prefixes and countries whose traffic departs from an account's history~\citep{twilio_fraudguard}, and its per-number pumping risk score advises friction from 60 and refusal above 90~\citep{twilio_pumping_risk}. On a service's own logs, \citet{huh2025ait} detect attack requests one at a time with gradient-boosted trees, at 89.6\% recall and 0.19\% false positives on web traffic, and \citet{zaliskyi2026ait} count application-to-person sends per number prefix in five-minute windows and quarantine a prefix that crosses a threshold.
 
 Each of these rests on an assumption that the literature has tested and found wanting. Source-side limits assume that an identity is scarce; without a trusted authority, one entity can present as many identities as it likes~\citep{douceur2002sybil}. Addresses are not scarce either: five residential proxy services relayed through 6.2 million addresses in 238 countries, 90\% of them for under fifteen minutes each and 2.2\% of them on any blacklist~\citep{mi2019resip}, and carrier-grade NAT, deployed in more than 90\% of cellular networks, puts dozens of subscribers behind one address and makes address reputation ``all but infeasible''~\citep{richter2016cgn}. A CAPTCHA costs an attacker about a dollar per thousand solutions from a labor market that was already paying ten dollars per thousand in 2007~\citep{motoyama2010captcha}. Supervised detection needs labels, which \citet{huh2025ait} derived from traffic peaks after the fact, and a decision taken per request can be probed one threshold at a time. Prefix counting acts on the one key a pumper cannot rotate away from, since it is paid only on its partner's ranges, but the thresholds that stopped 95\% and 63\% of two incidents in the data of \citet{zaliskyi2026ait} also blocked 58\% of a legitimate marketing campaign.
 
-The two closest studies therefore each act on one destination signal, and neither measures what acting on it costs. \citet{huh2025ait} report that about 92\% of attack requests fell on prefixes with zero conversion, against 21\% for genuine traffic, so whether codes are entered is informative; but the signal enters a classifier that needs labeled traffic and was not released because it is deployed. \citet{zaliskyi2026ait} act on send counts alone, without outcomes, and conclude that counts by themselves cannot safely separate inflated traffic from a campaign. Neither reports what a destination policy costs the legitimate users who share a number block with the attacker, neither reports its cost when there is no attack, and neither fixed the setting it would select before seeing the evaluation traffic. A service that sees only its own traffic is thus left without controlled evidence on the question it can act on: whether to count sends per block or to test the outcomes of their codes, at what quota or threshold, and at what price to its own users.
+The two closest studies therefore each act on one destination signal, and neither measures what acting on it costs. \citet{huh2025ait} report that about 92\% of attack requests fell on prefixes with zero conversion, against 21\% for genuine traffic, so whether codes are entered is informative; but the signal enters a classifier that needs labeled traffic and was not released because it is deployed. \citet{zaliskyi2026ait} act on send counts alone, without outcomes, and conclude that counts by themselves cannot safely separate inflated traffic from a campaign. Neither reports what a destination policy costs the legitimate users who share a number block with the attacker, neither reports its cost when there is no attack, and neither fixed the setting it would select before seeing the evaluation traffic.
 
-We make that comparison in simulation, inside a complete defense for a registration flow. We start from a baseline of seven controls, v1, and show how an attacker within a stated threat model breaks each of eight assumptions behind them. Our twelve-step redesign takes the platform from an attestation rather than a header, binds requests to signed sessions, checks the number before a message is paid for, builds reputation from whether earlier codes were entered, scores each request into one of five responses, and enforces a hard budget (Figure~\ref{fig:steps} and Algorithm~\ref{alg:v2}); on the destination it offers two label-free policies keyed on the 8-digit number block, a short-window counter of sends and sequential tests of code outcomes. We run seven designs and 25 scripted attacker profiles, from a single address to pumpers that enter codes, fake delivery receipts or buy challenge solutions, over simulated users on a simulated clock (Figure~\ref{fig:method}). We committed two protocols before their runs: the first selects destination settings on tuning seeds at a benign service target, and the second, written after that selection, freezes the selected counter and tests five claims on seeds and workloads held out from selection. We release the implementation, the protocols and every run's configuration and outcome~\citep{otpguard2026}. Everything is simulated: three behavioral parameters have published counterparts and the rest are our assumptions, so the results describe our generator rather than real traffic.
+\subsection{Problem statement}
+\label{sec:problem}
+A service that sees only its own traffic must decide, for every request, whether to pay for a message to a number it cannot verify, on behalf of a client that has no account yet. Source-side controls tax identities that are cheap to replace, supervised detection needs labels the service does not have when it decides, and the two destination signals it can compute without labels, the number of sends to a block and the fate of their codes, have never been compared on the same traffic with the cost to legitimate users made part of the result. The question we address therefore has three parts. On the source side, how much of the flooding that a seven-control baseline admits does a twelve-step redesign contain, at what cost in completed registrations, and through which layer? Where identities are cheap, when does reputation built from verification outcomes stop separating an attacker from the users whose keys it shares, and what does rationing then cost and depend on? On the destination, where a pumper is paid, does counting sends per number block or testing the outcomes of their codes leak less, under which conditions does the answer reverse, and what does either policy cost the legitimate users who share a block, with and without an attack?
 
-We ask one question in three parts. On the source side, how much of the flooding that a seven-control baseline admits does a twelve-step redesign contain, at what cost in completed registrations, and through which layer? Where identities are cheap, when does reputation built from verification outcomes stop separating an attacker from the users whose keys it shares, and what does rationing then cost and depend on? On the destination, where a pumper is paid, does counting sends per number block or testing the outcomes of their codes leak less, under which conditions does the answer reverse, and what does either policy cost the legitimate users who share a block, with and without an attack? We make four contributions.
-\begin{itemize}
+\subsection{Contributions}
+\label{sec:contrib}
+We answer these questions in simulation, inside a complete defense for a registration flow. We start from a baseline of seven controls, v1, and show how an attacker within a stated threat model breaks each of eight assumptions behind them. Our twelve-step redesign takes the platform from an attestation rather than a header, binds requests to signed sessions, checks the number before a message is paid for, builds reputation from whether earlier codes were entered, scores each request into one of five responses, and enforces a hard budget (Figure~\ref{fig:steps} and Algorithm~\ref{alg:v2}); on the destination it offers two label-free policies keyed on the 8-digit number block, a short-window counter of sends and sequential tests of code outcomes. We run seven designs and 25 scripted attacker profiles, from a single address to pumpers that enter codes, fake delivery receipts or buy challenge solutions, over simulated users on a simulated clock (Figure~\ref{fig:method}), under two protocols we committed before their runs. We release the implementation, the protocols and every run's configuration and outcome~\citep{otpguard2026}. Everything is simulated: three behavioral parameters have published counterparts and the rest are our assumptions, so the results describe our generator rather than real traffic. The contributions of this article are as follows.
+\begin{enumerate}
 \item \textbf{A design, as pseudocode and as code.} We show how an attacker breaks eight assumptions behind a seven-control baseline (Section~\ref{sec:baseline}), close the gaps with a twelve-step pipeline whose trust comes from attestation, signed sessions and the fate of earlier codes (Figure~\ref{fig:steps}, Algorithm~\ref{alg:v2}), and release the implementation with a regression test for every replay and concurrency defect we found on the way.
 \item \textbf{The limits of source-side reputation.} We measure where reputation built from code outcomes stops separating a residential attacker from the users whose keys it shares, and what rationing then costs: the default cap holds a CAPTCHA farm to 46\% of its requests by refusing 54\% of first-time users (Sections~\ref{sec:separability}--\ref{sec:rationing}).
 \item \textbf{Counting against testing, under predeclared protocols.} We compare a short-window counter of sends per number block with sequential tests of code outcomes, selected at a stated service target, then frozen and tested on held-out seeds and workloads, and charge each policy with its leakage, its attack-free cost and its harm to the users who share a block with the attacker (Sections~\ref{sec:pumping}--\ref{sec:fp}).
 \item \textbf{Unfitted leakage estimates.} From the rules and the attack rate alone we derive when counting leaks less than testing, and check the estimates against measurements over attacks of up to an hour: they ordered the policies' mean leakage in 18 of 18 decisive cells with the cold-start bound and 17 with the warm-start bound (Section~\ref{sec:model}, Figures~\ref{fig:boundaryb} and~\ref{fig:boundaryc}).
-\end{itemize}
-Section~\ref{sec:related} reviews related work; Section~\ref{sec:design} gives the baseline, the threat model and our design with its leakage estimates; Section~\ref{sec:method} our methodology; Section~\ref{sec:results} reports the results; Section~\ref{sec:discussion} discusses them, sets the design against the benchmark designs and the nearest work, and states the limitations; Section~\ref{sec:conclusion} concludes.
+\end{enumerate}
+
+\subsection{Organization}
+The remainder of this article is organized as follows. Section~\ref{sec:related} reviews the related work and states the gap. Section~\ref{sec:design} gives the baseline and its gaps, the threat model, the design and its leakage estimates. Section~\ref{sec:method} describes the implementation, the simulator, the two protocols and the metrics. Section~\ref{sec:results} reports the results. Section~\ref{sec:discussion} discusses them, sets the design against the benchmark designs and the nearest work, and states the limitations. Section~\ref{sec:conclusion} concludes the article.
 
 % ---------------------------------------------------------------------------
 \section{Related work}
@@ -157,7 +121,7 @@ Table~\ref{tab:related} compares the works closest to ours on the evidence they 
 \label{tab:related}
 \scriptsize
 \setlength{\tabcolsep}{5pt}
-\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}>{\raggedright\arraybackslash}p{2.1cm}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{3.2cm}>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}p{2.7cm}>{\raggedright\arraybackslash}p{3.0cm}@{}}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}>{\raggedright\arraybackslash}p{2.1cm}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{3.2cm}>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}p{2.7cm}>{\raggedright\arraybackslash}p{2.9cm}@{}}
 \toprule
 Work & Evidence & Signal acted on & Where it acts & Cost to legitimate users & Left open for an OTP service \\
 \midrule
@@ -430,14 +394,14 @@ Across 18 spread configurations, leakage follows the blocks touched: with 30 blo
 
 \begin{figure*}[!t]
 \centering
-\includegraphics[width=0.82\textwidth]{fig6_matched_a}
+\includegraphics[width=0.74\textwidth]{fig6_matched_a}
 \caption{Each setting's leakage against the completion it costs.}
 \label{fig:matched}
 \end{figure*}
 
 \begin{figure*}[!t]
 \centering
-\includegraphics[width=0.72\textwidth]{fig6_matched_b}
+\includegraphics[width=0.66\textwidth]{fig6_matched_b}
 \caption{Each selected setting against the default tests, carrier by carrier.}
 \label{fig:matchedpaired}
 \end{figure*}
@@ -588,30 +552,23 @@ The nearest external work is set out in Table~\ref{tab:related}, and it can be c
 We simulated everything and assumed the calibration. We wrote both protocols for our own generator, the second knowing which counters had won. Some results follow from the generator (a perfect premium list, a datacenter attacker that declines challenges, returning users who always present verified history), and our selection rule used an unweighted sum of four scripted pumpers' leakage and a mean service target met on tuning seeds, which guarantees no service level elsewhere. Close rankings rest on ten or fewer seeds, and costs that round to zero are not shown equivalent. Per-client quotas within a block, carrier spend ceilings, bounded exemptions, tuned token buckets, and other sequential statistics lie outside the evaluated policies. Vendor adapters are untested live, and the timing result holds only for the observer tested. Destination policies challenge people for what strangers sharing their block did, and deployment under the GDPR or Saudi Arabia's PDPL needs a lawful basis and a route for refused users.
 
 % ---------------------------------------------------------------------------
-\section{Conclusions and future work}
+\section{Conclusion}
 \label{sec:conclusion}
+In this work we asked which of two label-free destination signals a service that verifies phone numbers by SMS should act on when a pumper is paid on the destination, and we answered it in simulation, inside a twelve-step defense evaluated against a seven-control baseline, five simpler designs and 25 attacker profiles under two protocols committed before their runs. The design contains the attacks that carry a signature in the request at a low cost to simulated users, while a residential attacker that resembles a person can only be rationed, at a price set by how well the cap tracks the legitimate rate. On the destination, a counter of sends per number block whose quota matches the block's traffic leaked less than tests of code outcomes against short, concentrated pumping and cost its users less, but it failed its service claims on blocks the attacker shares and lost its advantage against paced or widely spread pumpers; estimates derived from the rules alone ordered the two policies in 18 of 18 decisive cells. Every number describes scripted attackers and simulated users under assumed calibration, and close rankings rest on ten or fewer seeds. Replaying real traffic is the experiment this work most needs; the policies left outside the evaluation, per-client quotas within a block, bounded exemptions, tuned token buckets and time-uniform statistics, could then be compared under the same protocols.
 
-We asked how a service that verifies phone numbers by SMS should defend an endpoint that must answer strangers, and in particular which of two label-free destination signals, the number of sends to a number block or the outcomes of the codes sent, it should act on when a pumper is paid on the destination. We answered it in simulation: we ran our twelve-step redesign of a seven-control baseline against 25 scripted attacker profiles and six other designs, and compared the two destination policies under two protocols we committed before their runs, with the cost to legitimate users made part of the result.
+\section*{Acknowledgment}
+The author used Claude (Anthropic) for code, evaluation, drafting and editing, checked every number against the recorded results and every claim against the code, and takes full responsibility for the content.
 
-On the source side, our design contains the attacks that carry a signature in the request, a single address, a datacenter range or a premium prefix, at a low cost to simulated users, holds walked numbers and a reused profile to 11.5\% and 22.5\% of their requests, and the ablation attributes these gains to the adaptive caps, the risk engine, the feedback loop and the block key. Against a residential attacker that resembles a person, outcome-based reputation stops separating once its failures land on keys that legitimate users share; in the settings run, it separated an attacker only on keys its sends dominated. What remains is rationing, whose cost depends on how well the cap tracks the legitimate rate: the deployed job leaked 193 messages with a clean three-week profile and 340 more on a cold start, while the default cap refused 41\% of legitimate users. On the destination, counting sends leaked less in aggregate than our outcome tests against concentrated pumpers, although not reliably against an instantly verifying carrier; the frozen counter failed its service claims when the attacker shared blocks with real users and lost its advantage against wide, paced and trust-building pumpers. Within an hour, unfitted estimates ordered the policies' mean leakage in 18 of 18 decisive boundary cells with the cold-start bound and 17 with the warm-start bound, missing a near tie; the crossing was algebraic, not a measured switching point. Without an attack, the default tests raise 0.5 verdict events a day on 200 busy blocks at 80\% conversion and 6.5 at 65\%, and a counter of four sends per ten minutes costs a block's users 2.3 points.
-
-Against the six benchmark designs run on the same traffic (Section~\ref{sec:compare}), the behavioral layers are what removed datacenter rotation and most of the reused profile, a per-block counter alone held the premium and walked-number attacks, and no design separated the residential farm. For an operator, the practical content is an ordering, not a recommendation. Against short, concentrated pumping on a few blocks, a counter of sends per block whose quota matches the block's legitimate traffic leaked less than tests of code outcomes and cost its users less, and the inputs of the estimate that orders the two, the attack rate, the blocks touched and the time a send stays unresolved, are in an operator's logs; the cost of an excess send, the competition for a quota on a shared block and the abuse of exemptions come only from the simulation. The quota must match the traffic: counters selected for sparser blocks cost 4.7 and 5.8 points on busier ones even without an attack. Every number describes scripted attackers and simulated users under assumed calibration, not real traffic, and close rankings rest on ten or fewer seeds.
-
-Replaying real traffic is the experiment our work most needs: it would test the assumed calibration, the cost of an excess send to users who share a block, and the quota a counter needs per block. The policies left outside the evaluation, per-client quotas within a block, bounded exemptions, tuned token buckets and windowed or time-uniform statistics, could then be compared under the same predeclared protocols.
-
-\section*{Declaration of generative AI and AI-assisted technologies in the writing process}
-The author used Claude (Anthropic) for code, evaluation, drafting and editing; checked numbers against the recorded results and claims against the code; and takes full responsibility for the content.
-
-\section*{CRediT authorship contribution statement}
-\textbf{Naveed Ahmed:} Conceptualization, Methodology, Software, Validation, Investigation, Writing -- original draft, Writing -- review \& editing.
-
-\section*{Declaration of competing interest}
-The author declares no known competing financial interests or personal relationships that could have appeared to influence this work.
+\section*{Funding and competing interests}
+No funding was received for this work. The author has no competing interests to declare.
 
 \section*{Data availability}
-{\raggedright No human or real traffic data was used. Code, protocols (\texttt{config/}), every run's configuration and outcome and the sources of headline numbers (\texttt{results/}) are at \url{https://github.com/nahmedpsu/OTP-DDOS}, release 2.9.1 (tag v2.9.1), which runs unchanged the code of release 2.9.0 (tag v2.9.0, commit 9af3100) that produced the results (\texttt{code\_identity.md}); the 2.8.0 results are in \texttt{results/\allowbreak historical\_2.8}. These files are the supplementary material.\par}
+No human or real traffic data was used. Code, protocols (\texttt{config/}), every run's configuration and outcome and the sources of headline numbers (\texttt{results/}) are at \url{https://github.com/nahmedpsu/OTP-DDOS}, release 2.9.1 (tag v2.9.1), which runs unchanged the code of release 2.9.0 (tag v2.9.0, commit 9af3100) that produced the results (\texttt{code\_identity.md}); the 2.8.0 results are in \texttt{results/\allowbreak historical\_2.8}. These files are the supplementary material.
 
-\bibliographystyle{elsarticle-harv}
+\bibliographystyle{IEEEtranN-doi}
 \bibliography{refs}
+
+\vspace{8pt}
+\noindent{\sffamily\footnotesize{\bfseries NAVEED AHMED} is with the College of Computer and Information Science, Prince Sultan University, Riyadh, Saudi Arabia (e-mail: nahmed@psu.edu.sa).\par}
 
 \end{document}

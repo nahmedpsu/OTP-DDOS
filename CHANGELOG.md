@@ -27,6 +27,14 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   is split into two tables (pumper; poisoner), the study map is supplementary Table S2
   (`results/study_map.md`), and the boundary figure is redrawn with larger text and separate legends
   for measurements and estimates.
+- **Manuscript reformatted for the IEEE Open Journal of the Communications Society (paper only).**
+  `paper/ojcoms.sty` gives the journal's look (two columns, Times, Roman-numeral sections, FIGURE and
+  TABLE captions, ABSTRACT and INDEX TERMS block) and `IEEEtranN-doi.bst` the numeric IEEE references;
+  the abstract is one paragraph under 250 words; the introduction ends with Problem statement,
+  Contributions and Organization subsections; the conclusion is one paragraph; Algorithm 2 is a
+  plain-language 21-line version and Algorithm 3 a structured one; every reference was checked
+  against its publisher's record (two author lists corrected: Mi et al. 2019, Richter et al. 2016);
+  `make_docx.py` writes the Word version with numeric citations and the IEEE captions.
 - **Manuscript in the journal's article structure (after the 2.9.1 tag; paper only, no code or
   result change).** Author-year references, two-column layout, Elsevier captions; sections
   Introduction, Related work (with a comparison table and a figure of the request path,

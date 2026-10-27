@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Word version of the manuscript, built from the same sources as the PDF (main.tex, the generated
-tables, the figures, and the label, citation and bibliography data of the last LaTeX run).
+"""Word version of the manuscript (IEEE OJ-COMS layout: numeric citations, FIGURE/TABLE captions, Roman
+section numbers), built from the same sources as the PDF (main.tex, the generated tables, the figures,
+and the label, citation and bibliography data of the last LaTeX run).
 
     latexmk -pdf main.tex          # writes main.aux and main.bbl, which this script reads
     python3 make_docx.py           # writes main.docx
@@ -51,18 +52,19 @@ def labels_and_cites():
         labels[m.group(1)] = m.group(2)
     # natbib author-year entries: \bibcite{key}{{n}{year}{{short author}}{{full author list}}}
     cites = {}
-    for m in re.finditer(r"\\bibcite\{([^}]*)\}\{\{(\d+)\}\{([^}]*)\}\{\{([^}]*)\}\}", aux):
+    for m in re.finditer(r"\\bibcite\{([^}]*)\}\{\{(\d+)\}\{([^}]*)(?:\{\})?\}\{\{([^}]*)\}\}", aux):
         cites[m.group(1)] = (int(m.group(2)), m.group(4).replace("~", " "), m.group(3))
     return labels, cites
 
 
 def cite_text(keys, cites, textual=False):
-    """Author-year citations as the elsarticle-harv style prints them: (Huh et al., 2025; Page, 1954)
-    in parentheses, or Huh et al. (2025) when the authors are part of the sentence."""
+    """Numeric citations as the IEEE style prints them: [4], [9] in the text, or Huh et al. [4] when the
+    authors are part of the sentence."""
     items = [cites[k.strip()] for k in keys.split(",")]
+    nums = ", ".join(f"[{n}]" for n, _, _ in items)
     if textual:
-        return "; ".join(f"{a} ({y})" for _, a, y in items)
-    return "(" + "; ".join(f"{a}, {y}" for _, a, y in items) + ")"
+        return " and ".join(f"{a} [{n}]" for n, a, _ in items)
+    return nums
 
 
 def table_rows(path):
@@ -84,22 +86,38 @@ def body_latex():
     labels, cites = labels_and_cites()
     s = s[s.index("\\begin{document}") + len("\\begin{document}"):s.index("\\end{document}")]
 
-    # front matter -> title, author lines, abstract, keywords
-    fm = s[s.index("\\begin{frontmatter}"):s.index("\\end{frontmatter}") + len("\\end{frontmatter}")]
-    title, _ = braced(fm, fm.index("\\title{") + 6)
-    org = re.search(r"organization=\{([^}]*)\}", fm).group(1)
-    city = re.search(r"city=\{([^}]*)\}", fm)
-    country = re.search(r"country=\{([^}]*)\}", fm).group(1)
-    if city:
-        country = f"{city.group(1)}, {country}"
-    email = re.search(r"\\ead\{([^}]*)\}", fm).group(1)
-    author = re.search(r"\\author\[[^\]]*\]\{([^\\}]*)", fm).group(1).strip()
-    abstract = fm[fm.index("\\begin{abstract}") + 16:fm.index("\\end{abstract}")].strip()
-    keywords = re.sub(r"\s*\\sep\s*", "; ", fm[fm.index("\\begin{keyword}") + 15:fm.index("\\end{keyword}")].strip())
-    front = (f"TITLEMARK {title}\n\nAUTHORMARK {author}\\textsuperscript{{*}}\n\n"
-             f"AFFILMARK {org}, {country}\n\nCORRMARK \\textsuperscript{{*}}Corresponding author. E-mail: {email}\n\n"
-             f"ABSTRACTHEAD Abstract\n\nABSTRACTMARK {abstract}\n\nKEYWORDSMARK \\textit{{Keywords:}} {keywords}\n\n")
-    s = s.replace(fm, front)
+    # front matter -> title, author lines, abstract, index terms (the \\ojtitlepage block of main.tex)
+    i = s.index("\\ojtitlepage")
+    j = i + len("\\ojtitlepage")
+    parts = []
+    for _ in range(6):
+        while s[j] != "{":
+            j += 1
+        part, j = braced(s, j)
+        parts.append(part)
+    title, author, affil, corr, abstract, terms = parts
+    author = re.sub(r"\\textsuperscript\{[^}]*\}", "", author).strip()
+    affil = re.sub(r"\\textsuperscript\{[^}]*\}", "", affil).strip()
+    front = (f"TITLEMARK {title}\n\nAUTHORMARK {author}\n\nAFFILMARK {affil}\n\nCORRMARK CORRESPONDING AUTHOR: {corr}\n\n"
+             f"ABSTRACTMARK \\textbf{{ABSTRACT}} {abstract}\n\nKEYWORDSMARK \\textbf{{INDEX TERMS}} {terms}\n\n")
+    s = s[:i] + front + s[j:]
+    s = re.sub(r"\\IEEEPARstart\{([^}]*)\}\{([^}]*)\}", r"\1\2", s)
+    s = re.sub(r"\\ojrunningheadset\{[^}]*\}", "", s)
+    # section numbers as the PDF prints them: I. SECTION, A. SUBSECTION, 1) SUB-SUBSECTION
+    counters = [0, 0, 0]
+    roman = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+    def number_heading(m):
+        level, name = m.group(1), m.group(2)
+        if level == "section":
+            counters[0] += 1; counters[1] = counters[2] = 0
+            return f"\\section*{{{roman[counters[0] - 1]}. {name.upper()}}}"
+        if level == "subsection":
+            counters[1] += 1; counters[2] = 0
+            return f"\\subsection*{{{chr(64 + counters[1])}. {name.upper()}}}"
+        counters[2] += 1
+        return f"\\subsubsection*{{{counters[2]}) {name.upper()}}}"
+    s = re.sub(r"\\(section|subsection|subsubsection)\{([^}]*)\}", number_heading, s)
+    s = re.sub(r"\\section\*\{([^}]*)\}", lambda m: m.group(0) if m.group(1)[:1] in "IVX" and ". " in m.group(1) else f"\\section*{{{m.group(1).upper()}}}", s)
 
     # generated tables, figures, layout-only commands
     s = re.sub(r"\\tablerows\{([^}]*)\}", lambda m: table_rows(m.group(1)), s)
@@ -124,8 +142,8 @@ def body_latex():
         num = labels.get(lab.group(1), "?") if lab else "?"
         i = inner.index("\\caption{")
         cap, end = braced(inner, i + 8)
-        # Elsevier captions: "Table 1" on its own line above the table; "Fig. 1." run in below the figure
-        head = f"\\textbf{{Table {num}}} TBLBRK " if env == "table" else f"\\textbf{{Fig. {num}.}} "
+        # IEEE OJ-COMS captions: "TABLE 1." above the table, "FIGURE 1." below the figure
+        head = f"\\textbf{{TABLE {num}.}} " if env == "table" else f"\\textbf{{FIGURE {num}.}} "
         inner = inner[:i] + "\\caption{" + head + cap + "}" + inner[end:]
         return f"\\begin{{{env}}}{inner}\\end{{{env}}}"
     s = re.sub(r"\\begin\{(table|figure)\}(.*?)\\end\{\1\}", number_caption, s, flags=re.S)
@@ -182,7 +200,7 @@ def body_latex():
     # references from the bibliography of the LaTeX run
     bbl = BBL.read_text()
     bbl = re.sub(r"%[^\n]*\n", "", bbl)
-    items = re.split(r"\\bibitem\[\{(?:[^{}]|\{[^{}]*\})*\}\]\{([^}]*)\}", bbl)
+    items = re.split(r"\\bibitem\[(?:[^\[\]]|\[[^\]]*\])*\]\{([^}]*)\}", bbl)
     refs = []
     for k in range(1, len(items), 2):
         key, text = items[k], items[k + 1]
@@ -191,11 +209,16 @@ def body_latex():
         text = re.sub(r"\\href\s*\{([^}]*)\}\s*\{\\path\{([^}]*)\}\}", r"\\url{\1}", text)
         text = re.sub(r"\\DOIprefix\\doi\{([^}]*)\}", r"https://doi.org/\1", text)
         text = re.sub(r"\\doi\{([^}]*)\}", r"https://doi.org/\1", text)
+        text = re.sub(r"\\BIBdoi\{([^}]*)\}", r"\1", text)
+        text = re.sub(r"\\hskip [^\\]*\\relax", " ", text)
+        text = text.replace("\\emph{", "\\textit{")
         text = text.replace("\\URLprefix", "URL: ").replace("\\ArXivprefix", "arXiv:")
         text = re.sub(r"\s+", " ", text).strip()
-        refs.append(f"REFMARK {text}")
+        refs.append(f"REFMARK [{len(refs) + 1}] {text}")
     s = re.sub(r"\\bibliographystyle\{[^}]*\}\s*\\bibliography\{[^}]*\}",
-               lambda m: "\\section*{References}\n\n" + "\n\n".join(refs) + "\n", s)
+               lambda m: "\\section*{REFERENCES}\n\n" + "\n\n".join(refs) + "\n", s)
+    s = re.sub(r"\\vspace\{[^}]*\}", "", s)
+    s = re.sub(r"\\noindent\{\\sffamily(?:\\footnotesize)?\{\\bfseries ([^}]*)\}(.*?)\\par\}", r"\n\n\\textbf{\1}\2\n", s, flags=re.S)
     return "\\documentclass{article}\n\\begin{document}\n" + s + "\n\\end{document}\n"
 
 
@@ -338,9 +361,9 @@ def style_document(path):
                 st.paragraph_format.space_after = Pt(4)
                 st.paragraph_format.line_spacing = 1.0
 
-    marks = {"TITLEMARK ": ("title", 16), "AUTHORMARK ": ("author", 12), "AFFILMARK ": ("affil", 11),
-             "CORRMARK ": ("corr", 10), "ABSTRACTHEAD ": ("abshead", 12), "ABSTRACTMARK ": ("abstract", 12),
-             "KEYWORDSMARK ": ("keywords", 12), "REFMARK ": ("ref", 10)}
+    marks = {"TITLEMARK ": ("title", 16), "AUTHORMARK ": ("author", 12), "AFFILMARK ": ("affil", 10),
+             "CORRMARK ": ("corr", 9), "ABSTRACTMARK ": ("abstract", 11),
+             "KEYWORDSMARK ": ("keywords", 11), "REFMARK ": ("ref", 10)}
     for p in doc.paragraphs:
         for mark, (kind, size) in marks.items():
             if p.text.startswith(mark):
@@ -362,13 +385,13 @@ def style_document(path):
                             el = OxmlElement(tag); rpr.append(el)
                         el.set(qn("w:val"), str(2 * size))
                 for r in p.runs:
-                    if kind in ("title", "abshead"):
+                    if kind == "title":
                         r.bold = True
-                    if kind == "affil":
-                        r.italic = True
+                    if kind == "author":
+                        r.font.small_caps = True
                 pf = p.paragraph_format
                 if kind in ("title", "author", "affil", "corr"):
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER if kind != "corr" else WD_ALIGN_PARAGRAPH.LEFT
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     pf.space_after = Pt(6)
                 if kind == "ref":
                     pf.left_indent, pf.first_line_indent = Cm(0.8), Cm(-0.8)
@@ -432,7 +455,7 @@ def main():
         src = pathlib.Path(d) / "word.tex"
         src.write_text(tex)
         (HERE / "build_word.tex").write_text(tex)                    # kept for inspection; not committed
-        subprocess.run(["pandoc", str(src), "-f", "latex", "-t", "docx", "--number-sections",
+        subprocess.run(["pandoc", str(src), "-f", "latex", "-t", "docx",
                         "--resource-path", str(HERE), "-o", str(OUT)], check=True)
     style_document(OUT)
     print("wrote", OUT)

@@ -1,5 +1,5 @@
-# Build the manuscript. Needs a TeX Live with latexmk; elsarticle.cls and the
-# elsarticle-harv style are vendored here from the Elsevier distribution.
+# Build the manuscript. Needs a TeX Live with latexmk; ojcoms.sty (the IEEE OJ-COMS look on the
+# article class) and IEEEtranN-doi.bst (the numeric IEEE reference style) are vendored here.
 all: main.pdf
 main.pdf: main.tex refs.bib figures/*.pdf
 	latexmk -pdf -interaction=nonstopmode main.tex

@@ -1,25 +1,26 @@
-% One simulation run (manuscript Section 4.2), as src/otp_guard/evaluation/sim.py executes it (release 2.9.0).
+% One simulation run (Section IV-B), as src/otp_guard/evaluation/sim.py executes it (release 2.9.0).
 % Shared by main.tex (Algorithm 3) and the standalone alg3_sim.tex that renders it for the Word version.
-\providecommand{\gap}[1]{\Statex \hspace{\algorithmicindent}{\color{black!60}$\triangleright$ \textit{#1}}}
 \begin{algorithmic}[1]
-\Require a design (its feature set and settings), an attacker profile $a$, a legitimate-traffic specification $\ell$, a seed, and $T$ attack minutes
-\State derive three random streams from the seed: $\mathrm{rng}_\ell$ (users), $\mathrm{rng}_w$ (attacker) and $\mathrm{rng}_p$ (whether a challenged person solves the challenge)
-\gap{the same seed offers the same users to every scenario, so comparisons are paired; a digest of the offered trace is checked across designs}
-\State build the pipeline of \algvtwo{} on the in-memory store, with fakes for CAPTCHA, address intelligence, HLR, the sender and WhatsApp; seed the returning population (20\%) with verified history
-\For{minute $= -\text{warm-up}, \dots, T-1$} \Comment{warm-up 10 min, or 30 or 130 for pumping; the attack starts at minute 0}
-  \State $n_\ell \sim \mathrm{Poisson}(\ell.\mathrm{rate})$ from $\mathrm{rng}_\ell$ and $n_a \sim \mathrm{Poisson}(a.\mathrm{rate})$ from $\mathrm{rng}_w$; draw each arrival's time inside the minute and sort
-  \For{each arrival at time $t$}
-    \State apply every event due by $t$ (receipt, code entry, resend) at its own time, then set the clock to $t$
-    \State draw the request's exogenous quantities in advance: identity, address, number, CAPTCHA scores, delivery delay, whether and when the person would verify, WhatsApp reachability
-    \State $r \gets$ \textsc{ProcessRequest}(request) \Comment{\algvtwo{}; a challenged user retries with probability 0.9, a challenge-buying attacker always}
-    \If{$r$ sent an SMS} schedule the receipt at $t$ plus the queue and delivery delays, and a code entry after the recipient's delay if it verifies
-    \gap{a pumper's carrier verifies as its profile says: always within 1\,s, 60\% after 30\,s, or only when the block's statistic nears its threshold; a receipt faker schedules a failed receipt}
+\Require design $d$, attacker profile $a$, legitimate-traffic specification $\ell$, seed $z$, attack minutes $T$, warm-up minutes $W$
+\Ensure the run record $R$
+\State $(\mathrm{rng}_\ell, \mathrm{rng}_w, \mathrm{rng}_p) \gets \textsc{Streams}(z)$ \Comment{users, attacker, challenge outcomes; the same $z$ offers the same users to every scenario}
+\State $P \gets \textsc{BuildPipeline}(d)$ on the in-memory store with vendor fakes; \textsc{SeedReturningUsers}$(P, 0.2)$
+\State $E \gets \emptyset$; $\mathrm{leaked}, \mathrm{offered} \gets$ empty arrays \Comment{$E$: timed events (receipts, code entries, resends)}
+\For{$m \gets -W$ \textbf{to} $T - 1$}
+  \State $n_\ell \sim \mathrm{Poisson}(\ell.\mathrm{rate})$ from $\mathrm{rng}_\ell$; \ $n_a \sim \mathrm{Poisson}(a.\mathrm{rate})$ from $\mathrm{rng}_w$ if $m \ge 0$, else $0$
+  \State $A \gets$ the $n_\ell + n_a$ arrivals with times drawn inside minute $m$, sorted by time
+  \ForAll{$(t, \mathrm{kind}) \in A$}
+    \State \textsc{ApplyEvents}$(E, t)$; $\mathrm{clock} \gets t$
+    \State $q \gets \textsc{DrawRequest}(\mathrm{kind})$ \Comment{identity, address, number, CAPTCHA scores, delays and whether the person would verify, all drawn in advance}
+    \State $r \gets P.\textsc{ProcessRequest}(q)$ \Comment{\algvtwo{}}
+    \If{$r$ = challenge \textbf{and} $q$ solves it} $r \gets P.\textsc{ProcessRequest}(q \,\|\, \mathrm{solution})$ \EndIf
+    \If{$r$ sent an SMS}
+      \State push onto $E$ a receipt at $t + \mathrm{queue} + \mathrm{delivery}$ and, if $q$ verifies, a code entry after its delay
     \EndIf
   \EndFor
-  \State apply events to the minute boundary; run the feedback loop's resolution timeouts (\textsc{OnOutcome} of \algvtwo{}); run the adaptive job of Step~9 at its cadence
-  \gap{oracle job: told the legitimate rate; learned job: reads the pipeline's own counters, so cold start and poisoning are in play}
-  \State record the attack requests offered and the SMS leaked this minute, and every user's progress through the funnel
+  \State \textsc{ApplyEvents}$(E, \mathrm{end}(m))$; $P.\textsc{ResolveTimeouts}()$; $P.\textsc{AdaptiveJob}()$ at its cadence
+  \If{$m \ge 0$} $\mathrm{leaked}[m] \gets$ SMS sent to $a$ in minute $m$; $\mathrm{offered}[m] \gets n_a$ \EndIf
 \EndFor
-\State drain: apply events until the receipt grace, the resolution timeout, the slowest code entry and a resend have elapsed after the last minute
-\State \Return leakage per minute and containment; each user's funnel (dispatched, delivered, completed, challenged, refused) by cohort; verdict events; the attacker's verifications, challenges solved and bill; the configuration, seed, workload digest and code hash
+\State \textsc{ApplyEvents}$(E, \mathrm{horizon})$ \Comment{drain: receipt grace, resolution timeout, the slowest entry and a resend}
+\State \Return $R \gets$ (leaked, offered, containment; each user's funnel by cohort; verdict events; the attacker's verifications, challenges solved and bill; $d$, $a$, $\ell$, $z$, the workload digest and the code hash)
 \end{algorithmic}
