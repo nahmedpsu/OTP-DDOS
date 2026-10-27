@@ -34,8 +34,8 @@ def ci(v, d=0):
 
 
 def ci2(v, d=0):
-    """A mean with its interval on a second, smaller line, so that wide tables stay legible (Table 7 of revision 8)."""
-    return f"\\begin{{tabular}}[t]{{@{{}}r@{{}}}}{n(v[0], d)}\\\\{{\\scriptsize [{n(v[1], d)}, {n(v[2], d)}]}}\\end{{tabular}}"
+    """A mean with its interval on the same line (Table 6 of revision 8; earlier revisions stacked the two)."""
+    return f"{n(v[0], d)} [{n(v[1], d)}, {n(v[2], d)}]"
 
 
 def headline(E):
@@ -161,10 +161,10 @@ def attacked(R5):
         q = four[key]
         ex, dg, bn = q["vs_attacked_none"], q["vs_attack_free_same_policy"], q["benign_cost"]
         if key == "none":
-            ra.append(f"{lab} & {ci2(q['leaked_sum'])} & -- & -- & {n(dg['all']['net_pct'][0], 2)} & {ci2(dg['attacked_block']['net_pct'], 1)} & -- \\\\[1pt]")
+            ra.append(f"{lab} & {ci2(q['leaked_sum'])} & -- & -- & {n(dg['all']['net_pct'][0], 2)} & {ci2(dg['attacked_block']['net_pct'], 1)} & -- \\\\")
         else:
             ra.append(f"{lab} & {ci2(q['leaked_sum'])} & {n(ex['all']['net_pct'][0], 2)} & {ci2(ex['attacked_block']['net_pct'], 1)} & "
-                      f"{n(dg['all']['net_pct'][0], 2)} & {ci2(dg['attacked_block']['net_pct'], 1)} & {n(bn['all']['net_pct'][0], 2)} \\\\[1pt]")
+                      f"{n(dg['all']['net_pct'][0], 2)} & {ci2(dg['attacked_block']['net_pct'], 1)} & {n(bn['all']['net_pct'][0], 2)} \\\\")
     P = A["poisoner"]
     rb = []
     for key, lab in pols:

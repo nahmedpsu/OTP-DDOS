@@ -27,6 +27,13 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   is split into two tables (pumper; poisoner), the study map is supplementary Table S2
   (`results/study_map.md`), and the boundary figure is redrawn with larger text and separate legends
   for measurements and estimates.
+- **Manuscript brought to 16 pages (paper only).** Figures 1-5 print at 0.72-0.82 of the text width;
+  Table 2 is set in the smaller table size; Table 6 prints each interval beside its mean instead of
+  under it (`scripts/paper_tables.py` `ci2`); and about 450 words of overlap are removed: the
+  architecture paragraph of Section III-C no longer lists what Figure 3 draws, the atomicity caveat
+  is stated once (IV-A), the feedback loop's backdating mechanics are one sentence, Sections II-B
+  and II-C drop detail that Table 1 and the Introduction carry, the gap is stated once (II-F) rather
+  than twice, and the Discussion's design walk keeps only the cells that differ from Table 3.
 - **Section V trimmed (paper only).** About 540 words of supporting detail removed from the results:
   the cold- and warm-start bookkeeping behind the leakage estimates, the per-seed agreement count, the
   undrawn no-policy line of Figure 7, the selection-rule robustness checks compressed to one sentence,
