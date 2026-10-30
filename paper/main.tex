@@ -7,21 +7,23 @@
 \documentclass{IEEEoj}
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
 \usepackage{graphicx,color}
 \usepackage{textcomp}
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage{xurl}
 \usepackage{stfloats}
-\usepackage{algorithm}
-\usepackage[noend]{algpseudocode}   % Require/Ensure procedures; used in place of the template's algorithmic
-\usepackage[colorlinks,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{algorithm}                % the "Algorithm n" float of algorithmic's own bundle
 \AtBeginDocument{\definecolor{ojcolor}{cmyk}{0.93,0.59,0.15,0.02}}
 \def\OJlogo{\vspace{-4pt}\hskip-4pt\includegraphics[height=18pt]{ojcoms.png}}
 \makeatletter
 \def\p@subsection{\thesection-}                 % cross-references read "Section III-C"
 \def\p@subsubsection{\thesection-\thesubsection} % and "Section V-F1"
 \newcommand{\tablerows}[1]{\@@input #1 }         % generated rows: scripts/paper_tables.py
+% a procedure block for Algorithm 2, on algorithmic's own indented block and in its keyword style
+\newcommand{\PROCEDURE}[2]{\STATE \textbf{procedure} \textsc{#1}$(#2)$\begin{ALC@g}}
+\newcommand{\ENDPROCEDURE}{\end{ALC@g}\STATE \textbf{end procedure}}
 \makeatother
 \newcommand{\scoreeq}{the score of~\eqref{eq:score}}
 \graphicspath{{figures/}}
@@ -159,7 +161,7 @@ Each control rests on an assumption that an attacker within the threat model of 
 \begin{algorithm}[!htb]
 \caption{The v1 baseline.}
 \label{alg:v1}
-\footnotesize
+\footnotesize\raggedright
 \input{figures/alg1_v1_body}
 \end{algorithm}
 
@@ -195,7 +197,7 @@ We designed the pipeline so that no message is paid for before every check passe
 
 A request passes the twelve steps of Fig.~\ref{fig:steps} in order until one refuses it. The figure numbers its stages in reading order: stages 1 to 4 are Steps~0 to~4, with Steps~3 and~4 drawn as one stage, the web checks; from stage~5 on the numberings coincide, and stage~12 is the feedback loop. The letters below are the gaps of Section~\ref{sec:baseline} that each step closes. Step~0 establishes the platform from an App Attest or Play Integrity result and refuses proxy addresses (A). Step~1 binds the request to a server-signed session with a fingerprint and a replay nonce, three requests per session per ten minutes (B). Step~2 throttles the address, its /24, and its autonomous system, with lower caps for hosting networks (B, F). Steps~3 and~4, for web requests only, check the reCAPTCHA score and the origin. Step~5 prices and checks the number before anything is paid for: its country and cost class, sequential or narrow-range bursts, liveness through an HLR lookup, and the verdict stage of its block, with the bulk flag now needing an internal credential (C, D, G). Step~6 validates the body and the exclusion list, the test flag needing a credential too (G). Step~7 computes the risk score of \eqref{eq:score} and chooses one of five tiers (H). Step~8 applies a per-number backoff, sixty seconds doubling to an hour and five sends a day. Step~9 takes the source caps per source, platform, and country, multiplied by the adaptive factor. Step~10 sets the operating mode from the hourly budget, elevated above 80\% and emergency at 100\% (E). Step~11 reserves the hourly count, spend, and any destination slot in one atomic operation, writes the state, and enqueues the message (E, H). A refusal at any step returns one uniform reply, and every send resolves through the feedback loop, whose per-key and per-block outcomes are what the next request is judged on.
 
-Algorithm~\ref{alg:v2} provides the same pipeline as that implemented, in the order of the steps, with the feedback loop of Section~\ref{sec:feedback} and the block statistics of Section~\ref{sec:blocks} as its second procedure. Its sets are those of Algorithm~\ref{alg:v1}, and $\theta_w$ is the web score threshold. \textsc{Take} claims one slot of a limit in one atomic operation and fails once the limit is reached; a refusal at any later line releases every slot claimed so far. \textsc{CheckNumber} returns the number's cost class $c$, whether the HLR lookup finds it live, and the verdict stage $v$ of its block; \textsc{Tier} maps the score to one of the five tiers and, for a client without verified history, raises it to challenge if $v = 1$ and to downgrade if $v = 2$; $m$ is the adaptive multiplier of Step~9 and $K$ is the source cap. \textsc{Reserve} takes the hourly count, the spend, and the block's counter slot together and returns the counter's stage $g$, by which \textsc{Raise} lifts the tier of a client without verified history past the quota (Section~\ref{sec:blocks}); \textsc{Dispatch} sends by SMS, or by push or WhatsApp at the downgrade tier, after a wait at the delay tier; and \textsc{Reply} is the uniform body. Read against Algorithm~\ref{alg:v1}, the pipeline differs in four ways: the platform is established before anything else and from evidence, every limit is taken atomically and released on refusal, the number is priced and checked before it is paid for, and the outcome of each send flows back into the keys and the destination block that the next request will be judged on. Each limit and reservation is one atomic operation, but the enclosing steps are not one transaction, and a crash between them can leak reservations (Section~\ref{sec:impl}); address limits and source caps count requests, except that a request Step~11 challenges returns its source-cap count. Every outcome after Step~0, except the challenge, returns one HTTP~200 body after at least 400\,ms, a floor that cannot hide longer work.
+Algorithm~\ref{alg:v2} provides the same pipeline as that implemented, in the order of the steps, with the feedback loop of Section~\ref{sec:feedback} and the block statistics of Section~\ref{sec:blocks} as its second procedure. Its sets are those of Algorithm~\ref{alg:v1}, and $\theta_w$ is the web score threshold. \textsc{Take} claims one slot of a limit in one atomic operation and fails once the limit is reached; a refusal at any later line releases every slot claimed so far. \textsc{CheckNumber} returns the number's cost class $c$, its country $u$, whether the HLR lookup finds it live, and the verdict stage $v$ of its block; \textsc{Tier} maps the score to one of the five tiers and, for a client without verified history, raises it to challenge if $v = 1$ and to downgrade if $v = 2$; $m$ is the adaptive multiplier of Step~9 and $K$ is the source cap. \textsc{Reserve} takes the hourly count, the spend, and the block's counter slot together and returns the counter's stage $g$, by which \textsc{Raise} lifts the tier of a client without verified history past the quota (Section~\ref{sec:blocks}); \textsc{Dispatch} sends by SMS, or by push or WhatsApp at the downgrade tier, after a wait at the delay tier; and \textsc{Reply} is the uniform body. Read against Algorithm~\ref{alg:v1}, the pipeline differs in four ways: the platform is established before anything else and from evidence, every limit is taken atomically and released on refusal, the number is priced and checked before it is paid for, and the outcome of each send flows back into the keys and the destination block that the next request will be judged on. Each limit and reservation is one atomic operation, but the enclosing steps are not one transaction, and a crash between them can leak reservations (Section~\ref{sec:impl}); address limits and source caps count requests, except that a request Step~11 challenges returns its source-cap count. Every outcome after Step~0, except the challenge, returns one HTTP~200 body after at least 400\,ms, a floor that cannot hide longer work.
 
 \begin{figure*}[!t]
 \centering
@@ -207,7 +209,7 @@ Algorithm~\ref{alg:v2} provides the same pipeline as that implemented, in the or
 \begin{algorithm}[!tb]
 \caption{The v2 pipeline and its feedback loop.}
 \label{alg:v2}
-\footnotesize
+\footnotesize\raggedright
 \input{figures/alg2_v2_body}
 \end{algorithm}
 
@@ -282,7 +284,7 @@ Fig.~\ref{fig:method} summarizes how we evaluated the design. Our implementation
 \begin{figure*}[!t]
 \centering
 \includegraphics[width=0.72\textwidth]{fig11_method.png}
-\caption{How we evaluated the design is described below.}
+\caption{Overview of how we evaluated the design.}
 \label{fig:method}
 \end{figure*}
 
@@ -297,7 +299,7 @@ We run the pipeline against scripted vendor fakes on a simulated clock, as set o
 \begin{algorithm}[!htb]
 \caption{One simulation run.}
 \label{alg:sim}
-\footnotesize
+\footnotesize\raggedright
 \input{figures/alg3_sim_body}
 \end{algorithm}
 
@@ -498,7 +500,7 @@ The limitations follow from the method. We simulated everything and assumed the 
 In this work, we asked which of the two label-free destination signals a service that verifies phone numbers by SMS should act on when a pumper is paid at the destination, and we answered it in simulation, inside a twelve-step defense evaluated against a seven-control baseline, five simpler designs, and 25 attacker profiles under two protocols committed before their runs. The design contains the attacks that carry a signature in the request at a low cost to simulated users, while a residential attacker that resembles a person can only be rationed, at a price set by how well the cap tracks the legitimate rate. On the destination, a counter of sends per number block whose quota matches the block's traffic leaked less than tests of code outcomes against short, concentrated pumping and cost its users less, but it failed its service claims on blocks the attacker shares and lost its advantage against paced or widely spread pumpers; estimates derived from the rules alone ordered the two policies in 18 of 18 decisive cells. Every number describes scripted attackers and simulated users under assumed calibration, and close rankings rest on ten or fewer seeds. Replaying real traffic is the experiment this work most needs; the policies left outside the evaluation, per-client quotas within a block, bounded exemptions, tuned token buckets, and time-uniform statistics, could then be compared under the same protocols.
 
 \section*{ACKNOWLEDGMENT}
-The author used Claude (Anthropic) to help with code review and code evaluation, checked every number against the recorded results and every claim against the code, and takes full responsibility for the content.
+The author used Claude (Anthropic), an AI assistant, in preparing this article: to write and review the code of the implementation and the simulation and to run the evaluation (Sections~\ref{sec:design} and~\ref{sec:method}); to draft and edit the text of every section; to generate Figs.~\ref{fig:boundarya}--\ref{fig:boundaryc} and the tables from the recorded results; and to check the references against their publishers' records. Figs.~\ref{fig:path}--\ref{fig:method} are the author's own drawings. The author checked every number against the recorded results and every claim against the code, and takes full responsibility for the content.
 
 \section*{DATA AVAILABILITY}
 Every run's configuration and outcome and the sources of headline numbers (\texttt{results/}) are at \url{https://github.com/nahmedpsu/OTP-DDOS}, release 2.9.1 (tag v2.9.1), which runs unchanged the code of release 2.9.0 (tag v2.9.0, commit 9af3100) that produced the results (\texttt{code\_identity.md}); the 2.8.0 results are in \texttt{results/\allowbreak historical\_2.8}. These files are the supplementary material.

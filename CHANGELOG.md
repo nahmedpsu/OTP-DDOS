@@ -27,6 +27,12 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   is split into two tables (pumper; poisoner), the study map is supplementary Table S2
   (`results/study_map.md`), and the boundary figure is redrawn with larger text and separate legends
   for measurements and estimates.
+- **Algorithms in the template's package; caption and AI-use note (paper only).** Algorithms 1-3 are
+  rewritten for `algorithmic`, the package the IEEE OJ-COMS template loads (Require/Ensure, if/for blocks
+  with their end lines, and a procedure block for Algorithm 2's two procedures); `hyperref` is no longer
+  loaded, as in the template. Figure 5's caption reads "Overview of how we evaluated the design.", and the
+  acknowledgment states what Claude (Anthropic) was used for, section by section, as IEEE's policy on
+  AI-generated content asks.
 - **Manuscript on the journal's official template (paper only).** `main.tex` now uses `IEEEoj.cls` from
   IEEE_OJCOMS-template-LaTex_202401 (vendored with its logo `ojcoms.png`), with the template's title block,
   section capitals, the `cite` package and `IEEEbiographynophoto`; `ojcoms.sty` and `IEEEtranN-doi.bst`,

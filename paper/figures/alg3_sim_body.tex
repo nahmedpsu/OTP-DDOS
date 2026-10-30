@@ -1,27 +1,28 @@
 % One simulation run (Section IV-B), as src/otp_guard/evaluation/sim.py executes it (release 2.9.0).
 % Shared by main.tex (Algorithm 3) and the standalone alg3_sim.tex that renders it for the Word version.
-% The streams, the drawn request, the timed events and the run record are explained in Section IV-B.
+% Written for the algorithmic package that the IEEE OJ-COMS template loads. The streams, the drawn request,
+% the timed events and the run record are explained in Section IV-B.
 \begin{algorithmic}[1]
-\Require design $d$, attacker $a$, legitimate traffic $\ell$, seed $z$, attack minutes $T$, warm-up minutes $W$
-\Ensure run record $R$
-\State $(\mathrm{rng}_\ell, \mathrm{rng}_a, \mathrm{rng}_c) \gets \textsc{Streams}(z)$
-\State $P \gets \textsc{BuildPipeline}(d)$;\ \textsc{SeedReturningUsers}$(P, 0.2)$
-\State $E \gets \emptyset$;\ $\mathrm{leaked}, \mathrm{offered} \gets \mathbf{0}_T$
-\For{$m \gets -W$ \textbf{to} $T - 1$}
-  \State $n_\ell \sim \mathrm{Poisson}(\lambda_\ell)$;\ $n_a \sim \mathrm{Poisson}(\lambda_a)\,[m \ge 0]$
-  \State $A \gets \textsc{Arrivals}(n_\ell, n_a, m)$ sorted by time
-  \ForAll{$(t, \mathrm{kind}) \in A$}
-    \State \textsc{ApplyEvents}$(E, t)$
-    \State $q \gets \textsc{DrawRequest}(\mathrm{kind})$;\ $y \gets P.\textsc{ProcessRequest}(q)$
-    \If{$y = \mathrm{challenge}$ \textbf{and} $q.\mathrm{solves}$}
-      \State $y \gets P.\textsc{ProcessRequest}(q \,\|\, \mathrm{solution})$
-    \EndIf
-    \If{$y = \mathrm{sent}$} $E \gets E \cup \{\mathrm{receipt}(q), \mathrm{entry}(q)\}$ \EndIf
-  \EndFor
-  \State \textsc{ApplyEvents}$(E, \mathrm{end}(m))$;\ $P.\textsc{ResolveTimeouts}()$
-  \State $P.\textsc{AdaptiveJob}()$
-  \If{$m \ge 0$} $\mathrm{leaked}[m] \gets \textsc{SentTo}(a, m)$;\ $\mathrm{offered}[m] \gets n_a$ \EndIf
-\EndFor
-\State \textsc{ApplyEvents}$(E, \infty)$
-\State \Return $R \gets (\mathrm{leaked}, \mathrm{offered}, \textsc{Funnels}(P), \textsc{Events}(P), d, a, \ell, z)$
+\REQUIRE design $d$, attacker $a$, legitimate traffic $\ell$, seed $z$, attack minutes $T$, warm-up minutes $W$
+\ENSURE run record $R$
+\STATE $(\mathrm{rng}_\ell, \mathrm{rng}_a, \mathrm{rng}_c) \gets \textsc{Streams}(z)$
+\STATE $P \gets \textsc{BuildPipeline}(d)$;\ \textsc{SeedReturningUsers}$(P, 0.2)$
+\STATE $E \gets \emptyset$;\ $\mathrm{leaked}, \mathrm{offered} \gets \mathbf{0}_T$
+\FOR{$m \gets -W$ \TO $T - 1$}
+\STATE $n_\ell \sim \mathrm{Poisson}(\lambda_\ell)$;\ $n_a \sim \mathrm{Poisson}(\lambda_a)\,[m \ge 0]$
+\STATE $A \gets \textsc{Arrivals}(n_\ell, n_a, m)$ sorted by time
+\FORALL{$(t, \mathrm{kind}) \in A$}
+\STATE \textsc{ApplyEvents}$(E, t)$
+\STATE $q \gets \textsc{DrawRequest}(\mathrm{kind})$;\ $y \gets P.\textsc{ProcessRequest}(q)$
+\IF{$y = \mathrm{challenge}$ \AND $q.\mathrm{solves}$}
+\STATE $y \gets P.\textsc{ProcessRequest}(q \,\|\, \mathrm{solution})$
+\ENDIF
+\STATE \textbf{if} $y = \mathrm{sent}$ \textbf{then} $E \gets E \cup \{\mathrm{receipt}(q), \mathrm{entry}(q)\}$
+\ENDFOR
+\STATE \textsc{ApplyEvents}$(E, \mathrm{end}(m))$;\ $P.\textsc{ResolveTimeouts}()$
+\STATE $P.\textsc{AdaptiveJob}()$
+\STATE \textbf{if} $m \ge 0$ \textbf{then} $\mathrm{leaked}[m] \gets \textsc{SentTo}(a, m)$;\ $\mathrm{offered}[m] \gets n_a$
+\ENDFOR
+\STATE \textsc{ApplyEvents}$(E, \infty)$
+\RETURN $R \gets (\mathrm{leaked}, \mathrm{offered}, \textsc{Funnels}(P), \textsc{Events}(P), d, a, \ell, z)$
 \end{algorithmic}

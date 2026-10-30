@@ -1,18 +1,19 @@
 % The v1 baseline (Section III-A) as the evaluated pipeline applies it (features off: src/otp_guard/config.py V1_FEATURES).
 % Shared by main.tex (Algorithm 1) and the standalone alg1_v1.tex that renders it for the Word version.
-% The sets and limits (V, O, A, X, L, K, the counters n) and the gap each line opens are explained in Section III-A.
+% Written for the algorithmic package that the IEEE OJ-COMS template loads. The sets and limits
+% (V, O, A, X, L, K, the counters n) and the gap each line opens are explained in Section III-A.
 \begin{algorithmic}[1]
-\Require request $r$: address, platform header, number, body, bulk and test flags
-\Ensure an SMS to $r.\mathrm{number}$, or the name of the control that refused
-\If{$r.\mathrm{address} \in \mathcal{V}$} \Return refused \EndIf
-\State $p \gets r.\mathrm{header}[\textsc{platform}]$;\ $u \gets \mathrm{country}(r.\mathrm{number})$
-\If{$p = \mathrm{web}$ \textbf{and} ($\mathrm{score}(r) < 0.5$ \textbf{or} $\mathrm{origin}(r) \notin \mathcal{O}$)} \Return refused \EndIf
-\If{$\neg\, r.\mathrm{bulk}$ \textbf{and} $u \notin \mathcal{A}$} \Return refused \EndIf
-\If{$\neg\, r.\mathrm{test}$ \textbf{and} ($|r.\mathrm{body}| > L$ \textbf{or} $r.\mathrm{number} \in \mathcal{X}$)} \Return refused \EndIf
-\If{$n_{\mathrm{num}}[r.\mathrm{number}] \ge 1$} \Return refused \EndIf
-\If{$n_{\mathrm{addr}}[r.\mathrm{address}] \ge 5$} \Return refused \EndIf
-\If{$n_{\mathrm{cap}}[p, u] \ge K[p, u]$} \Return refused \EndIf
-\State increment $n_{\mathrm{num}}[r.\mathrm{number}]$, $n_{\mathrm{addr}}[r.\mathrm{address}]$ and $n_{\mathrm{cap}}[p, u]$
-\State \textsc{SendSMS}$(r.\mathrm{number}, r.\mathrm{body})$
-\State \Return sent
+\REQUIRE request $r$: address, platform header, number, body, bulk and test flags
+\ENSURE an SMS to $r.\mathrm{number}$, or the name of the control that refused
+\STATE \textbf{if} $r.\mathrm{address} \in \mathcal{V}$ \textbf{then return} refused
+\STATE $p \gets r.\mathrm{header}[\textsc{platform}]$;\ $u \gets \mathrm{country}(r.\mathrm{number})$
+\STATE \textbf{if} $p = \mathrm{web}$ \textbf{and} ($\mathrm{score}(r) < 0.5$ \textbf{or} $\mathrm{origin}(r) \notin \mathcal{O}$) \textbf{then return} refused
+\STATE \textbf{if} $\neg\, r.\mathrm{bulk}$ \textbf{and} $u \notin \mathcal{A}$ \textbf{then return} refused
+\STATE \textbf{if} $\neg\, r.\mathrm{test}$ \textbf{and} ($|r.\mathrm{body}| > L$ \textbf{or} $r.\mathrm{number} \in \mathcal{X}$) \textbf{then return} refused
+\STATE \textbf{if} $n_{\mathrm{num}}[r.\mathrm{number}] \ge 1$ \textbf{then return} refused
+\STATE \textbf{if} $n_{\mathrm{addr}}[r.\mathrm{address}] \ge 5$ \textbf{then return} refused
+\STATE \textbf{if} $n_{\mathrm{cap}}[p, u] \ge K[p, u]$ \textbf{then return} refused
+\STATE increment $n_{\mathrm{num}}[r.\mathrm{number}]$, $n_{\mathrm{addr}}[r.\mathrm{address}]$ and $n_{\mathrm{cap}}[p, u]$
+\STATE \textsc{SendSMS}$(r.\mathrm{number}, r.\mathrm{body})$
+\RETURN sent
 \end{algorithmic}

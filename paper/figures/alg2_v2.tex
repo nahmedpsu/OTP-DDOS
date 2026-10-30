@@ -3,10 +3,14 @@
 \documentclass[border=4pt,varwidth=8.85cm]{standalone}
 \usepackage{times}
 \usepackage{amsmath}
-\usepackage[noend]{algpseudocode}
+\usepackage{algorithmic}
+\makeatletter
+\newcommand{\PROCEDURE}[2]{\STATE \textbf{procedure} \textsc{#1}$(#2)$\begin{ALC@g}}
+\newcommand{\ENDPROCEDURE}{\end{ALC@g}\STATE \textbf{end procedure}}
+\makeatother
 \usepackage{xcolor}
 \newcommand{\scoreeq}{the score of (1)}
 \begin{document}
-\footnotesize
+\footnotesize\raggedright
 \input{alg2_v2_body}
 \end{document}

@@ -6,8 +6,10 @@ title block follows the template's `ojcoms.tex` (`\receiveddate` to `\doiinfo` l
 `\title`, `\author`, `\affil`, `\corresp`, `\authornote` for the funding note, `abstract`, `IEEEkeywords`,
 `\maketitle`, and `IEEEbiographynophoto` until the author's photograph is added). Citations use the `cite`
 package, as the template does, with `IEEEtran-doi.bst`, the numeric IEEE style with DOIs (derived from
-IEEEtranN.bst because `IEEEtran.bst` could not be installed in the build sandbox). Algorithms use
-`algorithm` and `algpseudocode` instead of the template's `algorithmic`, for their Require/Ensure procedures.
+IEEEtranN.bst because `IEEEtran.bst` could not be installed in the build sandbox). Algorithms 1-3 are
+written for the template's `algorithmic` package, in the `algorithm` float of the same bundle; Algorithm 2's two
+procedures use `\PROCEDURE` and `\ENDPROCEDURE`, defined in the preamble on algorithmic's own indented block.
+Like the template, the manuscript does not load `hyperref` (with `algorithmic` it set stray blank lines).
 The Elsevier files of the earlier Computers & Security version (`elsarticle.cls`, `elsarticle-*.bst`) are
 kept for the revision history. `refs.bib` holds the references, each checked against its publisher's
 record. `make` builds `main.pdf`; `make rebuttal`
