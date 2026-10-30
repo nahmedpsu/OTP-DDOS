@@ -27,6 +27,14 @@ run records keep the 2.9.0 code hash, which covers those bytes.
   is split into two tables (pumper; poisoner), the study map is supplementary Table S2
   (`results/study_map.md`), and the boundary figure is redrawn with larger text and separate legends
   for measurements and estimates.
+- **Manuscript on the journal's official template (paper only).** `main.tex` now uses `IEEEoj.cls` from
+  IEEE_OJCOMS-template-LaTex_202401 (vendored with its logo `ojcoms.png`), with the template's title block,
+  section capitals, the `cite` package and `IEEEbiographynophoto`; `ojcoms.sty` and `IEEEtranN-doi.bst`,
+  which emulated the layout, are removed, and `IEEEtran-doi.bst` gives numeric IEEE references with DOIs.
+  Figures are cited as "Fig." and equations as "(1)" except at the start of a sentence, textual citations
+  read "Huh et al. [4]" in the text itself, the funding note moved from the acknowledgment to the
+  first-page note (`\authornote`), and subsection references keep the "Section III-C" form. On this class
+  the manuscript is 17 pages. `make_docx.py` reads the new title block and the numeric citation data.
 - **Author's copy-edit applied (paper only).** The wording changes the author made in the Word copy
   of revision 15 (serial commas, "approximately", past tense in the method and results, tightened
   phrasing in about seventy paragraphs, the acknowledgment and data-availability notes) are carried

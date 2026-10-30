@@ -1,11 +1,14 @@
 # Manuscript
 
-`main.tex` is the manuscript in the format of the IEEE Open Journal of the Communications Society:
-`ojcoms.sty` gives the journal's look on the standard `article` class (two columns, Times, `I. SECTION`
-headings, `FIGURE 1.` and `TABLE 1.` captions, a title block with ABSTRACT and INDEX TERMS) and
-`IEEEtranN-doi.bst` prints the numeric IEEE reference list (both vendored here; see the note in
-`ojcoms.sty` for switching to `IEEEtran.cls`, which could not be installed in the build sandbox). The
-Elsevier files of the earlier Computers & Security version (`elsarticle.cls`, `elsarticle-*.bst`) are
+`main.tex` is the manuscript on the IEEE Open Journal of the Communications Society's own LaTeX template:
+`IEEEoj.cls` and the journal logo `ojcoms.png` come unchanged from `IEEE_OJCOMS-template-LaTex_202401`, and the
+title block follows the template's `ojcoms.tex` (`\receiveddate` to `\doiinfo` left as IEEE's placeholders,
+`\title`, `\author`, `\affil`, `\corresp`, `\authornote` for the funding note, `abstract`, `IEEEkeywords`,
+`\maketitle`, and `IEEEbiographynophoto` until the author's photograph is added). Citations use the `cite`
+package, as the template does, with `IEEEtran-doi.bst`, the numeric IEEE style with DOIs (derived from
+IEEEtranN.bst because `IEEEtran.bst` could not be installed in the build sandbox). Algorithms use
+`algorithm` and `algpseudocode` instead of the template's `algorithmic`, for their Require/Ensure procedures.
+The Elsevier files of the earlier Computers & Security version (`elsarticle.cls`, `elsarticle-*.bst`) are
 kept for the revision history. `refs.bib` holds the references, each checked against its publisher's
 record. `make` builds `main.pdf`; `make rebuttal`
 builds the current response letter (`rebuttal_round8.js` -> `rebuttal_round8.docx`, with Node and

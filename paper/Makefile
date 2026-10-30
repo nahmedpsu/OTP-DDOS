@@ -1,5 +1,6 @@
-# Build the manuscript. Needs a TeX Live with latexmk; ojcoms.sty (the IEEE OJ-COMS look on the
-# article class) and IEEEtranN-doi.bst (the numeric IEEE reference style) are vendored here.
+# Build the manuscript. Needs a TeX Live with latexmk; the journal's template class IEEEoj.cls and its
+# logo ojcoms.png (IEEE_OJCOMS-template-LaTex_202401) and IEEEtran-doi.bst (numeric IEEE references with
+# DOIs, for the cite package the template loads) are vendored here.
 all: main.pdf
 main.pdf: main.tex refs.bib figures/*.pdf
 	latexmk -pdf -interaction=nonstopmode main.tex

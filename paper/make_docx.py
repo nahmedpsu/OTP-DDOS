@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Word version of the manuscript (IEEE OJ-COMS layout: numeric citations, FIGURE/TABLE captions, Roman
-section numbers), built from the same sources as the PDF (main.tex, the generated tables, the figures,
-and the label, citation and bibliography data of the last LaTeX run).
+section numbers), built from the same sources as the PDF (main.tex on the journal's IEEEoj.cls template,
+the generated tables, the figures, and the label, citation and bibliography data of the last LaTeX run).
 
     latexmk -pdf main.tex          # writes main.aux and main.bbl, which this script reads
     python3 make_docx.py           # writes main.docx
@@ -50,10 +50,10 @@ def labels_and_cites():
     labels = {}
     for m in re.finditer(r"\\newlabel\{([^}]*)\}\{\{([^}]*)\}", aux):
         labels[m.group(1)] = m.group(2)
-    # natbib author-year entries: \bibcite{key}{{n}{year}{{short author}}{{full author list}}}
+    # numeric entries of the cite package: \bibcite{key}{n}
     cites = {}
-    for m in re.finditer(r"\\bibcite\{([^}]*)\}\{\{(\d+)\}\{([^}]*)(?:\{\})?\}\{\{([^}]*)\}\}", aux):
-        cites[m.group(1)] = (int(m.group(2)), m.group(4).replace("~", " "), m.group(3))
+    for m in re.finditer(r"\\bibcite\{([^}]*)\}\{(\d+)\}", aux):
+        cites[m.group(1)] = (int(m.group(2)), "", "")
     return labels, cites
 
 
@@ -86,20 +86,19 @@ def body_latex():
     labels, cites = labels_and_cites()
     s = s[s.index("\\begin{document}") + len("\\begin{document}"):s.index("\\end{document}")]
 
-    # front matter -> title, author lines, abstract, index terms (the \\ojtitlepage block of main.tex)
-    i = s.index("\\ojtitlepage")
-    j = i + len("\\ojtitlepage")
-    parts = []
-    for _ in range(6):
-        while s[j] != "{":
-            j += 1
-        part, j = braced(s, j)
-        parts.append(part)
-    title, author, affil, corr, abstract, terms = parts
-    author = re.sub(r"\\textsuperscript\{[^}]*\}", "", author).strip()
-    affil = re.sub(r"\\textsuperscript\{[^}]*\}", "", affil).strip()
-    front = (f"TITLEMARK {title}\n\nAUTHORMARK {author}\n\nAFFILMARK {affil}\n\nCORRMARK CORRESPONDING AUTHOR: {corr}\n\n"
+    # front matter of the IEEEoj.cls template -> title, author, affiliation, corresponding author, first-page
+    # note, abstract, index terms (the dates, DOI and running heads are IEEE's and are left out)
+    def arg(cmd):
+        k = s.index("\\" + cmd + "{")
+        return braced(s, k + len(cmd) + 1)[0]
+    def env(name):
+        return s[s.index("\\begin{" + name + "}") + len(name) + 8:s.index("\\end{" + name + "}")].strip()
+    title, author, affil, corr, note = arg("title"), arg("author"), arg("affil"), arg("corresp"), arg("authornote")
+    abstract, terms = env("abstract"), env("IEEEkeywords")
+    author = re.sub(r"\\IEEEauthorrefmark\{[^}]*\}|\\IEEEmembership\{[^}]*\}", "", author).strip()
+    front = (f"TITLEMARK {title}\n\nAUTHORMARK {author}\n\nAFFILMARK {affil}\n\nCORRMARK {corr}\n\nNOTEMARK {note}\n\n"
              f"ABSTRACTMARK \\textbf{{ABSTRACT}} {abstract}\n\nKEYWORDSMARK \\textbf{{INDEX TERMS}} {terms}\n\n")
+    i, j = s.index("\\receiveddate"), s.index("\\maketitle") + len("\\maketitle")
     s = s[:i] + front + s[j:]
     s = re.sub(r"\\IEEEPARstart\{([^}]*)\}\{([^}]*)\}", r"\1\2", s)
     s = re.sub(r"\\ojrunningheadset\{[^}]*\}", "", s)
@@ -115,7 +114,7 @@ def body_latex():
             counters[1] += 1; counters[2] = 0
             return f"\\subsection*{{{chr(64 + counters[1])}. {name.upper()}}}"
         counters[2] += 1
-        return f"\\subsubsection*{{{counters[2]}) {name.upper()}}}"
+        return f"\\subsubsection*{{{counters[2]}) {name}}}"
     s = re.sub(r"\\(section|subsection|subsubsection)\{([^}]*)\}", number_heading, s)
     s = re.sub(r"\\section\*\{([^}]*)\}", lambda m: m.group(0) if m.group(1)[:1] in "IVX" and ". " in m.group(1) else f"\\section*{{{m.group(1).upper()}}}", s)
 
@@ -200,7 +199,7 @@ def body_latex():
     # references from the bibliography of the LaTeX run
     bbl = BBL.read_text()
     bbl = re.sub(r"%[^\n]*\n", "", bbl)
-    items = re.split(r"\\bibitem\[(?:[^\[\]]|\[[^\]]*\])*\]\{([^}]*)\}", bbl)
+    items = re.split(r"\\bibitem(?:\[(?:[^\[\]]|\[[^\]]*\])*\])?\{([^}]*)\}", bbl)
     refs = []
     for k in range(1, len(items), 2):
         key, text = items[k], items[k + 1]
@@ -218,7 +217,8 @@ def body_latex():
     s = re.sub(r"\\bibliographystyle\{[^}]*\}\s*\\bibliography\{[^}]*\}",
                lambda m: "\\section*{REFERENCES}\n\n" + "\n\n".join(refs) + "\n", s)
     s = re.sub(r"\\vspace\{[^}]*\}", "", s)
-    s = re.sub(r"\\noindent\{\\sffamily(?:\\footnotesize)?\{\\bfseries ([^}]*)\}(.*?)\\par\}", r"\n\n\\textbf{\1}\2\n", s, flags=re.S)
+    s = re.sub(r"\\begin\{IEEEbiography(?:nophoto)?\}(?:\[[^\]]*\])?\{([^}]*)\}(.*?)\\end\{IEEEbiography(?:nophoto)?\}",
+               lambda m: "\n\n\\textbf{" + m.group(1).strip() + "} " + m.group(2).strip() + "\n", s, flags=re.S)
     return "\\documentclass{article}\n\\begin{document}\n" + s + "\n\\end{document}\n"
 
 
@@ -362,7 +362,7 @@ def style_document(path):
                 st.paragraph_format.line_spacing = 1.0
 
     marks = {"TITLEMARK ": ("title", 16), "AUTHORMARK ": ("author", 12), "AFFILMARK ": ("affil", 10),
-             "CORRMARK ": ("corr", 9), "ABSTRACTMARK ": ("abstract", 11),
+             "CORRMARK ": ("corr", 9), "NOTEMARK ": ("note", 9), "ABSTRACTMARK ": ("abstract", 11),
              "KEYWORDSMARK ": ("keywords", 11), "REFMARK ": ("ref", 10)}
     for p in doc.paragraphs:
         for mark, (kind, size) in marks.items():
@@ -390,7 +390,7 @@ def style_document(path):
                     if kind == "author":
                         r.font.small_caps = True
                 pf = p.paragraph_format
-                if kind in ("title", "author", "affil", "corr"):
+                if kind in ("title", "author", "affil", "corr", "note"):
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     pf.space_after = Pt(6)
                 if kind == "ref":
